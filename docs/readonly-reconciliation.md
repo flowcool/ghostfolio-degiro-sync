@@ -26,6 +26,15 @@ coverage could not be independently reconstructed from that old output. A new
 direct broker export is now available privately; the old missing input does not
 prevent a fresh source-pinned transition proof.
 
+The subsequent extended direct broker capture uniquely traces all four old V3
+comments to source dividends by product ISIN and local minute. Every payment has
+one exact product/currency/date/value-date withholding partner; gross amount,
+withholding fee, currency and quantity 1 agree exactly with the saved V3 output.
+The four V3 timestamps truncate the source seconds (differences 18, 55, 1 and 41
+seconds), rather than shifting the timezone. This is explicit source association,
+not permission for proximity-based adoption or proof of canonical API identity.
+It does not establish omitted rows, the old producer revision or Yahoo quote units.
+
 A fresh bounded broker read of 2025-10-08..2026-10-08 returned three executions,
 88 cash movements and 88 rows from the alternate authenticated CSV-report endpoint.
 Ten dividend/withholding pairs remained uniquely associated. Count agreement and
