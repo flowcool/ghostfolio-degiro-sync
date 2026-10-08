@@ -41,7 +41,7 @@ quote currency, live broker data or market-price performance.
 | Repeated full sync | No proposed/imported rows; stored count remains4 |
 | Uncertain delayed INSERT | PostgreSQL BEFORE INSERT trigger blocks owned FEE999 on an advisory lock; HTTP times out; complete GET still contains only4 rows |
 | New Python process before release | Reads persisted intent and refuses synchronization; empty pending readback refuses resolution; no replay |
-| Release owned barrier | Native original request inserts exactly one row; complete count5; old request ID refuses even with positive readback and fresh process remains fenced; exact positive readback with selected pending request ID resolves it; repeated fee sync imports zero |
+| Release owned barrier | Native original request inserts exactly one row; complete count5; old request ID refuses even with positive readback. Rootless recovery CLI obtains authenticated GETs: default preflight retains intent and fresh-process fence; explicit local confirmation resolves selected request; repeated fee sync imports zero |
 | Actual pinned V3 synthetic SELL in another seeded lab account | Native import preserves captured output; API preflight diagnoses CSV overlap despite mismatched commission currency; zero added activities and balance stays0 |
 | Unresolvable Yahoo symbol in a synthetic BUY batch | Native HTTP400 permits core's recognized-symbol retry; only resolvable FEE stored; incomplete readback cannot resolve intent; no cash write |
 | Cleanup preflight over actual readback | Selects exactly3 manifest-owned canonical IDs, excludes opening/manual/foreign context, performs no DELETE |

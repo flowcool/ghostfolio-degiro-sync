@@ -167,7 +167,17 @@ def main():
     except RuntimeError as error:
         assert str(error) == 'Synchronization intent identity changed'
     assert_restart_fenced(config, 'import')
-    assert adapter.resolve_import_intent(config, after, expected_intent_id=delayed_intent_id) == 1
+    recovery_environment = {**os.environ, 'GHOST_HOST': HOST, 'GHOST_ACCOUNT_ID': account['id'],
+        'DEGIRO_ACCOUNT_ID': config['source_account'], 'STATE_DIR': config['state_dir']}
+    recovery_command = [sys.executable, '/app/scripts/recover_degiro.py',
+        '--expected-intent-id', delayed_intent_id]
+    preflight = subprocess.run(recovery_command, env=recovery_environment,
+        capture_output=True, text=True, timeout=150)
+    assert preflight.returncode == 0 and '1 exact activities verified; intent retained' in preflight.stdout
+    assert_restart_fenced(config, 'import')
+    resolved = subprocess.run(recovery_command + ['--confirm-local-state'], env=recovery_environment,
+        capture_output=True, text=True, timeout=150)
+    assert resolved.returncode == 0 and '1 exact activities confirmed locally' in resolved.stdout
     assert synchronize(delayed, config)['proposed'] == []
     assert call('GET', '/api/v1/activities')['count'] == 5
     print('PASS delayed insertion: timeout then empty GET;restart no replay;release creates exactly1;old request ID refused;selected positive readback resolves;repeat zero imports', flush=True)

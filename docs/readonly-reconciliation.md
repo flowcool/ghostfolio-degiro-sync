@@ -36,5 +36,5 @@ at the unsupported-category gate. No successful real synchronization DRY_RUN or
 cash acceptance is claimed. Do not discard these rows, fabricate completeness,
 borrow a quote-unit mapping, or clear uncertain state to make the preflight pass.
 An explicitly approved policy for unsupported rows, independent statement/V3
-provenance and explicit request-bound recovery remain prerequisites. See [the source contract](source-contract.md),
+provenance and explicit request-bound cash/partial recovery remain prerequisites. See [the source contract](source-contract.md),
 [synchronization](synchronization.md) and [isolated acceptance limits](isolated-acceptance.md).

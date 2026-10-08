@@ -851,27 +851,69 @@ def confirm_intent(journal, identity):
     write_journal(journal)
 
 
-def resolve_import_intent(config, existing_body, *, expected_intent_id):
-    """Resolve one explicitly selected request using complete positive readback."""
+def selected_import_intent(journal, expected_intent_id):
+    """Select a specific import under its owner lock before obtaining evidence."""
     if (not isinstance(expected_intent_id, str)
             or not re.fullmatch(r"[0-9a-f]{32}", expected_intent_id)):
         raise RuntimeError("Invalid expected synchronization intent identity")
+    pending = journal["document"]["pending"]
+    if (not isinstance(pending, dict) or pending.get("kind") != "import"
+            or not isinstance(pending.get("payload"), dict) or not pending["payload"]):
+        raise RuntimeError("No recoverable pending import intent")
+    if pending.get("id") != expected_intent_id:
+        raise RuntimeError("Synchronization intent identity changed")
+    return pending
+
+
+def verify_import_intent(journal, config, existing_body, expected_intent_id):
+    pending = selected_import_intent(journal, expected_intent_id)
+    target = {"id": config["target_account"]}
+    rows, _ = existing_activity_context(existing_body, target)
+    candidates = list(pending["payload"].values())
+    if (any(not isinstance(row, dict) or row.get("comment") != identity
+            for identity, row in pending["payload"].items())
+            or pending_activities(candidates, rows, target, config["source_account"])):
+        raise RuntimeError("Complete exact positive readback required for recovery")
+    return len(candidates)
+
+
+def resolve_import_intent(config, existing_body, *, expected_intent_id):
+    """Resolve one explicitly selected request using complete positive readback."""
     with account_journal(config) as journal:
-        pending = journal["document"]["pending"]
-        if (not isinstance(pending, dict) or pending.get("kind") != "import"
-                or not isinstance(pending.get("payload"), dict) or not pending["payload"]):
-            raise RuntimeError("No recoverable pending import intent")
-        if pending.get("id") != expected_intent_id:
-            raise RuntimeError("Synchronization intent identity changed")
-        target = {"id": config["target_account"]}
-        rows, _ = existing_activity_context(existing_body, target)
-        candidates = list(pending["payload"].values())
-        if (any(not isinstance(row, dict) or row.get("comment") != identity
-                for identity, row in pending["payload"].items())
-                or pending_activities(candidates, rows, target, config["source_account"])):
-            raise RuntimeError("Complete exact positive readback required for recovery")
+        matched = verify_import_intent(journal, config, existing_body, expected_intent_id)
         confirm_intent(journal, expected_intent_id)
-        return len(candidates)
+        return matched
+
+
+def readback_import_intent(config, *, expected_intent_id, confirm=False):
+    """Authenticated GET-only recovery; default preflight preserves private state."""
+    if type(confirm) is not bool:
+        raise RuntimeError("Invalid local recovery confirmation mode")
+    readonly = {**config, "dry_run": True}
+    with account_journal(readonly) as journal:
+        selected_import_intent(journal, expected_intent_id)
+        target = {"id": readonly["target_account"]}
+        with ghost_transport(readonly, target) as session:
+            response = session.get(f"{readonly['ghost_host']}/api/v1/account/{target['id']}")
+            if response.status_code != 200:
+                raise RuntimeError("Recovery account readback failed")
+            current = response.json()
+            if (not isinstance(current, dict) or current.get("id") != target["id"]
+                    or not core.activity_is_active({"account": current})
+                    or current.get("currency") not in CURRENCY_QUANTA
+                    or current.get("balance") is None):
+                raise RuntimeError("Invalid or redacted recovery account context")
+            financial_decimal(current["balance"])
+            response = session.get(f"{readonly['ghost_host']}/api/v1/activities")
+            if response.status_code != 200:
+                raise RuntimeError("Recovery activity readback failed")
+            body = response.json()
+        matched = verify_import_intent(journal, readonly, body, expected_intent_id)
+        digest = hashlib.sha256(json.dumps(body, sort_keys=True,
+            separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+        if confirm:
+            confirm_intent(journal, expected_intent_id)
+        return {"matched": matched, "confirmed": confirm, "snapshot_sha256": digest}
 
 
 def synchronize_account(config, snapshot, target_account, existing_body, mapping,
