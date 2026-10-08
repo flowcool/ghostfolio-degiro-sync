@@ -1164,8 +1164,8 @@ def main(argv=None):
     modes = parser.add_mutually_exclusive_group(required=True)
     modes.add_argument("--read-only", action="store_true")
     modes.add_argument("--sync", action="store_true")
-    parser.add_argument("--from-date", required=True)
-    parser.add_argument("--to-date", required=True)
+    parser.add_argument("--from-date")
+    parser.add_argument("--to-date")
     parser.add_argument("--window-days", type=int, default=90)
     parser.add_argument("--output")
     parser.add_argument("--report-country")
@@ -1176,15 +1176,20 @@ def main(argv=None):
         if args.sync:
             if args.output or args.report_country or args.report_language or args.orders:
                 raise RuntimeError("Read-only options cannot be used for synchronization")
-            result = run_sync(date.fromisoformat(args.from_date), date.fromisoformat(args.to_date), args.window_days)
+            end = date.fromisoformat(args.to_date or datetime.now(timezone.utc).date().isoformat())
+            lookback = int(os.environ.get("LOOKBACK_DAYS", "90"))
+            if not 2 <= lookback <= 366:
+                raise RuntimeError("Invalid bounded history lookback")
+            start = date.fromisoformat(args.from_date) if args.from_date else end - timedelta(days=lookback - 1)
+            result = run_sync(start, end, args.window_days)
             log.info("Sync %s: %d proposed activities, %d accepted", "DRY_RUN" if result["dry_run"] else "live",
                      len(result["proposed"]), len(result["accepted"]))
             if not result["history_verified"]:
                 log.warning("History completeness is unverified; live writes remain blocked")
                 return 1
             return 0
-        if not args.output:
-            raise RuntimeError("Read-only snapshot requires an output path")
+        if not args.output or not args.from_date or not args.to_date:
+            raise RuntimeError("Read-only snapshot requires dates and an output path")
         output = snapshot_destination(args.output)
         locale = None
         if args.report_country or args.report_language:

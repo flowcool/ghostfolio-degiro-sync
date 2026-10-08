@@ -20,6 +20,7 @@ Required non-secret environment values:
 | `GHOST_ACCOUNT_ID` | Exact existing destination account identity |
 | `MAPPING_FILE` | Explicit mapping file; default `mapping.yaml` |
 | `DRY_RUN` | Defaults to `1`; strict boolean strings, invalid values fail |
+| `LOOKBACK_DAYS` | Default90, bounded2..366 when explicit dates are omitted |
 
 Copy `mapping.yaml.example` to ignored `mapping.yaml`. Each ISIN maps to a Yahoo
 symbol and independently verified quote currency. Broker tickers/currencies are

@@ -433,3 +433,27 @@ def test_prior_uncertainty_fences_all_callbacks(snapshot):
         '_uncertain_import_accounts': {'target-a'}}
     with pytest.raises(RuntimeError, match='prior import'):
         run(snapshot, config=config)
+
+
+def test_cron_default_dates_are_bounded_utc_lookback(monkeypatch):
+    monkeypatch.setenv('LOOKBACK_DAYS', '90')
+    calls = []
+    monkeypatch.setattr(adapter, 'run_sync', lambda start, end, window:
+        calls.append((start, end, window)) or {'dry_run': True, 'proposed': [],
+            'accepted': [], 'history_verified': True})
+    assert adapter.main(['--sync']) == 0
+    start, end, window = calls[0]
+    assert end == datetime.now(timezone.utc).date()
+    assert (end - start).days == 89 and window == 90
+
+
+@pytest.mark.parametrize('lookback', ['1', '367', 'invalid', 'true'])
+def test_invalid_cron_lookback_never_runs_sync(monkeypatch, lookback):
+    monkeypatch.setenv('LOOKBACK_DAYS', lookback)
+    monkeypatch.setattr(adapter, 'run_sync', lambda *args: pytest.fail('Invalid lookback ran sync'))
+    assert adapter.main(['--sync']) == 1
+
+
+def test_read_only_still_requires_dates_before_broker_auth(monkeypatch, tmp_path):
+    monkeypatch.setattr(adapter, 'read_degiro', lambda *args: pytest.fail('Missing dates contacted broker'))
+    assert adapter.main(['--read-only', '--output', str(tmp_path / 'private.json')]) == 1

@@ -33,5 +33,9 @@ without modifying the sibling; the CI checker fetches into disposable state.
 Credentials are supplied only from environment variables backed by an off-git
 SOPS store and [non-secret pointer](secrets.pointer.yaml). Do not put real credentials into examples, tests or logs.
 
+The [runtime guide](docs/runtime.md) documents native amd64/arm64 validation,
+rootless run-once/cron, connector source parity and safe secret injection.
+Container checks build and smoke only; they do not publish or deploy an image.
+
 Current work and acceptance evidence live in Beads epic `infra-8tt.56` with
 `project=ghostfolio-degiro-sync`, rather than a repository task-status list.
