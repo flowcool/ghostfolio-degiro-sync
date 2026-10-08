@@ -45,6 +45,9 @@ quote currency, live broker data or market-price performance.
 | CSV-shaped unmarked SELL in another seeded lab account | API preflight diagnoses manual/CSV overlap; zero added activities and balance stays0 |
 | Unresolvable Yahoo symbol in a synthetic BUY batch | Native HTTP400 permits core's recognized-symbol retry; only resolvable FEE stored; incomplete readback cannot resolve intent; no cash write |
 | Cleanup preflight over actual readback | Selects exactly3 manifest-owned canonical IDs, excludes opening/manual/foreign context, performs no DELETE |
+| Partial import cancellation (2026-10-09) | First FEE committed; second independently blocked; timeout and fresh process remain fenced. Sole owned app stopped, its database work terminated, zero remaining database sessions verified before restart. Exact accepted subset unchanged, intent retained, no replay |
+| Delayed cash completion (2026-10-09) | Native PUT waits in AccountBalance trigger; timeout, initial balance0 and fresh-process fence observed. Release commits42.42 once; matching balance does not clear cash intent |
+| Delayed cash cancellation (2026-10-09) | Native PUT waits before84.84 upsert; independent owned app/DB quiescence cancels it. Restart balance remains0 and cash intent remains fenced |
 
 The delayed case proves more than a response lost after commit: complete empty
 readback is observed while a live INSERT is independently blocked. The controller
@@ -52,6 +55,26 @@ checks `pg_stat_activity` reports an advisory wait before release. The native
 request then finishes once. Positive resolution does not dispatch another POST.
 This does not prove cancellation for an absent/partial request in production,
 replica/queue recovery, or resolution of an uncertain cash PUT.
+
+The subsequent cancellation scenarios use the same unique isolated instance.
+After observing an advisory-waiting request, the controller verifies the exact
+Compose ownership, stops its sole app, and terminates remaining connections in
+its disposable database, excluding the verifying connection and held barrier.
+It verifies zero application work, releases/closes its own barrier, verifies zero
+other database sessions, then restarts the sole app. This independent quiescence
+proof is stronger than assuming a closed client socket cancelled SQL work.
+Complete post-restart readback preserves the exact accepted subset or old cash.
+No cancellation resolver is introduced: partial import and cash intents stay
+pending even with this isolated proof. A matching balance after delayed completion
+also leaves the fence intact. Production topology and an explicit reviewed
+request-bound resolution procedure remain gates; none of these steps authorizes
+stopping or terminating work in a shared service.
+
+The first cash-barrier rehearsal failed because the controller saw Order before
+all migrations had created AccountBalance. No scenario was accepted from that
+attempt, and its resources were removed. Readiness now requires both tables.
+The controller bounds the entire driver protocol to600 seconds, with incomplete
+or oversized protocol lines rejected; failures still execute owned teardown.
 
 The CSV scenario uses the accepted DTO shape of an unmarked trade, not an actual
 run of the external V3 converter over a private statement. Its purpose is to prove
