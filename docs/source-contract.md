@@ -43,6 +43,53 @@ This is bounded display rounding evidence, not permission to hide arbitrary
 financial discrepancies. Financial event IDs/counts and semantic fields remain
 the completeness check; a new discrepancy fails reconciliation.
 
+## Extended historical read-only characterization
+
+A direct operator collection requested 2000-01-01..2026-10-08 in overlapping
+366-day windows, then reread the occupied 2019-04-25..2026-10-08 span in overlapping
+90-day windows. Both requests returned the same full authenticated CSV statement.
+Private archives live outside project repositories under
+`~/.local/share/ghostfolio-degiro-sync/history/`, with directories 0700, files 0600,
+per-response captures, a decoded UTF-8 CSV and SHA256 manifests. Authentication
+responses, headers, session URLs and client-details responses were not archived.
+
+The earliest observed movement was 2019-04-25 and the latest 2026-10-06.
+Nineteen annual pre-activity overview windows returned HTTP 200 with `data: {}`,
+without `cashMovements`. The runtime correctly rejects this missing collection.
+A temporary read-only characterization collector preserved those envelopes and
+continued collection; it did not change the runtime or authorize synchronization.
+Empty ancient windows do not establish unlimited look-back or account inception.
+
+Across both widths, all 70 complete executed-transaction bodies agree. The 1,001
+cash rows with nonzero IDs also agree exactly after excluding the already observed
+window-derived `balance`. However, legacy `CASH_FUND_NAV_CHANGE` rows all have ID
+`0`: the annual capture contains 339 distinct bodies, the split capture 318.
+Of these, 150 annual-only and 129 split-only bodies differ between widths; every
+such difference is a 2019/2020 NAV event. These are not stable independently
+identifiable activity records. Never collapse them by ID, invent broker IDs,
+ignore their financial changes or infer an import policy from type alone.
+The strict runtime overlap check blocks distinct rows sharing ID `0`.
+
+The full CSV has 1,366 rows after its header, including three undated footer rows.
+An exact multiset comparison of date/minute, value date, ISIN, description,
+movement currency/amount and order reference matches 1,254 API rows. Another 83
+unique pairs differ by exactly one cent (81 NAV rows, two executed-trade cash rows);
+three pairs agree on those fields except description. The CSV also contains 23
+additional zero-valued NAV rows. These findings are recorded discrepancies, not
+accepted rounding or description-normalization rules. No successful statement
+reconciliation or complete-history flag is claimed.
+
+Annual order history also contains a repeated order identity with changed content;
+order snapshots remain diagnostic, never executed-activity identities. Temporary
+merged diagnostic snapshots can contain extra rows after a partial failed merge.
+Their counts are not authoritative: comparisons above use the preserved individual
+window responses and exact body sets, with no broker mutation or Ghostfolio request.
+
+The fresh direct export enables a new source-pinned CSV transition investigation;
+it cannot recover the exact producer or omitted input of an old July backfill.
+Unsupported legacy fund behavior remains outside the approved import policy,
+alongside the interest/compensation gate. History verification remains false.
+
 ## Cash taxonomy and dividend association
 
 Observed types: `CASH_TRANSACTION`, `FLATEX_CASH_SWEEP`, `TRANSACTION`,

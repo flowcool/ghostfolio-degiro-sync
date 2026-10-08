@@ -22,7 +22,9 @@ actual output comparison, not a new converter run or permission to adopt entries
 The output metadata records version `v0` and a generation date on 2026-07-16;
 it does not identify an immutable converter revision. The original input directory
 was empty, so the source CSV, exact producer revision and complete historical
-coverage could not be independently reconstructed.
+coverage could not be independently reconstructed from that old output. A new
+direct broker export is now available privately; the old missing input does not
+prevent a fresh source-pinned transition proof.
 
 A fresh bounded broker read of 2025-10-08..2026-10-08 returned three executions,
 88 cash movements and 88 rows from the alternate authenticated CSV-report endpoint.
@@ -35,6 +37,14 @@ compensation row. Dividend normalization and current-cash acceptance both stop
 at the unsupported-category gate. No successful real synchronization DRY_RUN or
 cash acceptance is claimed. Do not discard these rows, fabricate completeness,
 borrow a quote-unit mapping, or clear uncertain state to make the preflight pass.
-An explicitly approved policy for unsupported rows, independent statement/V3
-provenance and explicit request-bound cash/partial recovery remain prerequisites. See [the source contract](source-contract.md),
+A subsequent direct collection requested 2000-01-01..2026-10-08 and reread the
+occupied span with different window widths. Both yielded identical complete bodies
+for 70 executions and 1,001 nonzero-ID cash events, plus an identical full CSV.
+Legacy monetary-fund NAV rows instead use ID `0` and differ between window widths.
+Exact statement comparison also exposes zero-valued CSV-only NAV rows, one-cent
+amount differences and changed descriptions. Private raw windows and manifests
+stay outside GitHub; these gaps do not become a history override.
+
+An explicitly approved policy for unsupported rows, scoped full-statement
+reconciliation and explicit request-bound cash/partial recovery remain prerequisites. See [the source contract](source-contract.md),
 [synchronization](synchronization.md) and [isolated acceptance limits](isolated-acceptance.md).
