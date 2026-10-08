@@ -20,6 +20,19 @@ or broker locale. No source policy was changed or inferred from the converter.
 
 ## Reproduction boundary
 
+From this repository, with Docker available and the already inspected checkout:
+
+```sh
+.venv/bin/python scripts/check_v3_transition.py --source /path/to/Export-To-Ghostfolio
+```
+
+This optional operator bench is separate from offline pytest and production.
+It reads the pinned Git blob, verifies both source hashes, extracts only source
+and package manifests into disposable scratch state, and never edits the external
+checkout. Its dependency installation may contact the package registry while
+building. Converter execution is network-disabled. The exact UUID-tagged image
+and temporary files are removed afterward; shared image layers remain cached.
+
 Use the already inspected scratch checkout at the exact recorded commit. Copy its
 source, package manifest and lock into disposable scratch state, leaving that
 checkout unchanged. Use the recorded Node22 image; the local Node20 does not meet
