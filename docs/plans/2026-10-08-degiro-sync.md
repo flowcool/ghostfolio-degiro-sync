@@ -5,9 +5,10 @@
 This plan extends FINDINGS.md; it does not reopen the selected connector, TOTP
 availability, CSV fallback or rejection of picsou as an activity source.
 Florent approved Phase 0 on 2026-10-08 with Option C below. Phase 1 is authorized.
-Florent authorized local Git and GitHub repository initialization on 2026-10-08.
-Commits, pushes, live Ghostfolio writes and deployment still require Florent's explicit request; scope approval does not authorize them. Files are local drafts
-until a commit is requested. Beads owns execution state and acceptance evidence.
+Florent authorized Git/GitHub initialization and subsequently autonomous atomic
+commits, branches, PR publication, merges and releases for the approved scope on
+2026-10-08. Live Ghostfolio writes, cleanup and deployment retain separate explicit
+approval gates. Beads owns execution state and acceptance evidence.
 
 Deliver one DEGIRO login/source account per instance into one existing Ghostfolio
 account: executed BUY/SELL, paid DIVIDEND with linked withholding, separately

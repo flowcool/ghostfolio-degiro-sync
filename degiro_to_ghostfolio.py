@@ -371,6 +371,65 @@ def normalize_dividends(snapshot, target_account, mapping, quote_currencies, rul
     return sorted(result, key=lambda activity: (activity["date"], activity["comment"]))
 
 
+def reconcile_execution_costs(classified, transactions, base_currency):
+    """A brokerage ledger debit must evidence one already included execution fee."""
+    executions = []
+    merge_history(executions, transactions)
+    matched = set()
+    for row in classified.get("trade_commission", []):
+        candidates = [trade for trade in executions
+            if broker_identity(trade.get("productId")) == broker_identity(row["productId"])
+            and broker_instant(trade.get("date")) == broker_instant(row["date"])]
+        if len(candidates) != 1 or row["currency"] != base_currency:
+            raise RuntimeError("Unverified or ambiguous DEGIRO execution cost")
+        trade = candidates[0]
+        identity = broker_identity(trade.get("id"))
+        brokerage = financial_decimal(trade.get("feeInBaseCurrency"))
+        autofx = financial_decimal(trade.get("autoFxFeeInBaseCurrency"))
+        total = financial_decimal(trade.get("totalFeesInBaseCurrency"))
+        if (identity in matched or brokerage >= 0 or autofx > 0
+                or total != brokerage + autofx or financial_decimal(row["change"]) != brokerage
+                or (trade.get("orderId") is not None and trade["orderId"] != row["orderId"])):
+            raise RuntimeError("DEGIRO execution cost does not reconcile")
+        matched.add(identity)
+
+
+def normalize_fees(snapshot, target_account, rules=None):
+    """Only observed autonomous connection charges; no absolute-value refunds."""
+    rules = load_cash_rules() if rules is None else rules
+    classified = classify_cash_movements(snapshot["cash_movements"], rules)
+    if any(classified[name] for name, rule in rules.items()
+           if rule.get("treatment") == "unsupported_blocking"):
+        raise RuntimeError("Unsupported DEGIRO cash category blocks account writes")
+    if not isinstance(target_account, str) or not target_account.strip():
+        raise RuntimeError("Missing Ghostfolio target account")
+    source_account = broker_identity(snapshot["source_account"])
+    base_currency = snapshot["account_info"]["baseCurrency"]
+    reconcile_execution_costs(classified, snapshot["transactions"], base_currency)
+    result = []
+    for name, rows in classified.items():
+        if rules[name].get("treatment") != "standalone_fee":
+            continue
+        if name != "exchange_connection_fee":
+            raise RuntimeError("Unverified DEGIRO autonomous fee category")
+        for row in rows:
+            amount = -financial_decimal(row["change"])
+            if (row.get("productId") is not None or row.get("orderId") not in (None, "")
+                    or row["currency"] != "EUR" or base_currency != "EUR"
+                    or amount <= 0 or amount % CURRENCY_QUANTA["EUR"] != 0):
+                raise RuntimeError("Unverified DEGIRO autonomous fee relation or units")
+            fee = float(amount)
+            if not isfinite(fee) or fee <= 0 or Decimal(str(fee)) != amount:
+                raise RuntimeError("DEGIRO autonomous fee cannot be represented safely")
+            result.append({"accountId": target_account,
+                "comment": f"DEGIRO#{source_account}:FEE:{broker_identity(row['id'])}",
+                "currency": "EUR", "dataSource": "MANUAL", "date": broker_instant(row["date"]),
+                "fee": fee, "quantity": 1,
+                "symbol": f"GF_DEGIRO_{source_account}_EXCHANGE_CONNECTION_EUR",
+                "type": "FEE", "unitPrice": 0})
+    return sorted(result, key=lambda activity: (activity["date"], activity["comment"]))
+
+
 def broker_credentials():
     """Construct the connector model exclusively from the process environment."""
     from degiro_connector.trading.models.credentials import Credentials
