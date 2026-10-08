@@ -152,6 +152,7 @@ FOR EACH ROW EXECUTE FUNCTION c13_block_owned_cash();
                 '--security-opt=no-new-privileges',
                 '-v', str(Path('scripts/acceptance_driver.py').resolve()) + ':/lab/driver.py:ro',
                 '-v', str(Path('tests/fixtures/degiro_contract.yaml').resolve()) + ':/lab/fixture.yaml:ro',
+                '-v', str(Path('tests/fixtures/degiro_v3_transition.yaml').resolve()) + ':/lab/v3.yaml:ro',
                 args.runtime_image, 'python', '-c', 'import time; time.sleep(1800)')
             driver = subprocess.Popen(['docker', 'exec', '-i', '-e', 'DEGIRO_ISOLATED_ACCEPTANCE=synthetic-c13',
                 worker, 'python', '/lab/driver.py'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,

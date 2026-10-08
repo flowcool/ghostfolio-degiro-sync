@@ -42,7 +42,7 @@ quote currency, live broker data or market-price performance.
 | Uncertain delayed INSERT | PostgreSQL BEFORE INSERT trigger blocks owned FEE999 on an advisory lock; HTTP times out; complete GET still contains only4 rows |
 | New Python process before release | Reads persisted intent and refuses synchronization; empty pending readback refuses resolution; no replay |
 | Release owned barrier | Native original request inserts exactly one row; complete count5; old request ID refuses even with positive readback and fresh process remains fenced; exact positive readback with selected pending request ID resolves it; repeated fee sync imports zero |
-| CSV-shaped unmarked SELL in another seeded lab account | API preflight diagnoses manual/CSV overlap; zero added activities and balance stays0 |
+| Actual pinned V3 synthetic SELL in another seeded lab account | Native import preserves captured output; API preflight diagnoses CSV overlap despite mismatched commission currency; zero added activities and balance stays0 |
 | Unresolvable Yahoo symbol in a synthetic BUY batch | Native HTTP400 permits core's recognized-symbol retry; only resolvable FEE stored; incomplete readback cannot resolve intent; no cash write |
 | Cleanup preflight over actual readback | Selects exactly3 manifest-owned canonical IDs, excludes opening/manual/foreign context, performs no DELETE |
 | Partial import cancellation (2026-10-09) | First FEE committed; second independently blocked; timeout and fresh process remain fenced. Sole owned app stopped, its database work terminated, zero remaining database sessions verified before restart. Exact accepted subset unchanged, intent retained, no replay |
@@ -76,10 +76,13 @@ attempt, and its resources were removed. Readiness now requires both tables.
 The controller bounds the entire driver protocol to600 seconds, with incomplete
 or oversized protocol lines rejected; failures still execute owned teardown.
 
-The CSV scenario uses the accepted DTO shape of an unmarked trade, not an actual
-run of the external V3 converter over a private statement. Its purpose is to prove
-that such overlap cannot silently cause a second API import. Actual backfill
-reconciliation/adoption remains an explicit operator gate. Free-text MANUAL fee
+The CSV scenario now seeds output captured from the unchanged external V3
+converter over a public synthetic statement. Only its target account ID changes.
+[Pinned input/output and converter limits](v3-transition.md) distinguish this
+actual synthetic conversion from a private historical statement conversion.
+Its purpose is to prove that overlap cannot silently cause a second API import,
+including when fee currency semantics differ. Actual backfill reconciliation and
+adoption remain explicit operator gates. Free-text MANUAL fee
 incompatibility is separately established in [fee-contract.md](fee-contract.md).
 
 ## Cleanup and rollback preflight

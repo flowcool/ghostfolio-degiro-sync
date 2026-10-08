@@ -1,0 +1,67 @@
+provenance:
+  repository: https://github.com/dickwolff/Export-To-Ghostfolio
+  commit: 9e35bd602f054f563b8c728bcb36dc5eb2bbcaa5
+  converter_path: src/converters/degiroConverterV3.ts
+  converter_sha256: b08a48527cc02e4009dc0cbb2d33763e63f3106d438c85c0db6a29b6e69d8f8d
+  package_lock_sha256: 075190c2ab9bb3b3b6205871778f9b1afa48371255d14c9b798a39c9a3ecf7ce
+  runtime_image: node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
+  timezone: Europe/Zurich
+  security_fixture:
+    isin: US0378331005
+    symbol: TEST
+  network: none
+  note: Public synthetic statements only. Native converter is unchanged; external
+    security lookup is synthetic. Generation timestamp excluded from deterministic
+    output.
+cases:
+  foreign_fee:
+    input_csv: |
+      Date,Time,ValueDate,Product,ISIN,Description,FX,Currency,Amount,BalanceCurrency,Balance,OrderId
+      02-01-2026,10:00,02-01-2026,Synthetic TEST,US0378331005,Sell 2 @ 10 USD,,USD,"20,00",USD,,synthetic-order
+      02-01-2026,10:00,02-01-2026,Synthetic TEST,US0378331005,DEGIRO courtage et/ou frais,,EUR,"-0,15",EUR,,synthetic-order
+    output:
+      meta:
+        version: v0
+      activities:
+      - accountId: synthetic-csv-target
+        comment: synthetic-order
+        fee: 0.15
+        quantity: 2
+        type: SELL
+        unitPrice: 10
+        currency: USD
+        dataSource: YAHOO
+        date: '2026-01-02T10:00:00+01:00'
+        symbol: TEST
+        tags: []
+  same_day_payments:
+    input_csv: |
+      Date,Time,ValueDate,Product,ISIN,Description,FX,Currency,Amount,BalanceCurrency,Balance,OrderId
+      03-01-2026,10:00,03-01-2026,Synthetic TEST,US0378331005,Dividende,,USD,"10,00",USD,,
+      03-01-2026,10:00,03-01-2026,Synthetic TEST,US0378331005,Impôts sur dividende,,USD,"-1,50",USD,,
+      03-01-2026,14:00,03-01-2026,Synthetic TEST,US0378331005,Dividende,,USD,"20,00",USD,,
+      03-01-2026,14:00,03-01-2026,Synthetic TEST,US0378331005,Impôts sur dividende,,USD,"-3,00",USD,,
+    output:
+      meta:
+        version: v0
+      activities:
+      - accountId: synthetic-csv-target
+        comment: Dividend US0378331005 @ 03-01-2026T10:00
+        fee: 1.5
+        quantity: 1
+        type: DIVIDEND
+        unitPrice: 10
+        currency: USD
+        dataSource: YAHOO
+        date: '2026-01-03T10:00:00+01:00'
+        symbol: TEST
+        tags: []
+  unsupported_categories:
+    input_csv: |
+      Date,Time,ValueDate,Product,ISIN,Description,FX,Currency,Amount,BalanceCurrency,Balance,OrderId
+      01-01-2026,10:00,01-01-2026,Synthetic TEST,US0378331005,Flatex Interest Income,,EUR,"0,03",EUR,,
+      01-01-2026,11:00,01-01-2026,Synthetic TEST,US0378331005,Compensation Fonds Monétaires DEGIRO,,EUR,"0,02",EUR,,
+    output:
+      meta:
+        version: v0
+      activities: []

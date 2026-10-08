@@ -176,10 +176,17 @@ def main():
         'currency': 'EUR', 'balance': 0, 'platformId': None}, 201)
     csv_data = deepcopy(data)
     csv_data['source_account'] = '456'
-    csv_trade = adapter.normalize_trades(csv_data, csv_account['id'], mapping, quotes)[0]
-    csv_trade['comment'] = None
+    conversion = yaml.safe_load(Path('/lab/v3.yaml').read_text())
+    csv_trade = deepcopy(conversion['cases']['foreign_fee']['output']['activities'][0])
+    csv_trade['accountId'] = csv_account['id']
     csv_opening = {**opening, 'accountId': csv_account['id'], 'comment': 'Synthetic CSV opening'}
     call('POST', '/api/v1/import', {'activities': [csv_opening, csv_trade]}, 201)
+    csv_readback = call('GET', '/api/v1/activities')
+    csv_rows, _ = adapter.existing_activity_context(csv_readback, csv_account)
+    native_csv = [row for row in csv_rows if row['accountId'] == csv_account['id']
+                  and row['comment'] == csv_trade['comment']]
+    assert len(native_csv) == 1
+    assert adapter.activity_signature(native_csv[0]) == adapter.activity_signature(csv_trade)
     before_csv = call('GET', '/api/v1/activities')['count']
     csv_config = {**config, 'source_account': '456', 'target_account': csv_account['id']}
     try:
@@ -189,7 +196,7 @@ def main():
         assert 'Manual or CSV' in str(error)
     assert call('GET', '/api/v1/activities')['count'] == before_csv
     assert call('GET', '/api/v1/account/' + csv_account['id'])['balance'] == 0
-    print('PASS CSV-shaped unmarked trade overlap blocks whole API account;zero added activities/cash writes;cleanup selects3 exact broker IDs only', flush=True)
+    print('PASS actual pinned V3 synthetic SELL accepted unchanged;API overlap blocks account despite fee mismatch;zero added activities/cash writes;cleanup selects3 exact broker IDs only', flush=True)
 
     unresolved_account = call('POST', '/api/v1/account', {'name': 'Synthetic unresolved symbol',
         'currency': 'EUR', 'balance': 0, 'platformId': None}, 201)
