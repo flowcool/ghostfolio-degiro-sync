@@ -29,8 +29,11 @@ override the historical handoff's mono-file reuse inventory.
 
 Florent authorized autonomous commits, branches, PRs, merges and releases for
 the approved scope. The repository is `flowcool/ghostfolio-degiro-sync`.
-Request an actual CodeRabbit review of each final PR head and verify required
-CI before merge. Production financial writes, cleanup and deployment still
+Verify a completed CodeRabbit review covering the exact final head SHA and
+required CI before merge. Record the review URL and reviewed SHA in Beads and
+the PR; pending, skipped or rate-limited reviews are not evidence. Florent manages
+hourly review triggers externally; do not schedule or repeat them here.
+Production financial writes, cleanup and deployment still
 require separate explicit authorization.
 
 ## Durable work state

@@ -154,6 +154,41 @@ def test_existing_identity_cannot_change_mapping_or_amount(snapshot):
         run(snapshot, [opening_holding(), row], dry_run=False)
 
 
+def test_unrelated_crypto_context_is_preserved_without_blocking_target(snapshot):
+    foreign = opening_holding()
+    foreign.update(id='crypto', accountId='unrelated')
+    foreign['assetProfile'] = {'symbol': 'bitcoin', 'dataSource': 'COINGECKO'}
+    rows, holdings = adapter.existing_activity_context(
+        {'activities': [opening_holding(), foreign], 'count': 2}, TARGET)
+    assert rows[1]['dataSource'] == 'COINGECKO'
+    assert holdings == {('target-a', 'TEST'): 10}
+    assert len(run(snapshot, [opening_holding(), foreign])['proposed']) == 3
+
+
+def test_crypto_provider_never_weakens_foreign_canonical_ownership(snapshot):
+    fee = adapter.normalize_fees(snapshot, TARGET['id'])[0]
+    fee.update(accountId='other-account', dataSource='COINGECKO')
+    with pytest.raises(RuntimeError, match='another target'):
+        run(snapshot, [opening_holding(), activity_row(fee, 'foreign')], dry_run=False)
+
+
+@pytest.mark.parametrize('source', ['COINGECKO', '', None, 42])
+def test_unsupported_target_data_source_blocks(snapshot, source):
+    row = opening_holding()
+    row['assetProfile']['dataSource'] = source
+    with pytest.raises(RuntimeError):
+        run(snapshot, [row], dry_run=False)
+
+
+@pytest.mark.parametrize('field,value', [('symbol', ''), ('dataSource', ''), ('dataSource', None)])
+def test_foreign_profile_still_requires_well_formed_evidence(snapshot, field, value):
+    foreign = opening_holding()
+    foreign.update(id='foreign', accountId='other-account')
+    foreign['assetProfile'][field] = value
+    with pytest.raises(RuntimeError):
+        run(snapshot, [opening_holding(), foreign], dry_run=False)
+
+
 def test_manual_csv_fee_overlap_requires_explicit_reconciliation(snapshot):
     fee = adapter.normalize_fees(snapshot, TARGET['id'])[0]
     fee['comment'] = None
