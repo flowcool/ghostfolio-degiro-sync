@@ -1,0 +1,5 @@
+# Public example only. Independently verify Yahoo symbol AND quote currency.
+# Copy to ignored mapping.yaml; broker currency alone is not verification.
+US0378331005:
+  symbol: AAPL
+  currency: USD

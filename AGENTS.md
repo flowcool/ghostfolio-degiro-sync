@@ -48,6 +48,8 @@ completeness and current-cash semantics remain implementation gates. Unknown or
 ambiguous relevant account data blocks writes. Default operational mode is DRY_RUN;
 production mutations/cleanup/deployment require separate explicit authorization.
 
-Git initialization, commit and push require Florent's explicit request, including
-the first scaffold commit. Approval of implementation alone does not authorize them.
-Until then preserve verified local artifacts and record their exact evidence in Beads.
+Florent explicitly authorized autonomous commits, branches, PRs, merges and
+releases for the approved implementation scope on 2026-10-08. Verify required CI
+and request an actual CodeRabbit review on each final PR head before merging;
+a skipped review is not evidence. Production financial mutations, cleanup and
+deployment retain their separate explicit authorization gates.

@@ -27,9 +27,11 @@ override the historical handoff's mono-file reuse inventory.
 
 ## Git
 
-Git initialization and first atomic commit require Florent's explicit request.
-Likely a GitHub repo under `flowcool/` like the IBKR fork. GitOps: commit/push on Florent's explicit
-request only.
+Florent authorized autonomous commits, branches, PRs, merges and releases for
+the approved scope. The repository is `flowcool/ghostfolio-degiro-sync`.
+Request an actual CodeRabbit review of each final PR head and verify required
+CI before merge. Production financial writes, cleanup and deployment still
+require separate explicit authorization.
 
 ## Durable work state
 

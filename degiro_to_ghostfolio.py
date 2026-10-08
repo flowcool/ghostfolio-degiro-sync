@@ -541,6 +541,290 @@ def apply_cash_balance(snapshot, target_account, source_account, update_balance,
     return balance
 
 
+def validate_ghost_host(host):
+    """Exact operator origins; fixed errors never expose URL userinfo or tokens."""
+    allowed = {"https://ghost.mylittlemess.fr", "http://ghostfolio:3333",
+               "http://localhost:3333", "http://127.0.0.1:3333"}
+    if not isinstance(host, str) or host not in allowed:
+        raise RuntimeError("Ghostfolio target URL is outside the approved origin policy")
+    return host
+
+
+@contextmanager
+def ghost_transport(config, target_account):
+    """Bind immutable core to bounded HTTP for this sequential single-thread run."""
+    host = validate_ghost_host(config.get("ghost_host"))
+    token = config.get("ghost_token")
+    dry_run = config.get("dry_run", True)
+    if (not isinstance(token, str) or not token.strip() or "\r" in token or "\n" in token
+            or type(dry_run) is not bool or not isinstance(target_account, dict)
+            or not isinstance(target_account.get("id"), str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]+", target_account["id"])):
+        raise RuntimeError("Invalid Ghostfolio transport configuration")
+    session = requests.Session()
+    session.trust_env = False
+    session.headers.update(core.ghost_headers(token))
+    session.RequestException = requests.RequestException
+    original_send = session.send
+    account_path = f"/api/v1/account/{target_account['id']}"
+
+    def send(request, **kwargs):
+        parts = urlsplit(request.url)
+        origin = f"{parts.scheme}://{parts.netloc}"
+        allowed = (request.method == "GET" and parts.path in
+                   ("/api/v1/account", "/api/v1/activities", account_path)) or (
+                   not dry_run and request.method == "POST" and parts.path == "/api/v1/import") or (
+                   not dry_run and request.method == "PUT" and parts.path == account_path)
+        if origin != host or parts.query or parts.fragment or not allowed:
+            raise RuntimeError("Ghostfolio request outside the approved sync boundary")
+        kwargs.update(timeout=(10, 60), allow_redirects=False, verify=True, stream=False)
+        try:
+            response = original_send(request, **kwargs)
+        except requests.RequestException:
+            raise requests.RequestException("Ghostfolio bounded transport failed") from None
+        if 300 <= response.status_code < 400:
+            raise requests.RequestException("Ghostfolio redirect refused")
+        if request.method == "GET" and parts.path == account_path and not dry_run:
+            try:
+                current = response.json()
+            except ValueError:
+                raise RuntimeError("Invalid Ghostfolio current account response") from None
+            if (response.status_code != 200 or not isinstance(current, dict)
+                    or current.get("id") != target_account["id"]
+                    or current.get("currency") != target_account.get("currency")
+                    or not core.activity_is_active({"account": current}) or current.get("balance") is None):
+                raise RuntimeError("Ghostfolio cash account changed or is redacted")
+            financial_decimal(current["balance"])
+        return response
+
+    session.send = send
+    previous_requests = core.requests
+    saved_log = (core.log.disabled, core.log.propagate)
+    core.requests = session
+    # Immutable core error logs can include HTTP bodies/exception URLs. The
+    # adapter emits controlled outcome messages instead of forwarding them.
+    core.log.disabled = True
+    core.log.propagate = False
+    try:
+        yield session
+    finally:
+        core.requests = previous_requests
+        core.log.disabled, core.log.propagate = saved_log
+        session.close()
+
+
+def existing_activity_context(body, target_account):
+    """Complete unredacted list; never discard ownership or inactive target rows."""
+    if not isinstance(body, dict) or not isinstance(body.get("activities"), list):
+        raise RuntimeError("Invalid Ghostfolio activity list")
+    rows = body["activities"]
+    if type(body.get("count")) is not int or body["count"] != len(rows):
+        raise RuntimeError("Incomplete Ghostfolio activity list")
+    identities = set()
+    result = []
+    balances = {}
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("id"), str) or not row["id"]:
+            raise RuntimeError("Invalid Ghostfolio created activity identity")
+        if row["id"] in identities:
+            raise RuntimeError("Duplicate Ghostfolio created activity identity")
+        identities.add(row["id"])
+        for field in ("quantity", "unitPrice", "fee"):
+            if financial_decimal(row.get(field)) < 0:
+                raise RuntimeError("Invalid or redacted Ghostfolio financial context")
+        comment = row.get("comment")
+        if comment is not None and not isinstance(comment, str):
+            raise RuntimeError("Invalid Ghostfolio activity comment")
+        profile = row["assetProfile"] if "assetProfile" in row else row.get("SymbolProfile")
+        if (not isinstance(profile, dict) or not isinstance(profile.get("symbol"), str)
+                or not profile["symbol"] or profile.get("dataSource") not in ("YAHOO", "MANUAL")):
+            raise RuntimeError("Missing or invalid Ghostfolio asset profile context")
+        normalized = {**row, "symbol": profile["symbol"], "dataSource": profile["dataSource"]}
+        broker_instant(row.get("date"))
+        if row.get("accountId") != target_account["id"]:
+            result.append(normalized)
+            continue
+        if row.get("type") not in ("BUY", "SELL", "DIVIDEND", "FEE"):
+            raise RuntimeError("Unsupported target activity type blocks synchronization")
+        if not core.activity_is_active(row) or not core.activity_date_is_current(row):
+            raise RuntimeError("Inactive or future target activity blocks synchronization")
+        if row.get("type") in ("BUY", "SELL"):
+            if profile["dataSource"] != "YAHOO":
+                raise RuntimeError("Unverified target holding data source")
+            quantity = financial_decimal(row["quantity"])
+            key = (row["accountId"], profile["symbol"])
+            balances[key] = balances.get(key, Decimal(0)) + (quantity if row["type"] == "BUY" else -quantity)
+        result.append(normalized)
+    if any(quantity < 0 for quantity in balances.values()):
+        raise RuntimeError("Negative existing target holding blocks synchronization")
+    return result, balances
+
+
+def activity_signature(activity):
+    """Exact normalized DTO evidence independent of server row/profile metadata."""
+    try:
+        values = dict(activity)
+        values["date"] = broker_instant(values["date"])
+        for field in ("quantity", "unitPrice", "fee"):
+            values[field] = financial_decimal(values[field])
+        return tuple(values[field] for field in TRADE_FIELDS)
+    except (KeyError, TypeError):
+        raise RuntimeError("Incomplete Ghostfolio activity evidence") from None
+
+
+def pending_activities(activities, existing, target_account, source_account):
+    """Canonical identities never fall back to proximity or another account."""
+    namespace = f"DEGIRO#{broker_identity(source_account)}:"
+    known = {}
+    for row in existing:
+        comment = row.get("comment")
+        if not isinstance(comment, str) or not comment.startswith(namespace):
+            continue
+        if row.get("accountId") != target_account["id"]:
+            raise RuntimeError("DEGIRO identity is owned by another target account")
+        if not re.fullmatch(re.escape(namespace) + r"(TRADE|DIVIDEND|FEE):[1-9][0-9]*", comment):
+            raise RuntimeError("Malformed existing DEGIRO canonical identity")
+        if comment in known:
+            raise RuntimeError("Duplicate existing DEGIRO canonical identity")
+        known[comment] = row
+    result = []
+    seen = {}
+    for activity in activities:
+        if activity.get("accountId") != target_account["id"]:
+            raise RuntimeError("Candidate target account mismatch")
+        comment = activity["comment"]
+        signature = activity_signature(activity)
+        if comment in seen:
+            if signature != seen[comment]:
+                raise RuntimeError("Conflicting candidate DEGIRO identity")
+            continue
+        seen[comment] = signature
+        if comment in known:
+            if signature != activity_signature(known[comment]):
+                raise RuntimeError("Existing DEGIRO identity changed financial evidence")
+            continue
+        for row in existing:
+            if row.get("accountId") != target_account["id"] or row.get("type") != activity["type"]:
+                continue
+            old_comment = row.get("comment") or ""
+            if old_comment.startswith("DEGIRO#"):
+                continue
+            gap = abs((datetime.fromisoformat(broker_instant(row["date"])).date()
+                       - datetime.fromisoformat(activity["date"]).date()).days)
+            if (gap <= 2 and (activity["type"] == "FEE" or row["symbol"] == activity["symbol"])):
+                raise RuntimeError("Manual or CSV activity requires explicit reconciliation")
+        result.append(activity)
+    return result
+
+
+def synchronize_account(config, snapshot, target_account, existing_body, mapping,
+                        quote_currencies, import_activities, update_balance, now=None):
+    """Validate whole account before mutation; accepted evidence alone funds sells."""
+    dry_run = config.get("dry_run", True)
+    if type(dry_run) is not bool:
+        raise RuntimeError("Invalid DRY_RUN flag")
+    source = broker_identity(config.get("source_account"))
+    if broker_identity(snapshot.get("source_account")) != source:
+        raise RuntimeError("DEGIRO configured source account mismatch")
+    if not isinstance(target_account, dict) or target_account.get("id") != config.get("target_account"):
+        raise RuntimeError("Ghostfolio configured target account mismatch")
+    if not core.activity_is_active({"account": target_account}) or target_account.get("balance") is None:
+        raise RuntimeError("Ghostfolio target account excluded or redacted")
+    balance = current_cash_balance(snapshot, target_account, source, now)
+    existing, quantities = existing_activity_context(existing_body, target_account)
+    activities = normalize_trades(snapshot, target_account["id"], mapping, quote_currencies)
+    activities += normalize_dividends(snapshot, target_account["id"], mapping, quote_currencies)
+    activities += normalize_fees(snapshot, target_account["id"])
+    if any(not core.activity_date_is_current(activity) for activity in activities):
+        raise RuntimeError("Future DEGIRO candidate blocks synchronization")
+    pending = pending_activities(activities, existing, target_account, source)
+    trades = [activity for activity in pending if activity["type"] in ("BUY", "SELL")]
+    reconcile_trade_holdings(trades, existing, quantities)
+    if not dry_run and snapshot.get("history_completeness_verified") is not True:
+        raise RuntimeError("Unverified DEGIRO history completeness blocks live writes")
+    if target_account["id"] in config.get("_uncertain_import_accounts", set()):
+        raise RuntimeError("Uncertain prior import blocks account writes")
+    if dry_run:
+        return {"proposed": pending, "accepted": [], "cash": balance, "dry_run": True,
+                "history_verified": snapshot.get("history_completeness_verified") is True}
+    accepted = []
+    for sells in (False, True):
+        batch = [activity for activity in pending if (activity["type"] == "SELL") == sells]
+        if not batch:
+            continue
+        if sells:
+            reconcile_trade_holdings(batch, [], quantities)
+        try:
+            created, ok = import_activities(batch)
+            if (ok is not True or not isinstance(created, list)
+                    or len(created) != len(batch)
+                    or {activity_signature(a) for a in created} != {activity_signature(a) for a in batch}):
+                raise RuntimeError("Incomplete accepted account import evidence")
+        except Exception:
+            core.mark_import_uncertain(config, batch)
+            raise RuntimeError("Account import uncertain or incomplete; cash blocked") from None
+        for activity in created:
+            if activity["type"] in ("BUY", "SELL"):
+                key = (activity["accountId"], activity["symbol"])
+                quantities[key] = quantities.get(key, Decimal(0)) + financial_decimal(activity["quantity"]) * (
+                    1 if activity["type"] == "BUY" else -1)
+        accepted.extend(created)
+    apply_cash_balance(snapshot, target_account, source, update_balance, dry_run=False,
+        import_ok=True, uncertain=target_account["id"] in config.get("_uncertain_import_accounts", set()), now=now)
+    return {"proposed": pending, "accepted": accepted, "cash": balance, "dry_run": False,
+            "history_verified": True}
+
+
+def load_sync_config():
+    """Operator configuration only; credentials are read verbatim from environment."""
+    host = validate_ghost_host(os.environ.get("GHOST_HOST"))
+    token = os.environ.get("GHOST_TOKEN")
+    target = os.environ.get("GHOST_ACCOUNT_ID")
+    source = broker_identity(os.environ.get("DEGIRO_ACCOUNT_ID"))
+    mode = os.environ.get("DRY_RUN", "1").strip().lower()
+    if (not isinstance(token, str) or not token.strip() or "\r" in token or "\n" in token
+            or not isinstance(target, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", target)
+            or mode not in ("1", "true", "yes", "on", "0", "false", "no", "off")):
+        raise RuntimeError("Invalid Ghostfolio sync environment")
+    try:
+        document = yaml.safe_load(Path(os.environ.get("MAPPING_FILE", "mapping.yaml")).read_text())
+        if not isinstance(document, dict) or not document:
+            raise ValueError
+        mapping, quotes = {}, {}
+        for isin, entry in document.items():
+            if (not valid_isin(isin) or not isinstance(entry, dict)
+                    or set(entry) != {"symbol", "currency"}
+                    or not isinstance(entry["symbol"], str) or not entry["symbol"].strip()
+                    or entry["symbol"] != entry["symbol"].strip()
+                    or entry["currency"] not in CURRENCY_QUANTA):
+                raise ValueError
+            symbol, currency = entry["symbol"], entry["currency"]
+            if symbol in quotes and quotes[symbol] != currency:
+                raise ValueError
+            mapping[isin], quotes[symbol] = symbol, currency
+    except (OSError, ValueError, TypeError, KeyError, yaml.YAMLError):
+        raise RuntimeError("Invalid explicitly verified Yahoo mapping file") from None
+    return {"ghost_host": host, "ghost_token": token, "source_account": source,
+            "target_account": target, "dry_run": mode in ("1", "true", "yes", "on")}, mapping, quotes
+
+
+def run_sync(from_date, to_date, window_days=90):
+    """One broker read and complete target read; no completeness assertion invented."""
+    config, mapping, quotes = load_sync_config()
+    snapshot = read_degiro(from_date, to_date, window_days)
+    expected_target = {"id": config["target_account"], "currency": snapshot["account_info"]["baseCurrency"]}
+    with ghost_transport(config, expected_target) as session:
+        response = session.get(f"{config['ghost_host']}/api/v1/account/{config['target_account']}")
+        response.raise_for_status()
+        target = response.json()
+        response = session.get(f"{config['ghost_host']}/api/v1/activities")
+        response.raise_for_status()
+        existing = response.json()
+        return synchronize_account(config, snapshot, target, existing, mapping, quotes,
+            lambda activities: core.ghost_import_activities(config, activities),
+            lambda account, balance: core.ghost_update_cash_balance(config, account, balance))
+
+
 def broker_credentials():
     """Construct the connector model exclusively from the process environment."""
     from degiro_connector.trading.models.credentials import Credentials
@@ -872,21 +1156,35 @@ def save_private_snapshot(data, destination):
 
 
 def main(argv=None):
-    """Only an explicit read-only command can contact DEGIRO at this phase."""
+    """Explicit operator modes; normal sync defaults to DRY_RUN and fails closed."""
     if not argv:
         log.error("DEGIRO sync gates incomplete; use explicit --read-only characterization")
         return 1
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--read-only", action="store_true", required=True)
+    modes = parser.add_mutually_exclusive_group(required=True)
+    modes.add_argument("--read-only", action="store_true")
+    modes.add_argument("--sync", action="store_true")
     parser.add_argument("--from-date", required=True)
     parser.add_argument("--to-date", required=True)
     parser.add_argument("--window-days", type=int, default=90)
-    parser.add_argument("--output", required=True)
+    parser.add_argument("--output")
     parser.add_argument("--report-country")
     parser.add_argument("--report-language")
     parser.add_argument("--orders", action="store_true")
     args = parser.parse_args(argv)
     try:
+        if args.sync:
+            if args.output or args.report_country or args.report_language or args.orders:
+                raise RuntimeError("Read-only options cannot be used for synchronization")
+            result = run_sync(date.fromisoformat(args.from_date), date.fromisoformat(args.to_date), args.window_days)
+            log.info("Sync %s: %d proposed activities, %d accepted", "DRY_RUN" if result["dry_run"] else "live",
+                     len(result["proposed"]), len(result["accepted"]))
+            if not result["history_verified"]:
+                log.warning("History completeness is unverified; live writes remain blocked")
+                return 1
+            return 0
+        if not args.output:
+            raise RuntimeError("Read-only snapshot requires an output path")
         output = snapshot_destination(args.output)
         locale = None
         if args.report_country or args.report_language:
@@ -895,6 +1193,9 @@ def main(argv=None):
                            args.window_days, report_locale=locale, orders=args.orders)
         save_private_snapshot(data, output)
     except Exception as error:
+        if args.sync:
+            log.error("DEGIRO sync failed; unknown, incomplete or uncertain account state blocks writes")
+            return 1
         stages = ("login", "client_discovery", "transactions", "account_overview", "products",
                   "account_info", "account_update", "account_report", "order_history")
         messages = {f"DEGIRO read failed at {stage}; no financial writes attempted" for stage in stages}

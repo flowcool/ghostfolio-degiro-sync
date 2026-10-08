@@ -4,7 +4,9 @@ Sync DEGIRO trades, dividends and cash into self-hosted [Ghostfolio](https://gho
 schedule — sibling of [`ghostfolio-ibkr-sync`](../ghostfolio-ibkr-sync).
 
 The adapter provides an explicit [read-only DEGIRO procedure](docs/read-only.md).
-Normal sync still fails closed until the mapping and acceptance gates pass. Read the
+An explicit [DRY_RUN synchronization command](docs/synchronization.md) now
+reconciles configured source/target identities and mappings. Live sync fails
+closed until the history and acceptance gates pass. Read the
 approved [delivery plan](docs/plans/2026-10-08-degiro-sync.md) for implementation
 and live-validation gates; [FINDINGS.md](FINDINGS.md) preserves the reconnaissance.
 
