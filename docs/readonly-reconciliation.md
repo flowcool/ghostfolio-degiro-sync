@@ -19,8 +19,10 @@ activity on all ten canonical DTO fields: account, comment, currency, data sourc
 UTC instant, fee, quantity, symbol, type and price. The four matched created IDs
 were distinct. No proximity, rounding or inferred currency was used. This is an
 actual output comparison, not a new converter run or permission to adopt entries.
-The original input directory was empty, so the source CSV, converter revision and
-complete historical coverage could not be independently reconstructed.
+The output metadata records version `v0` and a generation date on 2026-07-16;
+it does not identify an immutable converter revision. The original input directory
+was empty, so the source CSV, exact producer revision and complete historical
+coverage could not be independently reconstructed.
 
 A fresh bounded broker read of 2025-10-08..2026-10-08 returned three executions,
 88 cash movements and 88 rows from the alternate authenticated CSV-report endpoint.
