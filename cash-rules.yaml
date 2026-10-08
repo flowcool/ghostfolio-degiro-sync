@@ -38,14 +38,14 @@ rules:
     description_pattern: '^Retrait .+$'
     sign: negative
     treatment: cash_only
-  cash_sweep:
+  cash_sweep_annotation:
     type: FLATEX_CASH_SWEEP
     description_pattern: '^Virement .+$'
-    treatment: cash_only
-  cash_sweep_notice:
+    treatment: nonfinancial_notice
+  cash_sweep_transfer:
     type: FLATEX_CASH_SWEEP
     description_exact: Degiro Cash Sweep Transfer
-    treatment: nonfinancial_notice
+    treatment: cash_only
   executed_trade_cash:
     type: TRANSACTION
     description_pattern: '^(Achat|Vente) .+$'

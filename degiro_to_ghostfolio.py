@@ -14,6 +14,7 @@ import re
 from urllib.parse import urlsplit
 
 import requests
+import yaml
 
 import ghostfolio_core as core
 
@@ -234,6 +235,140 @@ def reconcile_trade_holdings(activities, existing, quantities):
             raise RuntimeError("DEGIRO trades would create a negative target holding")
         pending.append(activity)
     return pending
+
+
+def load_cash_rules(path=None):
+    """Read the reviewed local taxonomy; malformed rules never broaden matching."""
+    path = Path(path) if path is not None else Path(__file__).with_name("cash-rules.yaml")
+    try:
+        document = yaml.safe_load(path.read_text())
+        rules = document["rules"]
+        if document["format"] != 1 or not isinstance(rules, dict) or not rules:
+            raise ValueError
+        for name, rule in rules.items():
+            if not isinstance(name, str) or not isinstance(rule, dict):
+                raise ValueError
+            if not isinstance(rule.get("type"), str) or not rule["type"]:
+                raise ValueError
+            descriptions = [key for key in ("description_exact", "description_pattern") if key in rule]
+            if len(descriptions) != 1 or not isinstance(rule[descriptions[0]], str):
+                raise ValueError
+            if "description_pattern" in rule:
+                pattern = rule["description_pattern"]
+                if not pattern.startswith("^") or not pattern.endswith("$"):
+                    raise ValueError
+                re.compile(pattern)
+            if rule.get("sign") not in (None, "positive", "negative"):
+                raise ValueError
+            for flag in ("product_required", "order_required"):
+                if flag in rule and type(rule[flag]) is not bool:
+                    raise ValueError
+    except (OSError, ValueError, TypeError, KeyError, yaml.YAMLError, re.error):
+        raise RuntimeError("Invalid DEGIRO cash rules") from None
+    return rules
+
+
+def classify_cash_movements(rows, rules=None):
+    """Classify the entire ledger; preserve row identity and reject ambiguity."""
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise RuntimeError("Invalid DEGIRO cash ledger")
+    rules = load_cash_rules() if rules is None else rules
+    unique = []
+    merge_history(unique, rows, cash=True)
+    result = {name: [] for name in rules}
+    for row in unique:
+        broker_identity(row.get("id"))
+        broker_instant(row.get("date"))
+        description = row.get("description")
+        if not isinstance(description, str):
+            raise RuntimeError("Invalid DEGIRO cash description")
+        matches = [name for name, rule in rules.items() if row.get("type") == rule["type"] and
+                   (description == rule["description_exact"] if "description_exact" in rule else
+                    re.fullmatch(rule["description_pattern"], description))]
+        if len(matches) != 1:
+            raise RuntimeError("Unknown or ambiguous DEGIRO cash category")
+        name = matches[0]
+        rule = rules[name]
+        if rule.get("treatment") == "nonfinancial_notice":
+            if row.get("change") is not None:
+                raise RuntimeError("DEGIRO cash notice unexpectedly contains an amount")
+        else:
+            amount = financial_decimal(row.get("change"))
+            currency = row.get("currency")
+            if not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency):
+                raise RuntimeError("Invalid DEGIRO cash currency")
+            broker_instant(row.get("valueDate"))
+            if ((not amount and rule.get("treatment") != "unsupported_blocking")
+                    or (rule.get("sign") == "positive" and amount <= 0)
+                    or (rule.get("sign") == "negative" and amount >= 0)):
+                raise RuntimeError("Unsupported DEGIRO cash sign or reversal")
+        if rule.get("product_required"):
+            broker_identity(row.get("productId"))
+        if rule.get("order_required") and (
+                not isinstance(row.get("orderId"), str) or not row["orderId"].strip()):
+            raise RuntimeError("Missing DEGIRO cash order relation")
+        result[name].append(row)
+    return result
+
+
+def associate_dividends(classified):
+    """One observed payment and one withholding per exact association group."""
+    groups = {}
+    for category in ("paid_dividend", "dividend_withholding"):
+        for row in classified.get(category, []):
+            if row.get("orderId") not in (None, ""):
+                raise RuntimeError("Unverified DEGIRO dividend relation")
+            key = (broker_identity(row.get("productId")), row["currency"],
+                   broker_instant(row.get("date")), broker_instant(row.get("valueDate")))
+            groups.setdefault(key, {"paid_dividend": [], "dividend_withholding": []})[category].append(row)
+    pairs = []
+    for group in groups.values():
+        if len(group["paid_dividend"]) != 1 or len(group["dividend_withholding"]) != 1:
+            raise RuntimeError("Ambiguous or unverified DEGIRO dividend withholding")
+        dividend = group["paid_dividend"][0]
+        withholding = group["dividend_withholding"][0]
+        if -financial_decimal(withholding["change"]) > financial_decimal(dividend["change"]):
+            raise RuntimeError("DEGIRO withholding exceeds gross payment")
+        pairs.append((dividend, withholding))
+    return pairs
+
+
+def normalize_dividends(snapshot, target_account, mapping, quote_currencies, rules=None):
+    """Import paid cash amounts independently of current or historical holdings."""
+    rules = load_cash_rules() if rules is None else rules
+    classified = classify_cash_movements(snapshot["cash_movements"], rules)
+    if any(classified[name] for name, rule in rules.items()
+           if rule.get("treatment") == "unsupported_blocking"):
+        raise RuntimeError("Unsupported DEGIRO cash category blocks account writes")
+    if not isinstance(target_account, str) or not target_account.strip():
+        raise RuntimeError("Missing Ghostfolio target account")
+    result = []
+    for dividend, withholding in associate_dividends(classified):
+        product_id = broker_identity(dividend["productId"])
+        product = snapshot["products"].get(product_id)
+        if (not isinstance(product, dict) or broker_identity(product.get("id")) != product_id
+                or product.get("productType") != "STOCK"
+                or financial_decimal(product.get("contractSize")) != 1):
+            raise RuntimeError("Unverified DEGIRO dividend instrument")
+        isin = product.get("isin")
+        if not valid_isin(isin):
+            raise RuntimeError("Invalid DEGIRO dividend ISIN")
+        symbol = mapping.get(isin)
+        if not isinstance(symbol, str) or not symbol.strip() or symbol != symbol.strip():
+            raise RuntimeError("DEGIRO dividend requires an explicit Yahoo mapping")
+        currency = dividend["currency"]
+        if (currency not in CURRENCY_QUANTA or product.get("currency") != currency
+                or quote_currencies.get(symbol) != currency):
+            raise RuntimeError("Unverified DEGIRO dividend currency or quote units")
+        gross = float(financial_decimal(dividend["change"]))
+        tax = float(-financial_decimal(withholding["change"]))
+        if not isfinite(gross) or gross <= 0 or not isfinite(tax) or tax <= 0:
+            raise RuntimeError("DEGIRO dividend cannot be represented safely")
+        result.append({"accountId": target_account,
+            "comment": f"DEGIRO#{broker_identity(snapshot['source_account'])}:DIVIDEND:{broker_identity(dividend['id'])}",
+            "currency": currency, "dataSource": "YAHOO", "date": broker_instant(dividend["date"]),
+            "fee": tax, "quantity": 1, "symbol": symbol, "type": "DIVIDEND", "unitPrice": gross})
+    return sorted(result, key=lambda activity: (activity["date"], activity["comment"]))
 
 
 def broker_credentials():

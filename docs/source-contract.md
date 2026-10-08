@@ -1,7 +1,7 @@
 # Observed DEGIRO contract
 
 This extends the inspected connector contract in the approved plan. It describes
-read-only evidence from2026-10-08, not a guarantee of undocumented API behavior.
+read-only evidence from 2026-10-08, not a guarantee of undocumented API behavior.
 Private financial evidence stays outside Git. `cash-rules.yaml` owns repeated
 classification strings; unexpected categories or ambiguity always block writes.
 
@@ -35,8 +35,9 @@ the API's local offset timestamps (+01:00/+02:00), at minute precision; do not
 silently reinterpret them as UTC. Value date, descriptions, product ISIN and order
 reference agree. The CSV has UTF-8 bytes without a declared charset, so the
 transport explicitly validates UTF-8 and sets the decoding before connector use.
-Neutral sweep notices have no amount and blank CSV currency despite an API
-currency value. One trade differs by exactly one cent in the two cash views;
+Virement sweep annotations have no amount and blank CSV currency despite an API
+currency value. Degiro Cash Sweep Transfer rows carry signed amounts and CSV
+currency; they are cash-only movements, not nonfinancial notices. One trade differs by exactly one cent in the two cash views;
 unrounded execution price times absolute quantity lies within one cent of both.
 This is bounded display rounding evidence, not permission to hide arbitrary
 financial discrepancies. Financial event IDs/counts and semantic fields remain
@@ -135,3 +136,37 @@ arithmetic characterization against the existing private snapshot accepted all
 three observed executions, using placeholder symbols and source currencies. It
 made no network requests and does not establish Yahoo mapping validity, history
 completeness, or authorization for import.
+
+## Paid dividend normalization policy
+
+Cash classification checks the complete ledger before constructing a dividend.
+Reviewed YAML rules must match exactly one category, with validated row identities,
+offset timestamps, required relations, financial signs and currencies. Equal
+cash overlap rows may differ only in the window-derived balance.
+
+`cash_sweep_annotation` describes Virement rows with null amounts and blank CSV
+movement/currency fields. `cash_sweep_transfer` describes signed Degiro Cash Sweep
+Transfer movements, which stay cash-only. These keys correct the initial inverted
+neutral-sweep interpretation. Any future annotation with a financial amount blocks
+classification. Observed zero-valued Flatex interest is still recognized as an
+unsupported account-level blocker; zero is not an exemption from Florent's policy.
+
+A dividend and withholding must form a unique group on product, currency and exact
+offset-aware payment/value-date instants. Multiple same-day payments at different
+instants remain separate. Missing tax, isolated tax, multiple candidates, new
+relation fields, reversal signs and mixed-currency tax block the batch. Untaxed
+payments need separate broker evidence before relaxing the missing-tax guard.
+Withholding must not exceed the gross payment.
+
+The activity uses the gross paid amount as unitPrice, quantity 1 and the positive
+linked withholding as fee, all in the verified instrument/Yahoo quote currency.
+The comment is `DEGIRO#<source-account>:DIVIDEND:<payment-row-id>`; target account
+remains part of the eventual dedup key. Current holdings, partial sales and upcoming
+payments never enter this calculation. STOCK/unit/currency restrictions match the
+trade gate; no amount or tax conversion is inferred for unsupported instruments.
+A successful pure conversion does not override history, fee, cash or live-write gates.
+
+The local immutable statement characterization now classifies all 88 movements and
+finds the 10 observed unique dividend/withholding pairs without network requests.
+Normalizing that full snapshot still fails at the preserved unsupported-category
+account gate. Synthetic tests own regression coverage; private data stays off Git.
