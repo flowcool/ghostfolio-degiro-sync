@@ -1,5 +1,6 @@
 """Durable intent and restart regressions; synthetic inputs and private tmp state."""
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import subprocess
@@ -135,6 +136,31 @@ def test_oversized_intent_never_replaces_readable_journal(config):
         with pytest.raises(RuntimeError, match='budget'):
             adapter.begin_intent(journal, 'import', {'fake': 'x' * 1_000_001})
         assert journal['path'].read_bytes() == previous
+
+
+def test_resolved_retention_preserves_newest_confirmations_and_pending_fence(config):
+    with adapter.account_journal(config) as journal:
+        start = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        # Reverse insertion order proves retention follows dates, not YAML order.
+        journal['document']['resolved'] = {f'{i:032x}': {
+            'kind': 'cash', 'at': (start + timedelta(seconds=i)).isoformat()}
+            for i in reversed(range(1005))}
+        adapter.write_journal(journal)
+        identity = adapter.begin_intent(journal, 'cash', {'account': 'target-a', 'balance': 12.3})
+        before = document(config)
+        assert len(before['resolved']) == 1005 and before['pending']['id'] == identity
+        with pytest.raises(RuntimeError, match='identity changed'):
+            adapter.confirm_intent(journal, 'wrong-id')
+        assert document(config) == before
+        adapter.confirm_intent(journal, identity)
+    stored = document(config)
+    assert stored['pending'] is None and len(stored['resolved']) == 1000
+    assert set(stored['resolved']) == {f'{i:032x}' for i in range(6, 1005)} | {identity}
+    with adapter.account_journal(config) as journal:
+        pending = adapter.begin_intent(journal, 'cash', {'account': 'target-a', 'balance': 99})
+    assert document(config)['pending']['id'] == pending
+    with pytest.raises(RuntimeError, match='durable write intent'):
+        synchronize(config, {}, lambda *args: pytest.fail('Pending cash replayed'))
 
 
 @pytest.mark.parametrize('other_source', [False, True])

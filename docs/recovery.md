@@ -28,9 +28,12 @@ including a crash before HTTP actually starts.
 Only exact complete synchronous acceptance confirms an import intent. Partial,
 degraded, failed or lost responses retain it. A cash response failure also remains
 pending. A later process refuses all writes while any intent is unresolved;
-there is no automatic replay or clear-on-empty behavior. Resolved metadata is
-retained, and journals over1MB fail closed rather than silently truncating state.
-No retention/compaction operation is currently provided.
+there is no automatic replay or clear-on-empty behavior. Confirmation retains the
+1,000 most recent resolved-request metadata entries, ordered by their UTC
+confirmation timestamps (request ID breaks ties). Older confirmed audit metadata
+ages out; pending financial intent is never pruned. Journals over1MB still fail
+closed rather than truncating financial evidence. No operator compaction command
+is provided.
 
 ## Explicit positive import readback
 

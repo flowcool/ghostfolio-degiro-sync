@@ -642,13 +642,16 @@ def existing_activity_context(body, target_account):
             raise RuntimeError("Invalid Ghostfolio activity comment")
         profile = row["assetProfile"] if "assetProfile" in row else row.get("SymbolProfile")
         if (not isinstance(profile, dict) or not isinstance(profile.get("symbol"), str)
-                or not profile["symbol"] or profile.get("dataSource") not in ("YAHOO", "MANUAL")):
+                or not profile["symbol"] or not isinstance(profile.get("dataSource"), str)
+                or not profile["dataSource"]):
             raise RuntimeError("Missing or invalid Ghostfolio asset profile context")
         normalized = {**row, "symbol": profile["symbol"], "dataSource": profile["dataSource"]}
         broker_instant(row.get("date"))
         if row.get("accountId") != target_account["id"]:
             result.append(normalized)
             continue
+        if profile["dataSource"] not in ("YAHOO", "MANUAL"):
+            raise RuntimeError("Unsupported target asset data source")
         if row.get("type") not in ("BUY", "SELL", "DIVIDEND", "FEE"):
             raise RuntimeError("Unsupported target activity type blocks synchronization")
         if not core.activity_is_active(row) or not core.activity_date_is_current(row):
@@ -837,8 +840,13 @@ def confirm_intent(journal, identity):
     pending = journal["document"]["pending"]
     if not isinstance(pending, dict) or pending.get("id") != identity:
         raise RuntimeError("Synchronization intent identity changed")
-    journal["document"]["resolved"][identity] = {"kind": pending["kind"],
+    resolved = journal["document"]["resolved"]
+    resolved[identity] = {"kind": pending["kind"],
         "at": datetime.now(timezone.utc).isoformat()}
+    if len(resolved) > 1000:
+        # Only confirmed audit metadata ages out; pending intent is never pruned.
+        keep = sorted(resolved.items(), key=lambda item: (broker_instant(item[1]["at"]), item[0]))[-1000:]
+        journal["document"]["resolved"] = dict(keep)
     journal["document"]["pending"] = None
     write_journal(journal)
 

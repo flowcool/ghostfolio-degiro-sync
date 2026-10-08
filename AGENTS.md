@@ -50,6 +50,8 @@ production mutations/cleanup/deployment require separate explicit authorization.
 
 Florent explicitly authorized autonomous commits, branches, PRs, merges and
 releases for the approved implementation scope on 2026-10-08. Verify required CI
-and request an actual CodeRabbit review on each final PR head before merging;
-a skipped review is not evidence. Production financial mutations, cleanup and
-deployment retain their separate explicit authorization gates.
+and a completed CodeRabbit review covering the exact final head SHA before merging.
+Record the review URL and reviewed SHA in Beads and the PR. Skipped, pending or
+rate-limited reviews are not evidence. Florent manages hourly review triggers
+externally; do not schedule or repeat them here. Production financial mutations,
+cleanup and deployment retain their separate explicit authorization gates.
