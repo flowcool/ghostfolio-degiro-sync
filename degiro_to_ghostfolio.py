@@ -430,6 +430,107 @@ def normalize_fees(snapshot, target_account, rules=None):
     return sorted(result, key=lambda activity: (activity["date"], activity["comment"]))
 
 
+def named_values(rows):
+    """Extract broker named fields without last-value-wins ambiguity."""
+    if not isinstance(rows, list):
+        raise RuntimeError("Invalid DEGIRO named cash fields")
+    result = {}
+    for row in rows:
+        if (not isinstance(row, dict) or not isinstance(row.get("name"), str)
+                or not row["name"] or row["name"] in result):
+            raise RuntimeError("Missing or duplicate DEGIRO named cash field")
+        # Optional accruedInterest is observed without a value key. Required
+        # monetary fields still fail financial_decimal(None), never become zero.
+        result[row["name"]] = row.get("value")
+    return result
+
+
+def current_cash_balance(snapshot, target_account, source_account, now=None):
+    """Validate the observed EUR current snapshot; aliases are cross-checks only."""
+    now = datetime.now(timezone.utc) if now is None else now
+    try:
+        if not isinstance(now, datetime) or now.utcoffset() is None:
+            raise RuntimeError("Cash validation requires an aware current time")
+        started = datetime.fromisoformat(broker_instant(snapshot["fetch_started_at"]))
+        fetched = datetime.fromisoformat(broker_instant(snapshot["fetched_at"]))
+        if not now - timedelta(minutes=5) <= started <= fetched <= now:
+            raise RuntimeError("DEGIRO cash snapshot is stale or has invalid timing")
+        if broker_identity(snapshot["source_account"]) != broker_identity(source_account):
+            raise RuntimeError("DEGIRO cash source account mismatch")
+        if (not isinstance(target_account, dict) or not isinstance(target_account.get("id"), str)
+                or not target_account["id"].strip()):
+            raise RuntimeError("Missing Ghostfolio cash target account")
+        currency = snapshot["account_info"]["baseCurrency"]
+        if currency != "EUR" or target_account.get("currency") != currency:
+            raise RuntimeError("Unverified or mismatched cash account currencies")
+        rules = load_cash_rules()
+        classified = classify_cash_movements(snapshot["cash_movements"], rules)
+        if any(classified[name] for name, rule in rules.items()
+               if rule.get("treatment") == "unsupported_blocking"):
+            raise RuntimeError("Unsupported DEGIRO cash category blocks account writes")
+        update = snapshot["update"]
+        total = named_values(update["totalPortfolio"]["value"])
+        balance = financial_decimal(total["totalCash"])
+        degiro = financial_decimal(total["degiroCash"])
+        flatex = financial_decimal(total["flatexCash"])
+        settlement = financial_decimal(total["pendingSettlement"])
+        if (balance < 0 or degiro != 0 or flatex != balance or degiro + flatex != balance
+                or settlement != 0 or balance % CURRENCY_QUANTA["EUR"] != 0):
+            raise RuntimeError("Unverified or inconsistent DEGIRO cash totals or settlement")
+        if "cryptoTotalCash" in total and financial_decimal(total["cryptoTotalCash"]) != balance:
+            raise RuntimeError("Conflicting DEGIRO cash alias")
+        funds = {}
+        fund_rows = update["cashFunds"]["value"]
+        if not isinstance(fund_rows, list):
+            raise RuntimeError("Invalid DEGIRO cash fund rows")
+        for row in fund_rows:
+            fields = named_values(row["value"])
+            code = fields["currencyCode"]
+            if (not isinstance(code, str) or not re.fullmatch(r"[A-Z]{3}", code)
+                    or code in funds):
+                raise RuntimeError("Invalid or duplicate DEGIRO cash fund currency")
+            funds[code] = financial_decimal(fields["value"])
+        if funds.get(currency) != balance or any(value != 0 for code, value in funds.items() if code != currency):
+            raise RuntimeError("DEGIRO cash funds disagree or contain foreign cash")
+        positions = update["portfolio"]["value"]
+        if not isinstance(positions, list) or any(not isinstance(row, dict) for row in positions):
+            raise RuntimeError("Invalid DEGIRO cash position rows")
+        cash_positions = set()
+        for row in positions:
+            identity = row.get("id")
+            if isinstance(identity, str) and identity.startswith("FLATEX_"):
+                fields = named_values(row["value"])
+                if identity in cash_positions or fields.get("id") != identity:
+                    raise RuntimeError("Conflicting DEGIRO cash pseudo-position identity")
+                cash_positions.add(identity)
+                if identity != "FLATEX_EUR" and financial_decimal(fields["size"]) != 0:
+                    raise RuntimeError("Unverified foreign DEGIRO cash pseudo-position")
+        matches = [row for row in positions if row.get("id") == "FLATEX_EUR"]
+        if len(matches) != 1:
+            raise RuntimeError("Missing or duplicate DEGIRO cash pseudo-position")
+        fields = named_values(matches[0]["value"])
+        if fields.get("id") != "FLATEX_EUR" or financial_decimal(fields["size"]) != balance:
+            raise RuntimeError("DEGIRO cash pseudo-position disagrees")
+        represented = float(balance)
+        if not isfinite(represented) or Decimal(str(represented)) != balance:
+            raise RuntimeError("DEGIRO cash balance cannot be represented safely")
+        return represented
+    except (KeyError, TypeError, AttributeError):
+        raise RuntimeError("Missing or malformed DEGIRO current cash evidence") from None
+
+
+def apply_cash_balance(snapshot, target_account, source_account, update_balance,
+                       dry_run=True, import_ok=False, uncertain=False, now=None):
+    """C11 binds the URL-validated writer; no callback runs without clean evidence."""
+    if type(dry_run) is not bool or type(uncertain) is not bool or import_ok is not True or uncertain:
+        raise RuntimeError("Ambiguous or unsuccessful account import blocks cash update")
+    balance = current_cash_balance(snapshot, target_account, source_account, now)
+    if not dry_run:
+        if not callable(update_balance) or update_balance(target_account["id"], balance) is not True:
+            raise RuntimeError("Ghostfolio cash update did not confirm success")
+    return balance
+
+
 def broker_credentials():
     """Construct the connector model exclusively from the process environment."""
     from degiro_connector.trading.models.credentials import Credentials

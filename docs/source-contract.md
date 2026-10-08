@@ -94,12 +94,39 @@ those fees; ambiguous commission-to-execution reconciliation blocks the account.
 is zero in this account. The EUR cash-fund value and `FLATEX_EUR` pseudo-position
 size both equal `totalCash`: these are cross-checks, not extra amounts to sum.
 Adding them would double-count cash. Other currencies are not converted silently.
+`cryptoTotalCash` also equals `totalCash` in the observed response and is an
+optional cross-check, not a new balance to add. Cash pseudo-positions include
+optional `accruedInterest` fields with no `value` key; required cash amount
+fields must still be present and numeric.
 
 The adapter records UTC fetch start/end timestamps separately from source
 `lastUpdated` values, whose units are not assumed. Only a fresh live snapshot with
 consistent wrappers and target currency equal to the broker base currency can
 drive a cash update. Historical overview balances cannot. Freshness, missing
 fields, conflicting duplicate names and account-currency mismatch remain guards.
+
+The current-cash adapter deliberately accepts only the observed EUR configuration:
+zero `degiroCash`, non-negative `totalCash` equal to `flatexCash`, exact cent units,
+zero pending settlement, one agreeing EUR cash fund and `FLATEX_EUR` position.
+Other fund currencies and FLATEX positions must be zero. Missing fields never
+become zero. A duplicate name/currency/position or conflicting optional alias
+blocks. Nonzero DEGIRO-held cash, negative cash and pending settlement need separate
+evidence before broadening this policy; no inferred settled-cash subtraction.
+
+The client fetch start/end must both fall within the previous five minutes and
+be ordered before the aware validation clock. This is a conservative operational
+freshness policy, not a documented broker guarantee or proof of source cache age.
+Saved snapshots cannot be replayed as fresh by using an old clock in operation.
+The diagnostic saved-shape check used its original fetch-time clock explicitly
+and is not current-cash acceptance.
+
+`apply_cash_balance` defaults to DRY_RUN and invokes its supplied writer only
+after strict successful-import evidence, no uncertainty and complete cash checks.
+An invalid flag, ambiguous/failed import, unknown ledger category or stale data
+blocks before any writer call. The callback is a functional boundary: the
+orchestrator owns target URL validation, complete active-context reconciliation,
+fresh target-account currency verification and binding the immutable core writer.
+This pure gate adds no Ghostfolio HTTP request and does not activate CLI writes.
 
 ## Trade normalization policy
 
