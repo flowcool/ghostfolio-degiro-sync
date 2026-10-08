@@ -81,6 +81,10 @@ These cash rows must not become separate FEE activities in addition to execution
 fees. Unknown signs/rates, refunds, multiple candidate matches or unsupported units
 remain fail-closed. Unobserved BUY/unit cases need validation in their owning gate.
 
+Standalone annual exchange fees follow the separately verified
+[FEE/MANUAL contract](fee-contract.md). Brokerage and AutoFX are excluded from
+those fees; ambiguous commission-to-execution reconciliation blocks the account.
+
 ## Current cash
 
 `account_info.data.baseCurrency` isEUR. `update` returns three named wrappers:
