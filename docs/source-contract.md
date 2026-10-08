@@ -1,7 +1,7 @@
 # Observed DEGIRO contract
 
 This extends the inspected connector contract in the approved plan. It describes
-read-only evidence from2026-10-08, not a guarantee of undocumented API behavior.
+read-only evidence from 2026-10-08, not a guarantee of undocumented API behavior.
 Private financial evidence stays outside Git. `cash-rules.yaml` owns repeated
 classification strings; unexpected categories or ambiguity always block writes.
 
@@ -35,8 +35,9 @@ the API's local offset timestamps (+01:00/+02:00), at minute precision; do not
 silently reinterpret them as UTC. Value date, descriptions, product ISIN and order
 reference agree. The CSV has UTF-8 bytes without a declared charset, so the
 transport explicitly validates UTF-8 and sets the decoding before connector use.
-Neutral sweep notices have no amount and blank CSV currency despite an API
-currency value. One trade differs by exactly one cent in the two cash views;
+Virement sweep annotations have no amount and blank CSV currency despite an API
+currency value. Degiro Cash Sweep Transfer rows carry signed amounts and CSV
+currency; they are cash-only movements, not nonfinancial notices. One trade differs by exactly one cent in the two cash views;
 unrounded execution price times absolute quantity lies within one cent of both.
 This is bounded display rounding evidence, not permission to hide arbitrary
 financial discrepancies. Financial event IDs/counts and semantic fields remain
@@ -95,3 +96,77 @@ The adapter records UTC fetch start/end timestamps separately from source
 consistent wrappers and target currency equal to the broker base currency can
 drive a cash update. Historical overview balances cannot. Freshness, missing
 fields, conflicting duplicate names and account-currency mismatch remain guards.
+
+## Trade normalization policy
+
+The pure adapter normalizes each execution independently using Decimal arithmetic.
+An explicit ISIN-to-Yahoo mapping and independently verified Yahoo quote currency
+are required inputs. Broker tickers never supply a fallback. Each comment is
+`DEGIRO#<source-account>:TRADE:<execution-id>`; reconciliation also keys by target
+account. Equal overlaps are retained once, while changed financial content under
+an existing identity blocks the batch. Separate fills retain separate identities.
+
+Only STOCK metadata with contract size 1 and characterized EUR/USD/JPY major
+currencies are currently accepted. ETF, derivative, transfer and minor-unit cases
+are blocked pending broker evidence. Price times signed quantity must reconstruct
+the signed total within one security-currency quantum. Both gross FX rates must
+reconstruct the base total within one base-currency quantum, with division from
+security to base. Same-currency rates must be 1. Brokerage and AutoFX must both
+be non-positive, and their sum must equal the total fee exactly. The activity fee
+is the negated total base fee multiplied once by `fxRate`; `nettFxRate` is unused.
+No refund clamping, automatic 100x scaling or hidden extra commission is applied.
+
+Source timestamps require an explicit UTC offset and are converted to the same
+instant in UTC, including local-to-UTC calendar-day shifts. JSON numbers are
+finite; malformed financial input errors never include the original value.
+
+The holdings guard consumes normalized activities and a complete, active target
+snapshot supplied by future orchestration. An already imported execution must
+match canonical financial content and is excluded from pending holdings changes.
+Only the same target account and Yahoo symbol contribute to the holding baseline.
+Pending executions are applied chronologically with no quantity epsilon; any
+negative position blocks the batch. A nearby manual trade of the same account,
+symbol and side blocks explicit reconciliation, regardless of quantity. Date
+proximity never creates a broker identity or silently suppresses an execution.
+The guard is conservative: missing opening holdings and buys already represented
+in a later current baseline can require operator reconciliation.
+
+Offline regressions cover these boundaries with synthetic data. A separate local
+arithmetic characterization against the existing private snapshot accepted all
+three observed executions, using placeholder symbols and source currencies. It
+made no network requests and does not establish Yahoo mapping validity, history
+completeness, or authorization for import.
+
+## Paid dividend normalization policy
+
+Cash classification checks the complete ledger before constructing a dividend.
+Reviewed YAML rules must match exactly one category, with validated row identities,
+offset timestamps, required relations, financial signs and currencies. Equal
+cash overlap rows may differ only in the window-derived balance.
+
+`cash_sweep_annotation` describes Virement rows with null amounts and blank CSV
+movement/currency fields. `cash_sweep_transfer` describes signed Degiro Cash Sweep
+Transfer movements, which stay cash-only. These keys correct the initial inverted
+neutral-sweep interpretation. Any future annotation with a financial amount blocks
+classification. Observed zero-valued Flatex interest is still recognized as an
+unsupported account-level blocker; zero is not an exemption from Florent's policy.
+
+A dividend and withholding must form a unique group on product, currency and exact
+offset-aware payment/value-date instants. Multiple same-day payments at different
+instants remain separate. Missing tax, isolated tax, multiple candidates, new
+relation fields, reversal signs and mixed-currency tax block the batch. Untaxed
+payments need separate broker evidence before relaxing the missing-tax guard.
+Withholding must not exceed the gross payment.
+
+The activity uses the gross paid amount as unitPrice, quantity 1 and the positive
+linked withholding as fee, all in the verified instrument/Yahoo quote currency.
+The comment is `DEGIRO#<source-account>:DIVIDEND:<payment-row-id>`; target account
+remains part of the eventual dedup key. Current holdings, partial sales and upcoming
+payments never enter this calculation. STOCK/unit/currency restrictions match the
+trade gate; no amount or tax conversion is inferred for unsupported instruments.
+A successful pure conversion does not override history, fee, cash or live-write gates.
+
+The local immutable statement characterization now classifies all 88 movements and
+finds the 10 observed unique dividend/withholding pairs without network requests.
+Normalizing that full snapshot still fails at the preserved unsupported-category
+account gate. Synthetic tests own regression coverage; private data stays off Git.

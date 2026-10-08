@@ -4,6 +4,8 @@
 import argparse
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
+from math import isfinite
 import json
 import logging
 import os
@@ -12,6 +14,7 @@ import re
 from urllib.parse import urlsplit
 
 import requests
+import yaml
 
 import ghostfolio_core as core
 
@@ -33,6 +36,339 @@ BROKER_PATHS = {
             r"/trading/secure/v5/update/[0-9]+;jsessionid=[^/]+"),
     "PUT": (r"/trading/secure/logout;jsessionid=[^/]+",),
 }
+
+
+# Deliberately limited to the characterized major currencies. Minor quotes
+# require separate broker evidence; an IBKR suffix rule is not DEGIRO evidence.
+CURRENCY_QUANTA = {"EUR": Decimal("0.01"), "USD": Decimal("0.01"), "JPY": Decimal("1")}
+TRADE_FIELDS = ("accountId", "comment", "currency", "dataSource", "date", "fee",
+                "quantity", "symbol", "type", "unitPrice")
+
+
+def financial_decimal(value):
+    """Reject absent, boolean and non-finite financial values without echoing data."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str, Decimal)):
+        raise RuntimeError("Invalid financial value")
+    try:
+        result = Decimal(str(value))
+    except InvalidOperation:
+        raise RuntimeError("Invalid financial value") from None
+    if not result.is_finite() or (result and not -300 < result.adjusted() < 16):
+        raise RuntimeError("Invalid financial value")
+    return result
+
+
+def broker_identity(value):
+    if (isinstance(value, bool) or not isinstance(value, (int, str))
+            or not re.fullmatch(r"[1-9][0-9]*", str(value))):
+        raise RuntimeError("Invalid DEGIRO identity")
+    return str(value)
+
+
+def execution_comment(source_account, execution_id):
+    return f"DEGIRO#{broker_identity(source_account)}:TRADE:{broker_identity(execution_id)}"
+
+
+def broker_instant(value):
+    try:
+        parsed = datetime.fromisoformat(value) if isinstance(value, str) else None
+    except ValueError:
+        parsed = None
+    if parsed is None or parsed.utcoffset() is None:
+        raise RuntimeError("DEGIRO timestamp requires an explicit offset")
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
+def valid_isin(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{9}[0-9]", value):
+        return False
+    digits = "".join(str(ord(char) - 55) if char.isalpha() else char for char in value)
+    total = 0
+    for index, char in enumerate(reversed(digits)):
+        number = int(char) * (2 if index % 2 else 1)
+        total += number // 10 + number % 10
+    return total % 10 == 0
+
+
+def convert_trade_to_activity(trade, product, source_account, target_account,
+                              base_currency, mapping, quote_currencies):
+    """Normalize one execution; no ticker fallback, unit inference or fee clamping."""
+    if not isinstance(trade, dict) or not isinstance(product, dict):
+        raise RuntimeError("Invalid DEGIRO execution metadata")
+    if not isinstance(target_account, str) or not target_account.strip():
+        raise RuntimeError("Missing Ghostfolio target account")
+    comment = execution_comment(source_account, trade.get("id"))
+    product_id = broker_identity(trade.get("productId"))
+    if broker_identity(product.get("id")) != product_id:
+        raise RuntimeError("DEGIRO product identity mismatch")
+    if product.get("productType") != "STOCK" or financial_decimal(product.get("contractSize")) != 1:
+        raise RuntimeError("Unverified DEGIRO instrument units")
+    if trade.get("transfered") not in (None, False):
+        raise RuntimeError("DEGIRO transfer execution is unsupported")
+    isin = product.get("isin")
+    if not valid_isin(isin):
+        raise RuntimeError("Invalid DEGIRO product ISIN")
+    symbol = mapping.get(isin)
+    if not isinstance(symbol, str) or not symbol.strip() or symbol != symbol.strip():
+        raise RuntimeError("DEGIRO ISIN requires an explicit Yahoo mapping")
+    currency = product.get("currency")
+    if currency not in CURRENCY_QUANTA or base_currency not in CURRENCY_QUANTA:
+        raise RuntimeError("Unverified DEGIRO currency units")
+    if quote_currencies.get(symbol) != currency:
+        raise RuntimeError("Unverified or conflicting Yahoo quote units")
+    side = trade.get("buysell")
+    quantity = financial_decimal(trade.get("quantity"))
+    price = financial_decimal(trade.get("price"))
+    total = financial_decimal(trade.get("total"))
+    base_total = financial_decimal(trade.get("totalInBaseCurrency"))
+    if (side not in ("B", "S") or not quantity or price <= 0
+            or (side == "B" and (quantity <= 0 or total >= 0 or base_total >= 0))
+            or (side == "S" and (quantity >= 0 or total <= 0 or base_total <= 0))):
+        raise RuntimeError("Inconsistent DEGIRO execution side or signs")
+    if abs(total + quantity * price) > CURRENCY_QUANTA[currency]:
+        raise RuntimeError("DEGIRO execution total does not match price and quantity")
+    fx = financial_decimal(trade.get("fxRate"))
+    gross_fx = financial_decimal(trade.get("grossFxRate"))
+    if fx <= 0 or gross_fx <= 0:
+        raise RuntimeError("Invalid DEGIRO FX rate")
+    if currency == base_currency and (fx != 1 or gross_fx != 1):
+        raise RuntimeError("Unexpected same-currency DEGIRO FX rate")
+    if any(abs(total / rate - base_total) > CURRENCY_QUANTA[base_currency]
+           for rate in (fx, gross_fx)):
+        raise RuntimeError("DEGIRO FX direction or base total is inconsistent")
+    brokerage = financial_decimal(trade.get("feeInBaseCurrency"))
+    autofx = financial_decimal(trade.get("autoFxFeeInBaseCurrency"))
+    fees = financial_decimal(trade.get("totalFeesInBaseCurrency"))
+    if any(value > 0 for value in (brokerage, autofx, fees)) or fees != brokerage + autofx:
+        raise RuntimeError("Inconsistent DEGIRO execution fees")
+    for field, expected in (("totalPlusFeeInBaseCurrency", base_total + brokerage),
+                            ("totalPlusAllFeesInBaseCurrency", base_total + fees)):
+        if field in trade and abs(financial_decimal(trade[field]) - expected) > CURRENCY_QUANTA[base_currency]:
+            raise RuntimeError("Inconsistent DEGIRO net execution total")
+    activity = {"accountId": target_account, "comment": comment, "currency": currency,
+                "dataSource": "YAHOO", "date": broker_instant(trade.get("date")),
+                "fee": float(-fees * fx), "quantity": float(abs(quantity)), "symbol": symbol,
+                "type": "BUY" if side == "B" else "SELL", "unitPrice": float(price)}
+    if any(not isfinite(activity[field]) or (activity[field] == 0 and value != 0)
+           for field, value in (("fee", fees), ("quantity", quantity), ("unitPrice", price))):
+        raise RuntimeError("DEGIRO execution cannot be represented safely")
+    return activity
+
+
+def normalize_trades(snapshot, target_account, mapping, quote_currencies):
+    """Keep individual fills and reject conflicting duplicate execution identities."""
+    rows = []
+    merge_history(rows, snapshot["transactions"])
+    result = []
+    for trade in rows:
+        product_id = broker_identity(trade.get("productId"))
+        product = snapshot["products"].get(product_id)
+        result.append(convert_trade_to_activity(trade, product, snapshot["source_account"],
+            target_account, snapshot["account_info"]["baseCurrency"], mapping, quote_currencies))
+    return sorted(result, key=lambda activity: (activity["date"], activity["comment"]))
+
+
+def trade_signature(activity):
+    """Compare canonical financial content independently of server IDs/metadata."""
+    try:
+        values = dict(activity)
+        values["date"] = broker_instant(values["date"])
+        for field in ("fee", "quantity", "unitPrice"):
+            values[field] = financial_decimal(values[field])
+        if (values["type"] not in ("BUY", "SELL") or values["dataSource"] != "YAHOO"
+                or values["quantity"] <= 0 or values["unitPrice"] <= 0 or values["fee"] < 0):
+            raise RuntimeError("Invalid existing Ghostfolio trade")
+        return tuple(values[field] for field in TRADE_FIELDS)
+    except (KeyError, TypeError, ValueError):
+        raise RuntimeError("Invalid existing Ghostfolio trade") from None
+
+
+def reconcile_trade_holdings(activities, existing, quantities):
+    """Pure account/symbol guard; manual overlap needs explicit reconciliation.
+
+    Existing contains active target activities; quantities is the active holding
+    baseline keyed by (target account, Yahoo symbol). Future orchestration owns
+    the complete/redaction-checked read, never this pure function.
+    """
+    identities = {}
+    manual = []
+    for activity in existing:
+        key = (activity.get("accountId"), activity.get("comment"))
+        if isinstance(key[1], str) and re.fullmatch(r"DEGIRO#[1-9][0-9]*:TRADE:[1-9][0-9]*", key[1]):
+            signature = trade_signature(activity)
+            if key in identities and identities[key] != signature:
+                raise RuntimeError("Conflicting existing DEGIRO identity")
+            if key in identities:
+                raise RuntimeError("Duplicate existing DEGIRO identity")
+            identities[key] = signature
+        elif activity.get("type") in ("BUY", "SELL"):
+            manual.append(activity)
+    balances = {key: financial_decimal(value) for key, value in quantities.items()}
+    pending = []
+    seen = {}
+    for activity in sorted(activities, key=lambda item: (broker_instant(item["date"]), item["comment"])):
+        key = (activity["accountId"], activity["comment"])
+        signature = trade_signature(activity)
+        if key in seen:
+            if seen[key] != signature:
+                raise RuntimeError("Conflicting pending DEGIRO identity")
+            continue
+        seen[key] = signature
+        if key in identities:
+            if identities[key] != signature:
+                raise RuntimeError("Existing DEGIRO identity changed financial content")
+            continue
+        # Proximity is a blocker, never evidence that two executions are equal.
+        for candidate in manual:
+            if (candidate.get("accountId"), candidate.get("symbol"), candidate.get("type")) != (
+                    activity["accountId"], activity["symbol"], activity["type"]):
+                continue
+            gap = abs((datetime.fromisoformat(broker_instant(candidate.get("date"))).date()
+                       - datetime.fromisoformat(activity["date"]).date()).days)
+            if gap <= 2:
+                raise RuntimeError("Manual Ghostfolio trade requires explicit reconciliation")
+        holding_key = (activity["accountId"], activity["symbol"])
+        quantity = financial_decimal(activity["quantity"])
+        balances[holding_key] = balances.get(holding_key, Decimal(0)) + (
+            quantity if activity["type"] == "BUY" else -quantity)
+        if balances[holding_key] < 0:
+            raise RuntimeError("DEGIRO trades would create a negative target holding")
+        pending.append(activity)
+    return pending
+
+
+def load_cash_rules(path=None):
+    """Read the reviewed local taxonomy; malformed rules never broaden matching."""
+    path = Path(path) if path is not None else Path(__file__).with_name("cash-rules.yaml")
+    try:
+        document = yaml.safe_load(path.read_text())
+        rules = document["rules"]
+        if document["format"] != 1 or not isinstance(rules, dict) or not rules:
+            raise ValueError
+        for name, rule in rules.items():
+            if not isinstance(name, str) or not isinstance(rule, dict):
+                raise ValueError
+            if not isinstance(rule.get("type"), str) or not rule["type"]:
+                raise ValueError
+            descriptions = [key for key in ("description_exact", "description_pattern") if key in rule]
+            if len(descriptions) != 1 or not isinstance(rule[descriptions[0]], str):
+                raise ValueError
+            if "description_pattern" in rule:
+                pattern = rule["description_pattern"]
+                if not pattern.startswith("^") or not pattern.endswith("$"):
+                    raise ValueError
+                re.compile(pattern)
+            if rule.get("sign") not in (None, "positive", "negative"):
+                raise ValueError
+            for flag in ("product_required", "order_required"):
+                if flag in rule and type(rule[flag]) is not bool:
+                    raise ValueError
+    except (OSError, ValueError, TypeError, KeyError, yaml.YAMLError, re.error):
+        raise RuntimeError("Invalid DEGIRO cash rules") from None
+    return rules
+
+
+def classify_cash_movements(rows, rules=None):
+    """Classify the entire ledger; preserve row identity and reject ambiguity."""
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise RuntimeError("Invalid DEGIRO cash ledger")
+    rules = load_cash_rules() if rules is None else rules
+    unique = []
+    merge_history(unique, rows, cash=True)
+    result = {name: [] for name in rules}
+    for row in unique:
+        broker_identity(row.get("id"))
+        broker_instant(row.get("date"))
+        description = row.get("description")
+        if not isinstance(description, str):
+            raise RuntimeError("Invalid DEGIRO cash description")
+        matches = [name for name, rule in rules.items() if row.get("type") == rule["type"] and
+                   (description == rule["description_exact"] if "description_exact" in rule else
+                    re.fullmatch(rule["description_pattern"], description))]
+        if len(matches) != 1:
+            raise RuntimeError("Unknown or ambiguous DEGIRO cash category")
+        name = matches[0]
+        rule = rules[name]
+        if rule.get("treatment") == "nonfinancial_notice":
+            if row.get("change") is not None:
+                raise RuntimeError("DEGIRO cash notice unexpectedly contains an amount")
+        else:
+            amount = financial_decimal(row.get("change"))
+            currency = row.get("currency")
+            if not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency):
+                raise RuntimeError("Invalid DEGIRO cash currency")
+            broker_instant(row.get("valueDate"))
+            if ((not amount and rule.get("treatment") != "unsupported_blocking")
+                    or (rule.get("sign") == "positive" and amount <= 0)
+                    or (rule.get("sign") == "negative" and amount >= 0)):
+                raise RuntimeError("Unsupported DEGIRO cash sign or reversal")
+        if rule.get("product_required"):
+            broker_identity(row.get("productId"))
+        if rule.get("order_required") and (
+                not isinstance(row.get("orderId"), str) or not row["orderId"].strip()):
+            raise RuntimeError("Missing DEGIRO cash order relation")
+        result[name].append(row)
+    return result
+
+
+def associate_dividends(classified):
+    """One observed payment and one withholding per exact association group."""
+    groups = {}
+    for category in ("paid_dividend", "dividend_withholding"):
+        for row in classified.get(category, []):
+            if row.get("orderId") not in (None, ""):
+                raise RuntimeError("Unverified DEGIRO dividend relation")
+            key = (broker_identity(row.get("productId")), row["currency"],
+                   broker_instant(row.get("date")), broker_instant(row.get("valueDate")))
+            groups.setdefault(key, {"paid_dividend": [], "dividend_withholding": []})[category].append(row)
+    pairs = []
+    for group in groups.values():
+        if len(group["paid_dividend"]) != 1 or len(group["dividend_withholding"]) != 1:
+            raise RuntimeError("Ambiguous or unverified DEGIRO dividend withholding")
+        dividend = group["paid_dividend"][0]
+        withholding = group["dividend_withholding"][0]
+        if -financial_decimal(withholding["change"]) > financial_decimal(dividend["change"]):
+            raise RuntimeError("DEGIRO withholding exceeds gross payment")
+        pairs.append((dividend, withholding))
+    return pairs
+
+
+def normalize_dividends(snapshot, target_account, mapping, quote_currencies, rules=None):
+    """Import paid cash amounts independently of current or historical holdings."""
+    rules = load_cash_rules() if rules is None else rules
+    classified = classify_cash_movements(snapshot["cash_movements"], rules)
+    if any(classified[name] for name, rule in rules.items()
+           if rule.get("treatment") == "unsupported_blocking"):
+        raise RuntimeError("Unsupported DEGIRO cash category blocks account writes")
+    if not isinstance(target_account, str) or not target_account.strip():
+        raise RuntimeError("Missing Ghostfolio target account")
+    result = []
+    for dividend, withholding in associate_dividends(classified):
+        product_id = broker_identity(dividend["productId"])
+        product = snapshot["products"].get(product_id)
+        if (not isinstance(product, dict) or broker_identity(product.get("id")) != product_id
+                or product.get("productType") != "STOCK"
+                or financial_decimal(product.get("contractSize")) != 1):
+            raise RuntimeError("Unverified DEGIRO dividend instrument")
+        isin = product.get("isin")
+        if not valid_isin(isin):
+            raise RuntimeError("Invalid DEGIRO dividend ISIN")
+        symbol = mapping.get(isin)
+        if not isinstance(symbol, str) or not symbol.strip() or symbol != symbol.strip():
+            raise RuntimeError("DEGIRO dividend requires an explicit Yahoo mapping")
+        currency = dividend["currency"]
+        if (currency not in CURRENCY_QUANTA or product.get("currency") != currency
+                or quote_currencies.get(symbol) != currency):
+            raise RuntimeError("Unverified DEGIRO dividend currency or quote units")
+        gross = float(financial_decimal(dividend["change"]))
+        tax = float(-financial_decimal(withholding["change"]))
+        if not isfinite(gross) or gross <= 0 or not isfinite(tax) or tax <= 0:
+            raise RuntimeError("DEGIRO dividend cannot be represented safely")
+        result.append({"accountId": target_account,
+            "comment": f"DEGIRO#{broker_identity(snapshot['source_account'])}:DIVIDEND:{broker_identity(dividend['id'])}",
+            "currency": currency, "dataSource": "YAHOO", "date": broker_instant(dividend["date"]),
+            "fee": tax, "quantity": 1, "symbol": symbol, "type": "DIVIDEND", "unitPrice": gross})
+    return sorted(result, key=lambda activity: (activity["date"], activity["comment"]))
 
 
 def broker_credentials():
