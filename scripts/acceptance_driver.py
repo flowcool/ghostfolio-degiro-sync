@@ -139,10 +139,13 @@ def main():
         assert 'cash blocked' in str(error)
     config.pop('_uncertain_import_accounts', None)
     print('Stage: checking unresolved readback', flush=True)
+    with adapter.account_journal(config) as journal:
+        delayed_intent_id = journal['document']['pending']['id']
+        previous_intent_id = next(iter(journal['document']['resolved']))
     before = call('GET', '/api/v1/activities')
     assert before['count'] == 4
     try:
-        adapter.resolve_import_intent(config, before)
+        adapter.resolve_import_intent(config, before, expected_intent_id=delayed_intent_id)
         raise AssertionError('Empty pending readback resolved delayed insertion')
     except RuntimeError:
         pass
@@ -158,10 +161,16 @@ def main():
         time.sleep(.2)
     else:
         raise RuntimeError('Released delayed insertion did not finish')
-    assert adapter.resolve_import_intent(config, after) == 1
+    try:
+        adapter.resolve_import_intent(config, after, expected_intent_id=previous_intent_id)
+        raise AssertionError('Prior request selection resolved a later intent')
+    except RuntimeError as error:
+        assert str(error) == 'Synchronization intent identity changed'
+    assert_restart_fenced(config, 'import')
+    assert adapter.resolve_import_intent(config, after, expected_intent_id=delayed_intent_id) == 1
     assert synchronize(delayed, config)['proposed'] == []
     assert call('GET', '/api/v1/activities')['count'] == 5
-    print('PASS delayed insertion: timeout then empty GET;restart no replay;release creates exactly1;positive readback resolves;repeat zero imports', flush=True)
+    print('PASS delayed insertion: timeout then empty GET;restart no replay;release creates exactly1;old request ID refused;selected positive readback resolves;repeat zero imports', flush=True)
 
     csv_account = call('POST', '/api/v1/account', {'name': 'Synthetic CSV overlap',
         'currency': 'EUR', 'balance': 0, 'platformId': None}, 201)
@@ -201,12 +210,15 @@ def main():
         raise AssertionError('Unresolved symbol falsely succeeded')
     except RuntimeError as error:
         assert 'cash blocked' in str(error)
+    with adapter.account_journal(unresolved_config) as journal:
+        unresolved_intent_id = journal['document']['pending']['id']
     incomplete = call('GET', '/api/v1/activities')
     owned = [row for row in incomplete['activities'] if row['accountId'] == unresolved_account['id']]
     assert len(owned) == 1 and owned[0]['type'] == 'FEE'
     assert call('GET', '/api/v1/account/' + unresolved_account['id'])['balance'] == 0
     try:
-        adapter.resolve_import_intent(unresolved_config, incomplete)
+        adapter.resolve_import_intent(unresolved_config, incomplete,
+            expected_intent_id=unresolved_intent_id)
         raise AssertionError('Partial symbol retry cleared durable intent')
     except RuntimeError:
         pass
@@ -246,6 +258,8 @@ def main():
         raise AssertionError('Partial import did not time out')
     except RuntimeError as error:
         assert 'cash blocked' in str(error)
+    with adapter.account_journal(partial_config) as journal:
+        partial_intent_id = journal['document']['pending']['id']
     partial_before = call('GET', '/api/v1/activities')
     partial_rows = [row for row in partial_before['activities'] if row['accountId'] == partial_account['id']]
     assert len(partial_rows) == 1 and partial_rows[0]['comment'] == 'DEGIRO#901:FEE:1001'
@@ -256,7 +270,8 @@ def main():
     assert partial_after['count'] == partial_before['count']
     assert [row for row in partial_after['activities'] if row['accountId'] == partial_account['id']] == partial_rows
     try:
-        adapter.resolve_import_intent(partial_config, partial_after)
+        adapter.resolve_import_intent(partial_config, partial_after,
+            expected_intent_id=partial_intent_id)
         raise AssertionError('Partial cancellation silently cleared intent')
     except RuntimeError:
         pass

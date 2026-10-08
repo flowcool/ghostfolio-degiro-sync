@@ -851,13 +851,18 @@ def confirm_intent(journal, identity):
     write_journal(journal)
 
 
-def resolve_import_intent(config, existing_body):
-    """Explicit positive readback only; empty/partial evidence never clears state."""
+def resolve_import_intent(config, existing_body, *, expected_intent_id):
+    """Resolve one explicitly selected request using complete positive readback."""
+    if (not isinstance(expected_intent_id, str)
+            or not re.fullmatch(r"[0-9a-f]{32}", expected_intent_id)):
+        raise RuntimeError("Invalid expected synchronization intent identity")
     with account_journal(config) as journal:
         pending = journal["document"]["pending"]
         if (not isinstance(pending, dict) or pending.get("kind") != "import"
                 or not isinstance(pending.get("payload"), dict) or not pending["payload"]):
             raise RuntimeError("No recoverable pending import intent")
+        if pending.get("id") != expected_intent_id:
+            raise RuntimeError("Synchronization intent identity changed")
         target = {"id": config["target_account"]}
         rows, _ = existing_activity_context(existing_body, target)
         candidates = list(pending["payload"].values())
@@ -865,7 +870,7 @@ def resolve_import_intent(config, existing_body):
                 for identity, row in pending["payload"].items())
                 or pending_activities(candidates, rows, target, config["source_account"])):
             raise RuntimeError("Complete exact positive readback required for recovery")
-        confirm_intent(journal, pending["id"])
+        confirm_intent(journal, expected_intent_id)
         return len(candidates)
 
 

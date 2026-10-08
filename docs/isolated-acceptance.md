@@ -41,7 +41,7 @@ quote currency, live broker data or market-price performance.
 | Repeated full sync | No proposed/imported rows; stored count remains4 |
 | Uncertain delayed INSERT | PostgreSQL BEFORE INSERT trigger blocks owned FEE999 on an advisory lock; HTTP times out; complete GET still contains only4 rows |
 | New Python process before release | Reads persisted intent and refuses synchronization; empty pending readback refuses resolution; no replay |
-| Release owned barrier | Native original request inserts exactly one row; complete count5; exact positive readback resolves stored intent; repeated fee sync imports zero |
+| Release owned barrier | Native original request inserts exactly one row; complete count5; old request ID refuses even with positive readback and fresh process remains fenced; exact positive readback with selected pending request ID resolves it; repeated fee sync imports zero |
 | CSV-shaped unmarked SELL in another seeded lab account | API preflight diagnoses manual/CSV overlap; zero added activities and balance stays0 |
 | Unresolvable Yahoo symbol in a synthetic BUY batch | Native HTTP400 permits core's recognized-symbol retry; only resolvable FEE stored; incomplete readback cannot resolve intent; no cash write |
 | Cleanup preflight over actual readback | Selects exactly3 manifest-owned canonical IDs, excludes opening/manual/foreign context, performs no DELETE |

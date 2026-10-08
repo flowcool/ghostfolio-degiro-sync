@@ -37,7 +37,7 @@ is provided.
 
 ## Explicit positive import readback
 
-`resolve_import_intent(config, existing_body)` is an operator/helper boundary,
+`resolve_import_intent(config, existing_body, expected_intent_id=...)` is an operator/helper boundary,
 not an automatic CLI retry. It performs no HTTP or financial mutation. Under the
 same lock it requires a complete unredacted current activity snapshot and proves
 every pending canonical identity exists exactly once in the configured target,
@@ -45,6 +45,11 @@ with unchanged symbol, source, UTC instant and all financial fields. Foreign
 ownership, changed mapping, redaction, malformed counts, duplicate rows and
 partial/empty evidence refuse resolution. A confirmed response resolves only
 that stored request; normal fresh preflight still gates later synchronization.
+The expected request ID is mandatory and checked against the pending intent under
+the same owner lock. Select it before obtaining readback and retain it throughout
+recovery; do not substitute whichever ID is pending afterward. A stale request ID
+cannot resolve a successor, even when its activity payload is identical. This
+selection guard does not authenticate a saved snapshot or prove its freshness.
 
 Never supply a fabricated or stale snapshot to release a financial gate. A future
 operator command must obtain complete authenticated readback from the pinned

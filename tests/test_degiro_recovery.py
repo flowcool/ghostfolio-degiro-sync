@@ -94,16 +94,52 @@ def test_insufficient_readback_never_clears_pending(config, snapshot, evidence):
         rows[0]['quantity'] = None
     body = {'activities': rows, 'count': len(rows) + (1 if evidence == 'count' else 0)}
     with pytest.raises(RuntimeError):
-        adapter.resolve_import_intent(config, body)
+        adapter.resolve_import_intent(config, body, expected_intent_id=intent['id'])
     assert document(config)['pending'] == intent
 
 
 def test_complete_positive_readback_explicitly_resolves_without_replay(config, snapshot):
     intent = pending_import(config, snapshot)
     rows = [activity_row(a, str(i)) for i, a in enumerate(intent['payload'].values())]
-    assert adapter.resolve_import_intent(config, {'activities': rows, 'count': len(rows)}) == 2
+    assert adapter.resolve_import_intent(config, {'activities': rows, 'count': len(rows)},
+        expected_intent_id=intent['id']) == 2
     state = document(config)
     assert state['pending'] is None and intent['id'] in state['resolved']
+
+
+@pytest.mark.parametrize('identity', [None, True, 123, '', 'old-id', 'a' * 31, 'a' * 33, 'A' * 32])
+def test_invalid_expected_request_identity_preserves_journal(config, snapshot, identity):
+    pending_import(config, snapshot)
+    path = next(Path(config['state_dir']).glob('*.yaml'))
+    before = path.read_bytes()
+    with pytest.raises(RuntimeError, match='Invalid expected'):
+        adapter.resolve_import_intent(config, {}, expected_intent_id=identity)
+    assert path.read_bytes() == before
+
+
+def test_request_selection_is_mandatory(config, snapshot):
+    intent = pending_import(config, snapshot)
+    with pytest.raises(TypeError):
+        adapter.resolve_import_intent(config, {'activities': [], 'count': 0})
+    assert document(config)['pending'] == intent
+
+
+def test_old_request_proof_cannot_resolve_successor_with_same_payload(config, snapshot):
+    intent = pending_import(config, snapshot)
+    rows = [activity_row(a, str(i)) for i, a in enumerate(intent['payload'].values())]
+    body = {'activities': rows, 'count': len(rows)}
+    assert adapter.resolve_import_intent(config, body, expected_intent_id=intent['id']) == 2
+    # Simulate a later separately authorized request, preserving identical DTOs.
+    with adapter.account_journal(config) as journal:
+        successor = adapter.begin_intent(journal, 'import', deepcopy(intent['payload']))
+        path = journal['path']
+    before = path.read_bytes()
+    with pytest.raises(RuntimeError, match='identity changed'):
+        adapter.resolve_import_intent(config, body, expected_intent_id=intent['id'])
+    assert path.read_bytes() == before
+    assert document(config)['pending']['id'] == successor
+    with pytest.raises(RuntimeError, match='durable write intent'):
+        synchronize(config, snapshot, lambda *args: pytest.fail('Successor replayed'))
 
 
 def test_cash_response_loss_also_survives_restart(config, snapshot):
@@ -117,7 +153,8 @@ def test_cash_response_loss_also_survives_restart(config, snapshot):
     with pytest.raises(RuntimeError, match='durable write intent'):
         synchronize(deepcopy(config), snapshot, lambda *args: pytest.fail('Cash uncertainty replay'))
     with pytest.raises(RuntimeError, match='No recoverable'):
-        adapter.resolve_import_intent(config, {'activities': [], 'count': 0})
+        adapter.resolve_import_intent(config, {'activities': [], 'count': 0},
+            expected_intent_id=document(config)['pending']['id'])
 
 
 def test_journal_write_failure_prevents_dispatch(config, snapshot, monkeypatch):
