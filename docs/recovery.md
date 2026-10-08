@@ -8,8 +8,10 @@ before broker login. Deleting state, replacing it with tmpfs or changing the
 configured origin can discard recovery evidence; none is a recovery procedure.
 Keep origin/source/target stable and retain the directory in backups.
 
-The adapter hashes the exact approved origin, source and destination into the
-account filenames. Its exclusive nonblocking file lock covers live source/target
+The adapter hashes the exact approved origin and destination into the account
+filenames, and records source ownership inside the journal. Changing broker source
+cannot create an independent lock for the same destination or replace its owner.
+Its exclusive nonblocking file lock covers live source/target
 reads and dispatch. Separate invocations using the same directory cannot overlap.
 All independent instances targeting that account must share this state; a local
 file lock is not a distributed lock across different volumes or machines.
@@ -44,8 +46,9 @@ that stored request; normal fresh preflight still gates later synchronization.
 Never supply a fabricated or stale snapshot to release a financial gate. A future
 operator command must obtain complete authenticated readback from the pinned
 origin under the same operational controls. Recovery is currently exercised in
-offline regressions; disposable full-server delayed-result/restart evidence is a
-separate acceptance requirement.
+offline regressions and the [disposable full-server delayed-result/restart
+scenario](isolated-acceptance.md). Production completion/cancellation proof
+remains separate.
 
 Cash intents have no automatic resolver. Matching current balance alone cannot
 prove the old PUT finished or was independently cancelled. Partial/absent import

@@ -722,6 +722,34 @@ def pending_activities(activities, existing, target_account, source_account):
     return result
 
 
+def cleanup_preflight(existing_body, manifest):
+    """Select exact proved broker IDs only; never perform or authorize deletion."""
+    if (not isinstance(manifest, dict) or set(manifest) != {"source_account", "target_account", "activities"}
+            or not isinstance(manifest["activities"], dict) or not manifest["activities"]):
+        raise RuntimeError("Invalid DEGIRO cleanup manifest")
+    source = broker_identity(manifest["source_account"])
+    target = manifest["target_account"]
+    if not isinstance(target, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", target):
+        raise RuntimeError("Invalid cleanup target account")
+    namespace = f"DEGIRO#{source}:"
+    activities = list(manifest["activities"].values())
+    for identity, activity in manifest["activities"].items():
+        if (not isinstance(identity, str) or not isinstance(activity, dict) or set(activity) != set(TRADE_FIELDS)
+                or activity.get("accountId") != target or activity.get("comment") != identity
+                or not re.fullmatch(re.escape(namespace) + r"(TRADE|DIVIDEND|FEE):[1-9][0-9]*", identity)):
+            raise RuntimeError("Unproved cleanup broker ownership")
+        activity_signature(activity)
+    rows, _ = existing_activity_context(existing_body, {"id": target})
+    if pending_activities(activities, rows, {"id": target}, source):
+        raise RuntimeError("Cleanup requires complete exact positive activity evidence")
+    selected = {row["comment"]: row["id"] for row in rows
+                if row.get("accountId") == target and row.get("comment") in manifest["activities"]}
+    snapshot_hash = hashlib.sha256(json.dumps(existing_body, sort_keys=True,
+        separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+    return {"source_account": source, "target_account": target,
+            "activity_ids": selected, "snapshot_sha256": snapshot_hash}
+
+
 def write_journal(journal):
     """Replace private state atomically, flushing both file and directory."""
     content = yaml.safe_dump(journal["document"], sort_keys=True)
@@ -765,7 +793,9 @@ def account_journal(config):
              "source": broker_identity(config.get("source_account")), "target": config.get("target_account")}
     if not isinstance(owner["target"], str) or not re.fullmatch(r"[A-Za-z0-9_-]+", owner["target"]):
         raise RuntimeError("Invalid journal account ownership")
-    key = hashlib.sha256(json.dumps(owner, sort_keys=True).encode()).hexdigest()
+    # Serialize by destination even if a second broker source is misconfigured.
+    key = hashlib.sha256(json.dumps({"host": owner["host"], "target": owner["target"]},
+        sort_keys=True).encode()).hexdigest()
     descriptor = os.open(directory / (key + ".lock"), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         private_state_file(descriptor)

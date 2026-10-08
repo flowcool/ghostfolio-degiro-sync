@@ -137,7 +137,8 @@ def test_oversized_intent_never_replaces_readable_journal(config):
         assert journal['path'].read_bytes() == previous
 
 
-def test_lock_refuses_another_process(config):
+@pytest.mark.parametrize('other_source', [False, True])
+def test_lock_refuses_another_process(config, other_source):
     script = '''
 import json, sys
 import degiro_to_ghostfolio as adapter
@@ -149,9 +150,18 @@ except RuntimeError as error:
 print('LOCKED')
 '''
     with adapter.account_journal(config):
-        result = subprocess.run([sys.executable, '-c', script, json.dumps(config)],
+        second = {**config, 'source_account': '456'} if other_source else config
+        result = subprocess.run([sys.executable, '-c', script, json.dumps(second)],
             text=True, capture_output=True, timeout=10)
         assert result.returncode == 0 and result.stdout.strip() == 'LOCKED'
+
+
+def test_another_source_cannot_replace_recorded_target_ownership(config):
+    with adapter.account_journal(config) as journal:
+        adapter.write_journal(journal)
+    with pytest.raises(RuntimeError, match='Invalid private'):
+        with adapter.account_journal({**config, 'source_account': '456'}):
+            pytest.fail('Different source bypassed account owner')
 
 
 @pytest.mark.parametrize('mutation', ['public-directory', 'symlink-directory', 'public-lock',
