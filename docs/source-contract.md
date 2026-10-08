@@ -95,3 +95,43 @@ The adapter records UTC fetch start/end timestamps separately from source
 consistent wrappers and target currency equal to the broker base currency can
 drive a cash update. Historical overview balances cannot. Freshness, missing
 fields, conflicting duplicate names and account-currency mismatch remain guards.
+
+## Trade normalization policy
+
+The pure adapter normalizes each execution independently using Decimal arithmetic.
+An explicit ISIN-to-Yahoo mapping and independently verified Yahoo quote currency
+are required inputs. Broker tickers never supply a fallback. Each comment is
+`DEGIRO#<source-account>:TRADE:<execution-id>`; reconciliation also keys by target
+account. Equal overlaps are retained once, while changed financial content under
+an existing identity blocks the batch. Separate fills retain separate identities.
+
+Only STOCK metadata with contract size 1 and characterized EUR/USD/JPY major
+currencies are currently accepted. ETF, derivative, transfer and minor-unit cases
+are blocked pending broker evidence. Price times signed quantity must reconstruct
+the signed total within one security-currency quantum. Both gross FX rates must
+reconstruct the base total within one base-currency quantum, with division from
+security to base. Same-currency rates must be 1. Brokerage and AutoFX must both
+be non-positive, and their sum must equal the total fee exactly. The activity fee
+is the negated total base fee multiplied once by `fxRate`; `nettFxRate` is unused.
+No refund clamping, automatic 100x scaling or hidden extra commission is applied.
+
+Source timestamps require an explicit UTC offset and are converted to the same
+instant in UTC, including local-to-UTC calendar-day shifts. JSON numbers are
+finite; malformed financial input errors never include the original value.
+
+The holdings guard consumes normalized activities and a complete, active target
+snapshot supplied by future orchestration. An already imported execution must
+match canonical financial content and is excluded from pending holdings changes.
+Only the same target account and Yahoo symbol contribute to the holding baseline.
+Pending executions are applied chronologically with no quantity epsilon; any
+negative position blocks the batch. A nearby manual trade of the same account,
+symbol and side blocks explicit reconciliation, regardless of quantity. Date
+proximity never creates a broker identity or silently suppresses an execution.
+The guard is conservative: missing opening holdings and buys already represented
+in a later current baseline can require operator reconciliation.
+
+Offline regressions cover these boundaries with synthetic data. A separate local
+arithmetic characterization against the existing private snapshot accepted all
+three observed executions, using placeholder symbols and source currencies. It
+made no network requests and does not establish Yahoo mapping validity, history
+completeness, or authorization for import.
