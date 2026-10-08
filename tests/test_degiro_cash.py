@@ -122,6 +122,24 @@ def test_missing_current_wrapper_never_falls_back_to_history(snapshot, wrapper):
         extract(snapshot)
 
 
+@pytest.mark.parametrize('wrapper', ['totalPortfolio', 'cashFunds', 'portfolio'])
+@pytest.mark.parametrize('value', [False, None, 1, 'true'])
+def test_removed_or_ambiguous_update_flags_block(snapshot, wrapper, value):
+    snapshot['update'][wrapper]['isAdded'] = value
+    with pytest.raises(RuntimeError, match='wrapper'):
+        extract(snapshot)
+    del snapshot['update'][wrapper]['isAdded']
+    snapshot['update'][wrapper]['value'][0]['isAdded'] = value
+    with pytest.raises(RuntimeError):
+        extract(snapshot)
+
+
+def test_incorrect_wrapper_name_blocks(snapshot):
+    snapshot['update']['totalPortfolio']['name'] = 'history'
+    with pytest.raises(RuntimeError, match='wrapper'):
+        extract(snapshot)
+
+
 @pytest.mark.parametrize('mutation', ['missing', 'duplicate', 'foreign', 'mismatch', 'invalid-code'])
 def test_fund_evidence_must_be_unique_and_match(snapshot, mutation):
     rows = snapshot['update']['cashFunds']['value']

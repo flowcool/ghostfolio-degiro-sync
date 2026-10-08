@@ -437,12 +437,26 @@ def named_values(rows):
     result = {}
     for row in rows:
         if (not isinstance(row, dict) or not isinstance(row.get("name"), str)
-                or not row["name"] or row["name"] in result):
+                or not row["name"] or row["name"] in result
+                or ("isAdded" in row and row["isAdded"] is not True)):
             raise RuntimeError("Missing or duplicate DEGIRO named cash field")
         # Optional accruedInterest is observed without a value key. Required
         # monetary fields still fail financial_decimal(None), never become zero.
         result[row["name"]] = row.get("value")
     return result
+
+
+def cash_wrapper_rows(update, name):
+    wrapper = update[name]
+    if (not isinstance(wrapper, dict) or wrapper.get("name", name) != name
+            or ("isAdded" in wrapper and wrapper["isAdded"] is not True)
+            or not isinstance(wrapper.get("value"), list)):
+        raise RuntimeError("Invalid or removed DEGIRO cash wrapper")
+    rows = wrapper["value"]
+    if any(not isinstance(row, dict) or ("isAdded" in row and row["isAdded"] is not True)
+           for row in rows):
+        raise RuntimeError("Invalid or removed DEGIRO cash row")
+    return rows
 
 
 def current_cash_balance(snapshot, target_account, source_account, now=None):
@@ -469,7 +483,7 @@ def current_cash_balance(snapshot, target_account, source_account, now=None):
                if rule.get("treatment") == "unsupported_blocking"):
             raise RuntimeError("Unsupported DEGIRO cash category blocks account writes")
         update = snapshot["update"]
-        total = named_values(update["totalPortfolio"]["value"])
+        total = named_values(cash_wrapper_rows(update, "totalPortfolio"))
         balance = financial_decimal(total["totalCash"])
         degiro = financial_decimal(total["degiroCash"])
         flatex = financial_decimal(total["flatexCash"])
@@ -480,9 +494,7 @@ def current_cash_balance(snapshot, target_account, source_account, now=None):
         if "cryptoTotalCash" in total and financial_decimal(total["cryptoTotalCash"]) != balance:
             raise RuntimeError("Conflicting DEGIRO cash alias")
         funds = {}
-        fund_rows = update["cashFunds"]["value"]
-        if not isinstance(fund_rows, list):
-            raise RuntimeError("Invalid DEGIRO cash fund rows")
+        fund_rows = cash_wrapper_rows(update, "cashFunds")
         for row in fund_rows:
             fields = named_values(row["value"])
             code = fields["currencyCode"]
@@ -492,9 +504,7 @@ def current_cash_balance(snapshot, target_account, source_account, now=None):
             funds[code] = financial_decimal(fields["value"])
         if funds.get(currency) != balance or any(value != 0 for code, value in funds.items() if code != currency):
             raise RuntimeError("DEGIRO cash funds disagree or contain foreign cash")
-        positions = update["portfolio"]["value"]
-        if not isinstance(positions, list) or any(not isinstance(row, dict) for row in positions):
-            raise RuntimeError("Invalid DEGIRO cash position rows")
+        positions = cash_wrapper_rows(update, "portfolio")
         cash_positions = set()
         for row in positions:
             identity = row.get("id")

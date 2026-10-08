@@ -112,6 +112,8 @@ Other fund currencies and FLATEX positions must be zero. Missing fields never
 become zero. A duplicate name/currency/position or conflicting optional alias
 blocks. Nonzero DEGIRO-held cash, negative cash and pending settlement need separate
 evidence before broadening this policy; no inferred settled-cash subtraction.
+An explicitly removed/ambiguous `isAdded` flag or mismatched wrapper name also
+blocks; a full update must not treat removed rows as current values.
 
 The client fetch start/end must both fall within the previous five minutes and
 be ordered before the aware validation clock. This is a conservative operational
