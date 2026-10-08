@@ -1,0 +1,7 @@
+format: 1
+repository: https://github.com/Chavithra/degiro-connector.git
+commit: 22691b5e355094ba8b52c364bb3a5f33d9cc1bbc
+version: 3.0.36
+wheel_sha256: adadd5c8f7c42191108f9897b7b704c29b0a8cdf161b2b722acdc03cd4df97a0
+python_module_count: 84
+python_tree_sha256: 6b4bbf5e69a62ea02cec1374c44daaa5add6b143c375d62dbd75875baf33b1e9

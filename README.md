@@ -4,7 +4,9 @@ Sync DEGIRO trades, dividends and cash into self-hosted [Ghostfolio](https://gho
 schedule — sibling of [`ghostfolio-ibkr-sync`](../ghostfolio-ibkr-sync).
 
 The adapter provides an explicit [read-only DEGIRO procedure](docs/read-only.md).
-Normal sync still fails closed until the mapping and acceptance gates pass. Read the
+An explicit [DRY_RUN synchronization command](docs/synchronization.md) now
+reconciles configured source/target identities and mappings. Live sync fails
+closed until the history and acceptance gates pass. Read the
 approved [delivery plan](docs/plans/2026-10-08-degiro-sync.md) for implementation
 and live-validation gates; [FINDINGS.md](FINDINGS.md) preserves the reconnaissance.
 
@@ -30,6 +32,14 @@ Tests are offline and HTTP is mocked. The local checker reads pinned Git objects
 without modifying the sibling; the CI checker fetches into disposable state.
 Credentials are supplied only from environment variables backed by an off-git
 SOPS store and [non-secret pointer](secrets.pointer.yaml). Do not put real credentials into examples, tests or logs.
+
+The [runtime guide](docs/runtime.md) documents native amd64/arm64 validation,
+rootless run-once/cron, connector source parity and safe secret injection.
+Container checks build and smoke only; they do not publish or deploy an image.
+The [recovery guide](docs/recovery.md) explains durable intent and explicit
+positive readback; the [isolated acceptance report](docs/isolated-acceptance.md)
+documents native delayed-result evidence, conservative CSV overlap and the
+offline exact-ID cleanup preflight. Production writes retain separate approval.
 
 Current work and acceptance evidence live in Beads epic `infra-8tt.56` with
 `project=ghostfolio-degiro-sync`, rather than a repository task-status list.

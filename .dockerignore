@@ -1,0 +1,8 @@
+# Allowlisted build context prevents private snapshots/SOPS pointers entering layers.
+**
+!Dockerfile
+!requirements.txt
+!degiro_to_ghostfolio.py
+!ghostfolio_core.py
+!cash-rules.yaml
+!entrypoint.sh
