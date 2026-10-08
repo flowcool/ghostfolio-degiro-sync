@@ -1,0 +1,96 @@
+# Entirely synthetic; public example ISIN, artificial IDs and amounts.
+source_account: '123'
+base_currency: EUR
+products:
+  '20':
+    id: '20'
+    productType: STOCK
+    contractSize: 1
+    currency: USD
+    isin: US0378331005
+    symbol: TEST
+transactions:
+  - id: 10
+    productId: 20
+    buysell: S
+    date: '2026-01-02T10:00:00+01:00'
+    quantity: -2
+    price: 10
+    total: 20
+    totalInBaseCurrency: 18.18
+    fxRate: 1.1
+    grossFxRate: 1.1
+    nettFxRate: 1.12
+    feeInBaseCurrency: -0.05
+    autoFxFeeInBaseCurrency: -0.10
+    totalFeesInBaseCurrency: -0.15
+cash_movements:
+  paid_dividend:
+    id: 101
+    type: CASH_TRANSACTION
+    description: Dividende
+    productId: 20
+    currency: USD
+    change: 10
+    date: '2026-01-03T10:00:00+01:00'
+    valueDate: '2026-01-03T00:00:00+01:00'
+  dividend_withholding:
+    id: 102
+    type: CASH_TRANSACTION
+    description: Impôts sur dividende
+    productId: 20
+    currency: USD
+    change: -1.5
+    date: '2026-01-03T10:00:00+01:00'
+    valueDate: '2026-01-03T00:00:00+01:00'
+  trade_commission:
+    id: 103
+    type: CASH_TRANSACTION
+    description: Frais DEGIRO de courtage et/ou de parties tierces
+    productId: 20
+    orderId: synthetic-order
+    currency: EUR
+    change: -0.05
+    date: '2026-01-02T10:00:00+01:00'
+  exchange_connection_fee:
+    id: 104
+    type: CASH_TRANSACTION
+    description: Frais de connexion aux places boursières 2026 (Synthetic exchange)
+    currency: EUR
+    change: -2.5
+    date: '2026-01-01T00:00:00+01:00'
+  flatex_interest:
+    id: 105
+    type: CASH_TRANSACTION
+    description: Flatex Interest Income
+    currency: EUR
+    change: 0.03
+    date: '2026-01-01T00:00:00+01:00'
+  monetary_fund_compensation:
+    id: 106
+    type: COMPENSATION_BOOKING
+    description: Compensation Fonds Monétaires DEGIRO
+    currency: EUR
+    change: 0.02
+    date: '2026-01-01T00:00:00+01:00'
+current_cash:
+  baseCurrency: EUR
+  totalPortfolio:
+    value:
+      - {name: totalCash, value: 12.30}
+      - {name: degiroCash, value: 0}
+      - {name: flatexCash, value: 12.30}
+      - {name: pendingSettlement, value: 0}
+  cashFunds:
+    value:
+      - name: cashFund
+        value:
+          - {name: currencyCode, value: EUR}
+          - {name: value, value: 12.30}
+  portfolio:
+    value:
+      - id: FLATEX_EUR
+        name: positionrow
+        value:
+          - {name: id, value: FLATEX_EUR}
+          - {name: size, value: 12.30}

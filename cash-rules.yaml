@@ -1,0 +1,62 @@
+# Observed DEGIRO account locale: French. Unknown types/descriptions block writes.
+format: 1
+rules:
+  paid_dividend:
+    type: CASH_TRANSACTION
+    description_exact: Dividende
+    sign: positive
+    product_required: true
+  dividend_withholding:
+    type: CASH_TRANSACTION
+    description_exact: Impôts sur dividende
+    sign: negative
+    product_required: true
+  trade_commission:
+    type: CASH_TRANSACTION
+    description_exact: Frais DEGIRO de courtage et/ou de parties tierces
+    sign: negative
+    product_required: true
+    order_required: true
+    treatment: reconcile_execution_brokerage_only
+  exchange_connection_fee:
+    type: CASH_TRANSACTION
+    description_pattern: '^Frais de connexion aux places boursières [0-9]{4} \(.+\)$'
+    sign: negative
+    treatment: standalone_fee
+  fx_debit:
+    type: CASH_TRANSACTION
+    description_exact: Opération de change - Débit
+    sign: negative
+    treatment: cash_only
+  fx_credit:
+    type: CASH_TRANSACTION
+    description_exact: Operation de change - Crédit
+    sign: positive
+    treatment: cash_only
+  bank_withdrawal:
+    type: CASH_TRANSACTION
+    description_pattern: '^Retrait .+$'
+    sign: negative
+    treatment: cash_only
+  cash_sweep:
+    type: FLATEX_CASH_SWEEP
+    description_pattern: '^Virement .+$'
+    treatment: cash_only
+  cash_sweep_notice:
+    type: FLATEX_CASH_SWEEP
+    description_exact: Degiro Cash Sweep Transfer
+    treatment: nonfinancial_notice
+  executed_trade_cash:
+    type: TRANSACTION
+    description_pattern: '^(Achat|Vente) .+$'
+    treatment: reconcile_execution_only
+  flatex_interest:
+    type: CASH_TRANSACTION
+    description_exact: Flatex Interest Income
+    treatment: unsupported_blocking
+    follow_up: infra-8tt.56.14
+  monetary_fund_compensation:
+    type: COMPENSATION_BOOKING
+    description_exact: Compensation Fonds Monétaires DEGIRO
+    treatment: unsupported_blocking
+    follow_up: infra-8tt.56.14
