@@ -2,6 +2,8 @@
 """Read-only DEGIRO adapter; activity writes require the remaining validation gates."""
 
 import argparse
+import fcntl
+import hashlib
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -11,6 +13,9 @@ import logging
 import os
 from pathlib import Path
 import re
+import stat
+import tempfile
+import uuid
 from urllib.parse import urlsplit
 
 import requests
@@ -717,8 +722,130 @@ def pending_activities(activities, existing, target_account, source_account):
     return result
 
 
+def write_journal(journal):
+    """Replace private state atomically, flushing both file and directory."""
+    content = yaml.safe_dump(journal["document"], sort_keys=True)
+    if len(content.encode("utf-8")) > 1_000_000:
+        raise RuntimeError("Synchronization journal exceeds state budget")
+    descriptor, temporary = tempfile.mkstemp(dir=journal["directory"], prefix=".intent-")
+    try:
+        with os.fdopen(descriptor, "w") as output:
+            output.write(content)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, journal["path"])
+        descriptor = os.open(journal["directory"], os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def private_state_file(descriptor):
+    info = os.fstat(descriptor)
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+            or info.st_mode & 0o077 or info.st_nlink != 1):
+        raise RuntimeError("Unsafe private sync state file")
+
+
+@contextmanager
+def account_journal(config):
+    """Hold one private account lock; unresolved requests survive process exit."""
+    directory = config.get("state_dir")
+    if not isinstance(directory, str) or not directory:
+        raise RuntimeError("Live synchronization requires private STATE_DIR")
+    directory = Path(directory)
+    info = directory.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077):
+        raise RuntimeError("Unsafe private STATE_DIR")
+    owner = {"host": validate_ghost_host(config.get("ghost_host")),
+             "source": broker_identity(config.get("source_account")), "target": config.get("target_account")}
+    if not isinstance(owner["target"], str) or not re.fullmatch(r"[A-Za-z0-9_-]+", owner["target"]):
+        raise RuntimeError("Invalid journal account ownership")
+    key = hashlib.sha256(json.dumps(owner, sort_keys=True).encode()).hexdigest()
+    descriptor = os.open(directory / (key + ".lock"), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        private_state_file(descriptor)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError("Another synchronization owns this account") from None
+        path = directory / (key + ".yaml")
+        try:
+            reader = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        except FileNotFoundError:
+            document = {"version": 1, "owner": owner, "pending": None, "resolved": {}}
+        else:
+            with os.fdopen(reader) as source:
+                private_state_file(source.fileno())
+                if os.fstat(source.fileno()).st_size > 1_000_000:
+                    raise RuntimeError("Synchronization journal exceeds state budget")
+                document = yaml.safe_load(source.read())
+            if (not isinstance(document, dict) or set(document) != {"version", "owner", "pending", "resolved"}
+                    or type(document["version"]) is not int or document["version"] != 1
+                    or document["owner"] != owner or not isinstance(document["resolved"], dict)
+                    or document["pending"] is not None and not isinstance(document["pending"], dict)):
+                raise RuntimeError("Invalid private synchronization journal")
+        yield {"directory": directory, "path": path, "document": document}
+    finally:
+        os.close(descriptor)
+
+
+def begin_intent(journal, kind, payload):
+    if journal["document"]["pending"] is not None:
+        raise RuntimeError("Unresolved durable write intent blocks account writes")
+    identity = uuid.uuid4().hex
+    journal["document"]["pending"] = {"id": identity, "kind": kind, "payload": payload}
+    write_journal(journal)
+    return identity
+
+
+def confirm_intent(journal, identity):
+    pending = journal["document"]["pending"]
+    if not isinstance(pending, dict) or pending.get("id") != identity:
+        raise RuntimeError("Synchronization intent identity changed")
+    journal["document"]["resolved"][identity] = {"kind": pending["kind"],
+        "at": datetime.now(timezone.utc).isoformat()}
+    journal["document"]["pending"] = None
+    write_journal(journal)
+
+
+def resolve_import_intent(config, existing_body):
+    """Explicit positive readback only; empty/partial evidence never clears state."""
+    with account_journal(config) as journal:
+        pending = journal["document"]["pending"]
+        if (not isinstance(pending, dict) or pending.get("kind") != "import"
+                or not isinstance(pending.get("payload"), dict) or not pending["payload"]):
+            raise RuntimeError("No recoverable pending import intent")
+        target = {"id": config["target_account"]}
+        rows, _ = existing_activity_context(existing_body, target)
+        candidates = list(pending["payload"].values())
+        if (any(not isinstance(row, dict) or row.get("comment") != identity
+                for identity, row in pending["payload"].items())
+                or pending_activities(candidates, rows, target, config["source_account"])):
+            raise RuntimeError("Complete exact positive readback required for recovery")
+        confirm_intent(journal, pending["id"])
+        return len(candidates)
+
+
 def synchronize_account(config, snapshot, target_account, existing_body, mapping,
                         quote_currencies, import_activities, update_balance, now=None):
+    """Serialize live account work and preserve intent before every write."""
+    if config.get("dry_run", True) is not False:
+        return synchronize_locked(config, snapshot, target_account, existing_body, mapping,
+            quote_currencies, import_activities, update_balance, now=now)
+    with account_journal(config) as journal:
+        if journal["document"]["pending"] is not None:
+            raise RuntimeError("Unresolved durable write intent blocks account writes")
+        return synchronize_locked(config, snapshot, target_account, existing_body, mapping,
+            quote_currencies, import_activities, update_balance, now=now, journal=journal)
+
+
+def synchronize_locked(config, snapshot, target_account, existing_body, mapping,
+                        quote_currencies, import_activities, update_balance, now=None, journal=None):
     """Validate whole account before mutation; accepted evidence alone funds sells."""
     dry_run = config.get("dry_run", True)
     if type(dry_run) is not bool:
@@ -755,11 +882,13 @@ def synchronize_account(config, snapshot, target_account, existing_body, mapping
         if sells:
             reconcile_trade_holdings(batch, [], quantities)
         try:
+            intent = begin_intent(journal, "import", {a["comment"]: a for a in batch})
             created, ok = import_activities(batch)
             if (ok is not True or not isinstance(created, list)
                     or len(created) != len(batch)
                     or {activity_signature(a) for a in created} != {activity_signature(a) for a in batch}):
                 raise RuntimeError("Incomplete accepted account import evidence")
+            confirm_intent(journal, intent)
         except Exception:
             core.mark_import_uncertain(config, batch)
             raise RuntimeError("Account import uncertain or incomplete; cash blocked") from None
@@ -769,7 +898,17 @@ def synchronize_account(config, snapshot, target_account, existing_body, mapping
                 quantities[key] = quantities.get(key, Decimal(0)) + financial_decimal(activity["quantity"]) * (
                     1 if activity["type"] == "BUY" else -1)
         accepted.extend(created)
-    apply_cash_balance(snapshot, target_account, source, update_balance, dry_run=False,
+    def guarded_balance(account, amount):
+        intent = begin_intent(journal, "cash", {"account": account, "balance": amount})
+        try:
+            if update_balance(account, amount) is not True:
+                raise RuntimeError("Cash update rejected")
+            confirm_intent(journal, intent)
+        except Exception:
+            raise RuntimeError("Uncertain cash update remains durably fenced") from None
+        return True
+
+    apply_cash_balance(snapshot, target_account, source, guarded_balance, dry_run=False,
         import_ok=True, uncertain=target_account["id"] in config.get("_uncertain_import_accounts", set()), now=now)
     return {"proposed": pending, "accepted": accepted, "cash": balance, "dry_run": False,
             "history_verified": True}
@@ -805,12 +944,23 @@ def load_sync_config():
     except (OSError, ValueError, TypeError, KeyError, yaml.YAMLError):
         raise RuntimeError("Invalid explicitly verified Yahoo mapping file") from None
     return {"ghost_host": host, "ghost_token": token, "source_account": source,
-            "target_account": target, "dry_run": mode in ("1", "true", "yes", "on")}, mapping, quotes
+            "target_account": target, "dry_run": mode in ("1", "true", "yes", "on"),
+            "state_dir": os.environ.get("STATE_DIR")}, mapping, quotes
 
 
 def run_sync(from_date, to_date, window_days=90):
     """One broker read and complete target read; no completeness assertion invented."""
     config, mapping, quotes = load_sync_config()
+    if config["dry_run"]:
+        return run_sync_locked(config, mapping, quotes, from_date, to_date, window_days)
+    with account_journal(config) as journal:
+        if journal["document"]["pending"] is not None:
+            raise RuntimeError("Unresolved durable write intent blocks account writes")
+        return run_sync_locked(config, mapping, quotes, from_date, to_date, window_days, journal)
+
+
+def run_sync_locked(config, mapping, quotes, from_date, to_date, window_days, journal=None):
+    """Live lock covers source/target reads as well as dispatch."""
     snapshot = read_degiro(from_date, to_date, window_days)
     expected_target = {"id": config["target_account"], "currency": snapshot["account_info"]["baseCurrency"]}
     with ghost_transport(config, expected_target) as session:
@@ -820,9 +970,9 @@ def run_sync(from_date, to_date, window_days=90):
         response = session.get(f"{config['ghost_host']}/api/v1/activities")
         response.raise_for_status()
         existing = response.json()
-        return synchronize_account(config, snapshot, target, existing, mapping, quotes,
+        return synchronize_locked(config, snapshot, target, existing, mapping, quotes,
             lambda activities: core.ghost_import_activities(config, activities),
-            lambda account, balance: core.ghost_update_cash_balance(config, account, balance))
+            lambda account, balance: core.ghost_update_cash_balance(config, account, balance), journal=journal)
 
 
 def broker_credentials():

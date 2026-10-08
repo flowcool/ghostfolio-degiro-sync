@@ -47,9 +47,18 @@ def opening_holding():
         'quantity': 10, 'symbol': 'TEST', 'type': 'BUY', 'unitPrice': 1}, 'opening')
 
 
+@pytest.fixture(autouse=True)
+def private_state(tmp_path, monkeypatch):
+    monkeypatch.setenv('STATE_DIR', str(tmp_path))
+    tmp_path.chmod(0o700)
+
+
 def run(snapshot, existing=None, dry_run=True, importer=None, writer=None, config=None):
+    import os
     rows = [opening_holding()] if existing is None else existing
     config = {'source_account': '123', 'target_account': 'target-a', 'dry_run': dry_run} if config is None else config
+    config.setdefault('state_dir', os.environ['STATE_DIR'])
+    config.setdefault('ghost_host', 'http://localhost:3333')
     return adapter.synchronize_account(config, snapshot, TARGET,
         {'activities': rows, 'count': len(rows)}, MAPPING, QUOTES,
         importer or (lambda activities: pytest.fail('Unexpected POST')),

@@ -21,6 +21,7 @@ Required non-secret environment values:
 | `MAPPING_FILE` | Explicit mapping file; default `mapping.yaml` |
 | `DRY_RUN` | Defaults to `1`; strict boolean strings, invalid values fail |
 | `LOOKBACK_DAYS` | Default90, bounded2..366 when explicit dates are omitted |
+| `STATE_DIR` | Existing private persistent directory owned by the process UID, mode0700; required for live work |
 
 Copy `mapping.yaml.example` to ignored `mapping.yaml`. Each ISIN maps to a Yahoo
 symbol and independently verified quote currency. Broker tickers/currencies are
@@ -82,9 +83,10 @@ core to drop that symbol and retry; other HTTP400 errors fail immediately.
 The adapter deliberately treats short acceptance as requiring reconciliation,
 even though native import may return HTTP201 with no created rows. See the KB
 account-ownership trap and [fee-contract.md](fee-contract.md). Run-scoped
-uncertainty is recorded in the config and is never cleared within a run. A
-durable lost-response/restart recovery procedure belongs to the isolated recovery
-acceptance gate; this implementation does not claim it is production-proven.
+uncertainty is recorded in the config and is never cleared within a run. Live
+work additionally records a durable intent before dispatch; see
+[recovery.md](recovery.md). Empty/partial readback cannot clear that fence.
+Isolated and production recovery proofs retain their separate acceptance gates.
 
 After clean complete acceptance, the guarded cash callback checks freshness
 again and calls the immutable writer. The bounded transport verifies the writer's

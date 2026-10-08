@@ -50,6 +50,9 @@ shortcuts and embedded commands/newlines are rejected. Only the fixed sync comma
 is written to the crontab; no environment-provided command is evaluated.
 Supercronic retains its default non-overlapping scheduling for this single job.
 Independent instances targeting the same account still require operator control.
+Live invocations also require one shared private persistent `STATE_DIR` for their
+account lock and durable intent. See [recovery.md](recovery.md); do not use the
+container tmpfs for that state. No production mount is created by this scaffold.
 
 Default sync dates are today's UTC date and the previous89 days inclusive.
 `LOOKBACK_DAYS` defaults to90 and accepts2..366. This operational window is based
