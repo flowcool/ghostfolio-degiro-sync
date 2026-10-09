@@ -60,8 +60,9 @@ from a failed ISIN join, infer instrument identity from matching financial value
 adopt these candidates or rewrite their fees/dates automatically. Original input
 hashes were unchanged and the comparison used no network or financial callbacks.
 
-The full ledger contains four Flatex interest rows and one monetary-fund
-compensation row. Dividend normalization and current-cash acceptance both stop
+Before the cash-yield policy implementation, the recent ledger contained four
+Flatex interest rows and one monetary-fund compensation row. Dividend
+normalization and current-cash acceptance both stopped
 at the unsupported-category gate. No successful real synchronization DRY_RUN or
 cash acceptance is claimed. Do not discard these rows, fabricate completeness,
 borrow a quote-unit mapping, or clear uncertain state to make the preflight pass.
@@ -76,3 +77,35 @@ stay outside GitHub; these gaps do not become a history override.
 An explicitly approved policy for unsupported rows, scoped full-statement
 reconciliation and explicit request-bound cash/partial recovery remain prerequisites. See [the source contract](source-contract.md),
 [synchronization](synchronization.md) and [isolated acceptance limits](isolated-acceptance.md).
+
+## Saved-input verification after cash-yield implementation (2026-10-09)
+
+Offline analysis using adapter revision `5966e121ca2465fffbe68f9ae52216504c0d9066`
+rechecked the retained source and destination captures. Network access was disabled,
+no financial callbacks ran, and all source-file hashes remained unchanged.
+The complete 1,017-row destination response still passed ownership/context checks.
+The recent 88-row source had no unsupported category: ten dividend pairs, five
+cash-yield activities and three standalone fees normalized independently. Current
+cash validated using the source capture's own timestamp as `now`; this establishes
+capture-time compatibility, not present freshness or a successful whole-account run.
+
+Comparing date, local minute, value date, source ISIN, description, currency,
+amount and order reference as multisets matched 87 of 88 recent CSV rows exactly.
+The sole remaining pair is a `TRANSACTION` with a one-cent amount difference;
+all other compared fields agree. No rounding tolerance or financial correction
+was applied. Minute equality does not establish payment association or canonical
+activity identity. The CSV is the captured broker report, not a newly supplied
+independent manual statement.
+
+Annual and split archives still contain 70 identical stable executions and 1,001
+identical nonzero-ID cash-event bodies, with byte-identical CSV reports. The annual
+archive contains 1,377 cash rows including 340 zero-ID rows; the split archive has
+1,326 cash rows including 319 zero-ID rows. Their respective exact CSV multiset
+matches are 1,254 and 1,231 of 1,366 CSV rows. Both fail the legacy-cash format gate
+and both retain unverified history. These characterization-only archives cannot
+be substituted for an accepted source snapshot or prove completeness.
+
+The category-policy obstacle is resolved for the characterized yield rows;
+verified ISIN-to-Yahoo quote mapping, exact CSV transition semantics and history
+proof remain distinct prerequisites. No broker-ticker fallback, inferred mapping,
+completeness flag or production-write authorization was introduced.
