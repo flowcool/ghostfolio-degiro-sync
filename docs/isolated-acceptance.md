@@ -31,7 +31,7 @@ database writes. Those native paths remain byte-identical. The lab therefore
 proves transport/DTO/import/recovery behavior; it does not verify real Yahoo
 quote currency, live broker data or market-price performance.
 
-## Observed results (2026-10-08)
+## Observed results (2026-10-08 and 2026-10-09)
 
 | Scenario | Exact observed result |
 | --- | --- |
@@ -39,12 +39,16 @@ quote currency, live broker data or market-price performance.
 | Adapter DRY_RUN | Proposes3 rows; stored count remains1; balance remains0 |
 | First adapter import | Native SELL2, paid DIVIDEND and FEE preserve all10 canonical DTO fields; net holding8; current balance12.30EUR |
 | Repeated full sync | No proposed/imported rows; stored count remains4 |
+| Changed configured mapping after native import (2026-10-09) | Same source identities mapped from TEST to CHANGED_TEST with unchanged USD quote currency fail with the exact canonical financial-evidence conflict. Complete native activities and target balance remain unchanged; no pending intent is created |
 | Uncertain delayed INSERT | PostgreSQL BEFORE INSERT trigger blocks owned FEE999 on an advisory lock; HTTP times out; complete GET still contains only4 rows |
 | New Python process before release | Reads persisted intent and refuses synchronization; empty pending readback refuses resolution; no replay |
-| Release owned barrier | Native original request inserts exactly one row; complete count5; exact positive readback resolves stored intent; repeated fee sync imports zero |
-| CSV-shaped unmarked SELL in another seeded lab account | API preflight diagnoses manual/CSV overlap; zero added activities and balance stays0 |
+| Release owned barrier | Native original request inserts exactly one row; complete count5; old request ID refuses even with positive readback. Rootless recovery CLI obtains authenticated GETs: default preflight retains intent and fresh-process fence; explicit local confirmation resolves selected request; repeated fee sync imports zero |
+| Actual pinned V3 synthetic SELL in another seeded lab account | Native import preserves captured output; API preflight diagnoses CSV overlap despite mismatched commission currency; zero added activities and balance stays0 |
 | Unresolvable Yahoo symbol in a synthetic BUY batch | Native HTTP400 permits core's recognized-symbol retry; only resolvable FEE stored; incomplete readback cannot resolve intent; no cash write |
 | Cleanup preflight over actual readback | Selects exactly3 manifest-owned canonical IDs, excludes opening/manual/foreign context, performs no DELETE |
+| Partial import cancellation (2026-10-09) | First FEE committed; second independently blocked; timeout and fresh process remain fenced. Sole owned app stopped, its database work terminated, zero remaining database sessions verified before restart. Exact accepted subset unchanged, intent retained, no replay |
+| Delayed cash completion (2026-10-09) | Native PUT waits in AccountBalance trigger; timeout, initial balance0 and fresh-process fence observed. Release commits42.42 once; matching balance does not clear cash intent |
+| Delayed cash cancellation (2026-10-09) | Native PUT waits before84.84 upsert; independent owned app/DB quiescence cancels it. Restart balance remains0 and cash intent remains fenced |
 
 The delayed case proves more than a response lost after commit: complete empty
 readback is observed while a live INSERT is independently blocked. The controller
@@ -53,10 +57,45 @@ request then finishes once. Positive resolution does not dispatch another POST.
 This does not prove cancellation for an absent/partial request in production,
 replica/queue recovery, or resolution of an uncertain cash PUT.
 
-The CSV scenario uses the accepted DTO shape of an unmarked trade, not an actual
-run of the external V3 converter over a private statement. Its purpose is to prove
-that such overlap cannot silently cause a second API import. Actual backfill
-reconciliation/adoption remains an explicit operator gate. Free-text MANUAL fee
+The subsequent cancellation scenarios use the same unique isolated instance.
+After observing an advisory-waiting request, the controller verifies the exact
+Compose ownership, stops its sole app, and terminates remaining connections in
+its disposable database, excluding the verifying connection and held barrier.
+It verifies zero application work, releases/closes its own barrier, verifies zero
+other database sessions, then restarts the sole app. This independent quiescence
+proof is stronger than assuming a closed client socket cancelled SQL work.
+Complete post-restart readback preserves the exact accepted subset or old cash.
+No cancellation resolver is introduced: partial import and cash intents stay
+pending even with this isolated proof. A matching balance after delayed completion
+also leaves the fence intact. Production topology and an explicit reviewed
+request-bound resolution procedure remain gates; none of these steps authorizes
+stopping or terminating work in a shared service.
+
+The first cash-barrier rehearsal failed because the controller saw Order before
+all migrations had created AccountBalance. No scenario was accepted from that
+attempt, and its resources were removed. Readiness now requires both tables.
+The controller bounds the entire driver protocol to600 seconds, with incomplete
+or oversized protocol lines rejected. Each barrier acquisition uses the same
+buffered `select`/`os.read` protocol with its own30-second deadline; a partial line
+cannot bypass that deadline. Invalid PID/acknowledgement, premature EOF and
+oversized output fail without echoing process data. A failed acquisition reaps
+its local subprocess before the controller tears down the owned lab.
+
+The2026-10-09 rehearsal replayed every scenario above from a freshly built
+rootless adapter image after the barrier correction. Both independent quiescence
+proofs and the mapping-change rejection passed. The generated worker, Compose
+containers/network, profile-fixture image and uniquely named adapter image were
+removed afterward. The controller pins the generated Compose name with `-p`
+and refuses optimized Python before Docker because its native evidence checks
+require assertions enabled.
+
+The CSV scenario now seeds output captured from the unchanged external V3
+converter over a public synthetic statement. Only its target account ID changes.
+[Pinned input/output and converter limits](v3-transition.md) distinguish this
+actual synthetic conversion from a private historical statement conversion.
+Its purpose is to prove that overlap cannot silently cause a second API import,
+including when fee currency semantics differ. Actual backfill reconciliation and
+adoption remain explicit operator gates. Free-text MANUAL fee
 incompatibility is separately established in [fee-contract.md](fee-contract.md).
 
 ## Cleanup and rollback preflight

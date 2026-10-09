@@ -29,6 +29,7 @@ def main():
             name, version = line.split("==")
             expected[name] = version
     core_hash = hashlib.sha256(Path("ghostfolio_core.py").read_bytes()).hexdigest()
+    recovery_hash = hashlib.sha256(Path("scripts/recover_degiro.py").read_bytes()).hexdigest()
     provenance = Path("docs/connector-provenance.yaml").read_text()
     probe = f'''
 import hashlib, importlib.metadata, json, os
@@ -53,13 +54,19 @@ for path in files:
 assert len(files) == provenance["python_module_count"]
 assert tree.hexdigest() == provenance["python_tree_sha256"]
 assert not any(name.startswith(("DEGIRO_", "GHOST_TOKEN")) for name in os.environ)
-assert sorted(p.name for p in Path("/app").iterdir()) == ["cash-rules.yaml", "degiro_to_ghostfolio.py", "entrypoint.sh", "ghostfolio_core.py", "requirements.txt"]
+assert sorted(p.name for p in Path("/app").iterdir()) == ["cash-rules.yaml", "degiro_to_ghostfolio.py", "entrypoint.sh", "ghostfolio_core.py", "requirements.txt", "scripts"]
+assert sorted(p.name for p in Path("/app/scripts").iterdir()) == ["recover_degiro.py"]
+assert hashlib.sha256(Path("/app/scripts/recover_degiro.py").read_bytes()).hexdigest() == {recovery_hash!r}
 print("Runtime UID, dependency closure, source-equivalent connector, immutable core and explicit app file set: PASS")
 '''
     print(run(*options, "-i", args.image, "python", "-", input_text=probe).strip())
     output = run(*options, args.image, expected=1)
     assert "Running once" in output and "DEGIRO sync failed" in output
     print("Default run-once fails closed without credentials: PASS")
+    output = run(*options, args.image, "python", "/app/scripts/recover_degiro.py",
+        "--expected-intent-id", "a" * 32, expected=1)
+    assert "Positive import recovery failed" in output
+    print("GET-only recovery refuses missing environment without mutation: PASS")
     for cron in ("* * * * *; echo unsafe", "* * * * *\necho unsafe", "@daily"):
         output = run(*options, "-e", f"CRON={cron}", args.image, expected=1)
         assert "Invalid CRON" in output

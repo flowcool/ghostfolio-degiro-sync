@@ -40,6 +40,8 @@ The [recovery guide](docs/recovery.md) explains durable intent and explicit
 positive readback; the [isolated acceptance report](docs/isolated-acceptance.md)
 documents native delayed-result evidence, conservative CSV overlap and the
 offline exact-ID cleanup preflight. Production writes retain separate approval.
+The [read-only reconciliation report](docs/readonly-reconciliation.md) records
+actual destination/V3 output matches and the deliberately retained source gates.
 
 Current work and acceptance evidence live in Beads epic `infra-8tt.56` with
 `project=ghostfolio-degiro-sync`, rather than a repository task-status list.
