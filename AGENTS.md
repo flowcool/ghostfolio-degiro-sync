@@ -57,6 +57,10 @@ rate-limited reviews are not evidence. Florent manages hourly review triggers
 externally; do not schedule or repeat them here. Production financial mutations,
 cleanup and deployment retain their separate explicit authorization gates.
 
+For PR bodies, including skill-generated bodies, use the compatible sections in
+[the PR template](.github/pull_request_template.md); it also owns the read-only
+merge-preflight command and exact-head handoff procedure.
+
 ## Execution continuity
 
 When Florent requests autonomous execution, carry the agreed scope across task,
