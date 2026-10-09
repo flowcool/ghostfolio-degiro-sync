@@ -37,7 +37,7 @@ is provided.
 
 ## Explicit positive import readback
 
-`resolve_import_intent(config, existing_body)` is an operator/helper boundary,
+`resolve_import_intent(config, existing_body, expected_intent_id=...)` is an operator/helper boundary,
 not an automatic CLI retry. It performs no HTTP or financial mutation. Under the
 same lock it requires a complete unredacted current activity snapshot and proves
 every pending canonical identity exists exactly once in the configured target,
@@ -45,13 +45,52 @@ with unchanged symbol, source, UTC instant and all financial fields. Foreign
 ownership, changed mapping, redaction, malformed counts, duplicate rows and
 partial/empty evidence refuse resolution. A confirmed response resolves only
 that stored request; normal fresh preflight still gates later synchronization.
+The expected request ID is mandatory and checked against the pending intent under
+the same owner lock. Select it before obtaining readback and retain it throughout
+recovery; do not substitute whichever ID is pending afterward. A stale request ID
+cannot resolve a successor, even when its activity payload is identical. This
+selection guard does not authenticate a saved snapshot or prove its freshness.
 
-Never supply a fabricated or stale snapshot to release a financial gate. A future
-operator command must obtain complete authenticated readback from the pinned
-origin under the same operational controls. Recovery is currently exercised in
+Never supply a fabricated or stale snapshot to release a financial gate.
+`readback_import_intent` and the operator command below obtain fresh authenticated
+account and complete activity GETs from the approved origin while holding the
+same owner lock. Transport is forced into GET-only mode, even if the normal sync
+configuration enables writes. Wrong account, excluded/redacted context, malformed
+or incomplete readback and changed request ID refuse confirmation. There is no
+broker login, token exchange, automatic replay or cash/partial cancellation.
+
+Recovery is currently exercised in
 offline regressions and the [disposable full-server delayed-result/restart
 scenario](isolated-acceptance.md). Production completion/cancellation proof
 remains separate.
+
+## Operator preflight and local confirmation
+
+Select the exact pending request ID from the private journal before beginning.
+Provide `GHOST_HOST`, `GHOST_TOKEN`, `GHOST_ACCOUNT_ID`, `DEGIRO_ACCOUNT_ID` and
+`STATE_DIR` from the established environment/secret pointer. The command does not
+require broker credentials or a mapping file. Do not paste a bearer into its
+arguments. Stop scheduled adapter work before operator recovery; its owner lock
+also refuses overlap rather than waiting.
+
+```sh
+.venv/bin/python scripts/recover_degiro.py --expected-intent-id <selected-request-id>
+```
+
+The default verifies all expected activities and retains the pending journal.
+Only a subsequent explicit invocation with `--confirm-local-state` confirms that
+selected local intent, obtaining fresh evidence again. Neither mode sends a
+financial mutation. The script ships at `/app/scripts/recover_degiro.py` in the
+rootless image and can run against the same private persistent state mount under
+the same UID. Its output contains counts and outcome only, not IDs, DTOs or tokens.
+Transport and JSON errors return failure without private details. A persistence
+failure requires inspection of the journal; do not assume the state replacement
+did or did not complete after a filesystem failure.
+
+Positive confirmation means only that this import's exact identities are present.
+It does not verify history, unsupported source categories or current cash for the
+next synchronization. Complete normal preflight still applies. Cash and partial
+intents remain fenced and require the separately proved operator procedure.
 
 Cash intents have no automatic resolver. Matching current balance alone cannot
 prove the old PUT finished or was independently cancelled. Partial/absent import

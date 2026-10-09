@@ -43,6 +43,53 @@ This is bounded display rounding evidence, not permission to hide arbitrary
 financial discrepancies. Financial event IDs/counts and semantic fields remain
 the completeness check; a new discrepancy fails reconciliation.
 
+## Extended historical read-only characterization
+
+A direct operator collection requested 2000-01-01..2026-10-08 in overlapping
+366-day windows, then reread the occupied 2019-04-25..2026-10-08 span in overlapping
+90-day windows. Both requests returned the same full authenticated CSV statement.
+Private archives live outside project repositories under
+`~/.local/share/ghostfolio-degiro-sync/history/`, with directories 0700, files 0600,
+per-response captures, a decoded UTF-8 CSV and SHA256 manifests. Authentication
+responses, headers, session URLs and client-details responses were not archived.
+
+The earliest observed movement was 2019-04-25 and the latest 2026-10-06.
+Nineteen annual pre-activity overview windows returned HTTP 200 with `data: {}`,
+without `cashMovements`. The runtime correctly rejects this missing collection.
+A temporary read-only characterization collector preserved those envelopes and
+continued collection; it did not change the runtime or authorize synchronization.
+Empty ancient windows do not establish unlimited look-back or account inception.
+
+Across both widths, all 70 complete executed-transaction bodies agree. The 1,001
+cash rows with nonzero IDs also agree exactly after excluding the already observed
+window-derived `balance`. However, legacy `CASH_FUND_NAV_CHANGE` rows all have ID
+`0`: the annual capture contains 339 distinct bodies, the split capture 318.
+Of these, 150 annual-only and 129 split-only bodies differ between widths; every
+such difference is a 2019/2020 NAV event. These are not stable independently
+identifiable activity records. Never collapse them by ID, invent broker IDs,
+ignore their financial changes or infer an import policy from type alone.
+The strict runtime overlap check blocks distinct rows sharing ID `0`.
+
+The full CSV has 1,366 rows after its header, including three undated footer rows.
+An exact multiset comparison of date/minute, value date, ISIN, description,
+movement currency/amount and order reference matches 1,254 API rows. Another 83
+unique pairs differ by exactly one cent (81 NAV rows, two executed-trade cash rows);
+three pairs agree on those fields except description. The CSV also contains 23
+additional zero-valued NAV rows. These findings are recorded discrepancies, not
+accepted rounding or description-normalization rules. No successful statement
+reconciliation or complete-history flag is claimed.
+
+Annual order history also contains a repeated order identity with changed content;
+order snapshots remain diagnostic, never executed-activity identities. Temporary
+merged diagnostic snapshots can contain extra rows after a partial failed merge.
+Their counts are not authoritative: comparisons above use the preserved individual
+window responses and exact body sets, with no broker mutation or Ghostfolio request.
+
+The fresh direct export enables a new source-pinned CSV transition investigation;
+it cannot recover the exact producer or omitted input of an old July backfill.
+Unsupported legacy fund behavior remains outside the approved import policy,
+alongside the interest/compensation gate. History verification remains false.
+
 ## Cash taxonomy and dividend association
 
 Observed types: `CASH_TRANSACTION`, `FLATEX_CASH_SWEEP`, `TRANSACTION`,
@@ -84,6 +131,35 @@ remain fail-closed. Unobserved BUY/unit cases need validation in their owning ga
 Standalone annual exchange fees follow the separately verified
 [FEE/MANUAL contract](fee-contract.md). Brokerage and AutoFX are excluded from
 those fees; ambiguous commission-to-execution reconciliation blocks the account.
+
+## Historical scope extension findings
+
+The full raw-window stable set contains 110 paid dividend rows and 112 withholding
+rows. Exact product/currency/payment/value-date grouping yields 95 unique pairs.
+The remaining groups contain 15 payment-only rows, 13 tax-only singletons and two
+tax-only double groups. Nine payment-only rows have exactly one same-product,
+same-currency, same-calendar-day candidate with equal value date: eight timestamps
+differ by one second and one by four seconds. Each candidate/payment appears
+exactly once with its own financial fields in the retained CSV, at the same local
+minute. This corroborates the recorded rows, not an explicit payment reference.
+Five payments have no same-day withholding candidate and all use HKD; one has two
+candidates. Five isolated withholding rows are positive. The current exact-match,
+missing-tax and reversal guards remain intact; no tax is inferred or summed.
+
+A separate offline per-execution arithmetic diagnostic used placeholder symbols
+and broker currencies, not independently verified Yahoo quotes. Of 70 STOCK
+executions (41 BUY, 29 SELL), 34 passed the existing converter. The other outcomes
+were 18 invalid FX rates, three flagged transfers, five absent/invalid financial
+values, six uncharacterized currency-unit cases and four inconsistent side/sign
+cases. These are refusal outcomes, not diagnosed financial errors or permission
+to synthesize missing values. The source currencies were EUR, USD, JPY and CAD.
+No holding, quote mapping, full-source acceptance or financial write was proved.
+
+The broader stable ledger contains 16 Flatex interest rows, all zero, and one
+positive monetary-fund compensation. Unknown legacy fund events and every existing
+unsupported category still block the whole account. A follow-up policy proposal
+is separate from the approved implementation; it must be reviewed before changing
+these boundaries. See [the proposed contract extension](plans/history-contract-extension.md).
 
 ## Current cash
 

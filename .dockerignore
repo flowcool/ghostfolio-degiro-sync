@@ -6,3 +6,6 @@
 !ghostfolio_core.py
 !cash-rules.yaml
 !entrypoint.sh
+!scripts/
+scripts/**
+!scripts/recover_degiro.py

@@ -154,6 +154,26 @@ def test_existing_identity_cannot_change_mapping_or_amount(snapshot):
         run(snapshot, [opening_holding(), row], dry_run=False)
 
 
+@pytest.mark.parametrize('dry_run', [True, False])
+def test_changed_configured_mapping_preserves_native_shaped_existing_rows(snapshot, tmp_path, dry_run):
+    canonical = adapter.normalize_trades(snapshot, TARGET['id'], MAPPING, QUOTES)[0]
+    existing = {'activities': [opening_holding(), activity_row(canonical, 'canonical')], 'count': 2}
+    before = deepcopy(existing)
+    config = {'source_account': '123', 'target_account': TARGET['id'],
+        'ghost_host': 'http://localhost:3333', 'state_dir': str(tmp_path), 'dry_run': dry_run}
+
+    def forbidden(*args):
+        pytest.fail('Changed mapping reached a financial callback')
+
+    with pytest.raises(RuntimeError, match='^Existing DEGIRO identity changed financial evidence$'):
+        adapter.synchronize_account(config, snapshot, TARGET, existing,
+            {'US0378331005': 'CHANGED_TEST'}, {'CHANGED_TEST': 'USD'},
+            forbidden, forbidden, now=NOW)
+    assert existing == before
+    with adapter.account_journal(config) as journal:
+        assert journal['document']['pending'] is None
+
+
 def test_unrelated_crypto_context_is_preserved_without_blocking_target(snapshot):
     foreign = opening_holding()
     foreign.update(id='crypto', accountId='unrelated')

@@ -1,0 +1,59 @@
+# yaml-language-server: $schema=https://www.coderabbit.ai/integrations/schema.v2.json
+inheritance: true
+reviews:
+  profile: chill
+  poem: false
+  in_progress_fortune: false
+  review_status: true
+  auto_review:
+    enabled: true
+    # Work is delivered as stacked PRs, often drafts: review every base branch,
+    # not only the default one.
+    drafts: true
+    base_branches:
+      - ".*"
+  # Functional, docstring-free convention; the warning is noise on every PR.
+  pre_merge_checks:
+    docstrings:
+      mode: "off"
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+  tools:
+    ruff:
+      enabled: false
+    languagetool:
+      enabled: false
+  path_instructions:
+    - path: "ghostfolio_core.py"
+      instructions: >-
+        Immutable byte projection of the pinned IBKR core: any hand edit is a
+        defect. Changes must come only from scripts/check_core.py regeneration
+        with CORE_PROVENANCE.md updated.
+    - path: "degiro_to_ghostfolio.py"
+      instructions: >-
+        DEGIRO is a private, reverse-engineered API: validate response shapes
+        and fail loud, never guess. Check account isolation, idempotent import
+        and cash handling, exact Decimal/currency semantics, durable
+        uncertain-write journal and lock behavior across restarts, exact
+        Ghostfolio origin allow-listing without redirects, and that no password,
+        TOTP secret, session id, token or account data reaches logs or errors.
+    - path: "scripts/**/*.py"
+      instructions: >-
+        Operator and lab tooling: no production endpoint or credential, no
+        deletion path without an exact ownership manifest, bounded subprocess
+        and filesystem use.
+    - path: "tests/**/*.py"
+      instructions: >-
+        Synthetic data only, no network or credentials. Prefer assertions that
+        fail if a safety guard is removed; flag untested guards and tests that
+        would pass on broken code.
+    - path: "{Dockerfile,entrypoint.sh,.github/**}"
+      instructions: >-
+        Digest-pinned base image, checksum-verified binaries, rootless runtime,
+        actions pinned by commit SHA, least-privilege permissions, no secrets in
+        PR workflows.
+chat:
+  art: false

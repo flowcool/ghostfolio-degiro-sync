@@ -8,9 +8,10 @@ import sys
 
 import pytest
 import yaml
+import requests
 
 import degiro_to_ghostfolio as adapter
-from test_degiro_sync import NOW, TARGET, MAPPING, QUOTES, activity_row, opening_holding, snapshot
+from test_degiro_sync import NOW, TARGET, MAPPING, QUOTES, activity_row, opening_holding, response, snapshot
 
 
 @pytest.fixture
@@ -94,16 +95,144 @@ def test_insufficient_readback_never_clears_pending(config, snapshot, evidence):
         rows[0]['quantity'] = None
     body = {'activities': rows, 'count': len(rows) + (1 if evidence == 'count' else 0)}
     with pytest.raises(RuntimeError):
-        adapter.resolve_import_intent(config, body)
+        adapter.resolve_import_intent(config, body, expected_intent_id=intent['id'])
     assert document(config)['pending'] == intent
 
 
 def test_complete_positive_readback_explicitly_resolves_without_replay(config, snapshot):
     intent = pending_import(config, snapshot)
     rows = [activity_row(a, str(i)) for i, a in enumerate(intent['payload'].values())]
-    assert adapter.resolve_import_intent(config, {'activities': rows, 'count': len(rows)}) == 2
+    assert adapter.resolve_import_intent(config, {'activities': rows, 'count': len(rows)},
+        expected_intent_id=intent['id']) == 2
     state = document(config)
     assert state['pending'] is None and intent['id'] in state['resolved']
+
+
+@pytest.mark.parametrize('identity', [None, True, 123, '', 'old-id', 'a' * 31, 'a' * 33, 'A' * 32])
+def test_invalid_expected_request_identity_preserves_journal(config, snapshot, identity):
+    pending_import(config, snapshot)
+    path = next(Path(config['state_dir']).glob('*.yaml'))
+    before = path.read_bytes()
+    with pytest.raises(RuntimeError, match='Invalid expected'):
+        adapter.resolve_import_intent(config, {}, expected_intent_id=identity)
+    assert path.read_bytes() == before
+
+
+def test_request_selection_is_mandatory(config, snapshot):
+    intent = pending_import(config, snapshot)
+    with pytest.raises(TypeError):
+        adapter.resolve_import_intent(config, {'activities': [], 'count': 0})
+    assert document(config)['pending'] == intent
+
+
+def test_old_request_proof_cannot_resolve_successor_with_same_payload(config, snapshot):
+    intent = pending_import(config, snapshot)
+    rows = [activity_row(a, str(i)) for i, a in enumerate(intent['payload'].values())]
+    body = {'activities': rows, 'count': len(rows)}
+    assert adapter.resolve_import_intent(config, body, expected_intent_id=intent['id']) == 2
+    # Simulate a later separately authorized request, preserving identical DTOs.
+    with adapter.account_journal(config) as journal:
+        successor = adapter.begin_intent(journal, 'import', deepcopy(intent['payload']))
+        path = journal['path']
+    before = path.read_bytes()
+    with pytest.raises(RuntimeError, match='identity changed'):
+        adapter.resolve_import_intent(config, body, expected_intent_id=intent['id'])
+    assert path.read_bytes() == before
+    assert document(config)['pending']['id'] == successor
+    with pytest.raises(RuntimeError, match='durable write intent'):
+        synchronize(config, snapshot, lambda *args: pytest.fail('Successor replayed'))
+
+
+@pytest.mark.parametrize('confirm', [False, True])
+def test_authenticated_recovery_holds_lock_and_uses_only_get(config, snapshot, monkeypatch, confirm):
+    intent = pending_import(config, snapshot)
+    path = next(Path(config['state_dir']).glob('*.yaml'))
+    before = path.read_bytes()
+    rows = [opening_holding()] + [activity_row(a, str(i)) for i, a in enumerate(intent['payload'].values())]
+    calls = []
+    def send(session, request, **options):
+        calls.append(request)
+        assert request.method == 'GET'
+        assert request.headers['Authorization'] == 'Bearer TOKEN-SENTINEL'
+        assert session.trust_env is False and options['allow_redirects'] is False
+        assert options['timeout'] == (10, 60)
+        with pytest.raises(RuntimeError, match='Another synchronization'):
+            with adapter.account_journal(config):
+                pytest.fail('Recovery failed to hold account lock across readback')
+        return response(TARGET if request.url.endswith('/target-a') else {'activities': rows, 'count': len(rows)})
+    monkeypatch.setattr(requests.Session, 'send', send)
+    result = adapter.readback_import_intent({**config, 'ghost_token': 'TOKEN-SENTINEL'},
+        expected_intent_id=intent['id'], confirm=confirm)
+    assert result['matched'] == 2 and result['confirmed'] is confirm
+    assert len(result['snapshot_sha256']) == 64
+    assert [r.url for r in calls] == ['http://localhost:3333/api/v1/account/target-a',
+                                     'http://localhost:3333/api/v1/activities']
+    if confirm:
+        assert document(config)['pending'] is None
+    else:
+        assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize('failure', ['stale-id', 'cash', 'invalid-confirm', 'unsafe-origin'])
+def test_recovery_preconditions_fail_before_http(config, snapshot, monkeypatch, failure):
+    intent = pending_import(config, snapshot)
+    config['ghost_token'] = 'TOKEN-SENTINEL'
+    identity, confirm = intent['id'], True
+    if failure == 'stale-id':
+        identity = 'a' * 32 if intent['id'] != 'a' * 32 else 'b' * 32
+    elif failure == 'cash':
+        with adapter.account_journal(config) as journal:
+            journal['document']['pending']['kind'] = 'cash'
+            adapter.write_journal(journal)
+    elif failure == 'unsafe-origin':
+        config['ghost_host'] = 'https://evil.example'
+    else:
+        confirm = 'true'
+    path = next(Path(config['state_dir']).glob('*.yaml'))
+    before = path.read_bytes()
+    monkeypatch.setattr(requests.Session, 'send', lambda *a, **k: pytest.fail('Invalid recovery sent HTTP'))
+    with pytest.raises(RuntimeError):
+        adapter.readback_import_intent(config, expected_intent_id=identity, confirm=confirm)
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize('failure', ['account-status', 'wrong-target', 'redacted', 'inactive',
+    'currency', 'activity-status', 'partial', 'malformed', 'redirect', 'transport'])
+def test_failed_authenticated_readback_never_confirms(config, snapshot, monkeypatch, failure):
+    intent = pending_import(config, snapshot)
+    path = next(Path(config['state_dir']).glob('*.yaml'))
+    before = path.read_bytes()
+    rows = [opening_holding()] + [activity_row(a, str(i)) for i, a in enumerate(intent['payload'].values())]
+    def send(session, request, **options):
+        assert request.method == 'GET'
+        if failure == 'transport':
+            raise requests.Timeout('TOKEN-SENTINEL PRIVATE-SENTINEL')
+        if failure == 'redirect':
+            return response({}, 302)
+        if request.url.endswith('/target-a'):
+            body = deepcopy(TARGET)
+            if failure == 'wrong-target':
+                body['id'] = 'other'
+            elif failure == 'redacted':
+                body['balance'] = None
+            elif failure == 'inactive':
+                body['isExcluded'] = True
+            elif failure == 'currency':
+                body['currency'] = 'UNKNOWN'
+            return response(body, 500 if failure == 'account-status' else 200)
+        if failure == 'malformed':
+            result = response()
+            result._content = b'not-json'
+            return result
+        actual = rows[:-1] if failure == 'partial' else rows
+        return response({'activities': actual, 'count': len(actual)},
+            500 if failure == 'activity-status' else 200)
+    monkeypatch.setattr(requests.Session, 'send', send)
+    with pytest.raises((RuntimeError, ValueError, requests.RequestException)) as error:
+        adapter.readback_import_intent({**config, 'ghost_token': 'TOKEN-SENTINEL'},
+            expected_intent_id=intent['id'], confirm=True)
+    assert 'TOKEN-SENTINEL' not in str(error.value) and 'PRIVATE-SENTINEL' not in str(error.value)
+    assert path.read_bytes() == before
 
 
 def test_cash_response_loss_also_survives_restart(config, snapshot):
@@ -117,7 +246,8 @@ def test_cash_response_loss_also_survives_restart(config, snapshot):
     with pytest.raises(RuntimeError, match='durable write intent'):
         synchronize(deepcopy(config), snapshot, lambda *args: pytest.fail('Cash uncertainty replay'))
     with pytest.raises(RuntimeError, match='No recoverable'):
-        adapter.resolve_import_intent(config, {'activities': [], 'count': 0})
+        adapter.resolve_import_intent(config, {'activities': [], 'count': 0},
+            expected_intent_id=document(config)['pending']['id'])
 
 
 def test_journal_write_failure_prevents_dispatch(config, snapshot, monkeypatch):
