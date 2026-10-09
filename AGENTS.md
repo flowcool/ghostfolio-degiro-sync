@@ -56,3 +56,17 @@ Record the review URL and reviewed SHA in Beads and the PR. Skipped, pending or
 rate-limited reviews are not evidence. Florent manages hourly review triggers
 externally; do not schedule or repeat them here. Production financial mutations,
 cleanup and deployment retain their separate explicit authorization gates.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in the shared Beads database, scoped with `project=ghostfolio-degiro-sync`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The canonical triage roles use the default label vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository. See `docs/agents/domain.md`.
