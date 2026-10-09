@@ -57,6 +57,18 @@ rate-limited reviews are not evidence. Florent manages hourly review triggers
 externally; do not schedule or repeat them here. Production financial mutations,
 cleanup and deployment retain their separate explicit authorization gates.
 
+## Execution continuity
+
+When Florent requests autonomous execution, carry the agreed scope across task,
+commit and PR boundaries. A completed subtask or a pending external review is a
+progress update, not a reason to end the turn: select the next independently
+actionable authorized task. Do not require another "continue" message. Stop only
+when the authorized scope is complete, indispensable information is unavailable,
+or the next action requires an explicit authorization that has not been granted.
+An explicit pause request wins: finish only the current task when Florent permits
+that completion, reconcile durable state, then pause without selecting more work.
+Keep the review-before-merge and production authorization gates above.
+
 ## Agent skills
 
 ### Issue tracker

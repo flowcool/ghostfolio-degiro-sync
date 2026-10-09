@@ -106,8 +106,12 @@ Multiple same-product/date candidates remain separate and block ambiguous pairin
 Payment identity is the stable dividend row ID, never a calendar-day key. Upcoming
 payments are excluded. No date-proximity matching or unconditional summation is safe.
 
-Interest and monetary-fund compensation are recognized but unsupported and block
-account writes. Their policy belongs to `infra-8tt.56.14` by Florent's decision.
+Under the [adopted cash-yield convention](interest-compensation-policy.md),
+characterized zero EUR Flatex interest is retained as zero INTEREST and positive
+EUR monetary-fund compensation as separately identified INTEREST. Exact type,
+description, cent-valued amount, offset dates and stable ID are required. Unobserved
+nonzero interest, zero/negative compensation, unknown fields/relationships or other
+currencies block account writes; no gross income or tax is inferred.
 Known cash-only FX/funding/sweep rows are not security trades or fee activities.
 
 ## Execution, commission and FX

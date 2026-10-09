@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import select
 import subprocess
@@ -226,7 +227,13 @@ FOR EACH ROW EXECUTE FUNCTION c13_block_owned_cash();
                 else:
                     cash_released = True
             driver.stdin.flush()
-    assert driver.wait(timeout=30) == 0 and released and cash_released and quiescent == 2
+    status = driver.wait(timeout=30)
+    if status != 0:
+        for line in driver.stderr.read().splitlines():
+            if re.fullmatch(r'Failure location: [A-Za-z0-9_.-]+:[0-9]+:[A-Za-z0-9_<>]+', line):
+                print(line, flush=True)
+        raise RuntimeError('Owned acceptance driver failed; private details suppressed')
+    assert released and cash_released and quiescent == 2
     print('PASS owned internal network, distinct temporary database, no published ports/production credentials; native INSERT/cash barriers and two independent quiescence proofs verified', flush=True)
 
 

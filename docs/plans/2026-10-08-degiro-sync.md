@@ -320,3 +320,16 @@ contract; adopting them is a separate scoped decision. Reuse remains Option C.
 The sibling is read-only. GitHub settings and applicable security/release workflows
 are mirrored; container build gates are enabled with Phase 5 packaging rather than
 requiring checks for artifacts that do not yet exist. C1-C15 remain unchanged.
+
+## Delegated cash-yield reporting extension (2026-10-09)
+
+Florent delegated accounting arbitration and supplied the money-market fund
+compensation explanation and official framework documents. The adopted
+[reporting contract](../interest-compensation-policy.md) extends the initial
+activity scope with characterized zero EUR Flatex interest and positive EUR
+monetary-fund compensation, represented as distinctly identified INTEREST.
+This convention preserves cash yield and source identity; it is not a tax ruling.
+Unobserved signs, currencies, product/order/FX/tax relationships and source fields
+remain write-blocking. Existing identity/readback/recovery and C1-C15 gates remain
+applicable; legacy NAV/history, CSV transition and production authorization are
+not relaxed by this extension.

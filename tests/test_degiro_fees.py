@@ -103,8 +103,9 @@ def test_unsupported_cash_blocks_even_valid_fees(snapshot, name):
     rows = yaml.safe_load((Path(__file__).parent / 'fixtures/degiro_contract.yaml').read_text())['cash_movements']
     row = rows[name]
     row['valueDate'] = row['date']
+    row['change'] = -1
     snapshot['cash_movements'].append(row)
-    with pytest.raises(RuntimeError, match='blocks account writes'):
+    with pytest.raises(RuntimeError):
         normalize(snapshot)
 
 

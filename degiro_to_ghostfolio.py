@@ -332,10 +332,12 @@ def classify_cash_movements(rows, rules=None):
             if not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency):
                 raise RuntimeError("Invalid DEGIRO cash currency")
             broker_instant(row.get("valueDate"))
-            if ((not amount and rule.get("treatment") != "unsupported_blocking")
+            if ((not amount and rule.get("treatment") not in ("unsupported_blocking", "zero_interest"))
                     or (rule.get("sign") == "positive" and amount <= 0)
                     or (rule.get("sign") == "negative" and amount >= 0)):
                 raise RuntimeError("Unsupported DEGIRO cash sign or reversal")
+            if rule.get("treatment") in ("zero_interest", "positive_compensation"):
+                validate_cash_yield(row, name, rule["treatment"])
         if rule.get("product_required"):
             broker_identity(row.get("productId"))
         if rule.get("order_required") and (
@@ -343,6 +345,49 @@ def classify_cash_movements(rows, rules=None):
             raise RuntimeError("Missing DEGIRO cash order relation")
         result[name].append(row)
     return result
+
+
+def validate_cash_yield(row, category, treatment):
+    """Only characterized EUR receipts; no inferred taxes, FX or product links."""
+    expected = {"flatex_interest": "zero_interest",
+                "monetary_fund_compensation": "positive_compensation"}
+    allowed = {"id", "type", "description", "change", "currency", "date",
+               "valueDate", "balance", "productId", "orderId"}
+    amount = financial_decimal(row["change"])
+    if (expected.get(category) != treatment or set(row) - allowed
+            or row.get("productId") is not None or row.get("orderId") not in (None, "")
+            or row["currency"] != "EUR" or amount % CURRENCY_QUANTA["EUR"] != 0
+            or (treatment == "zero_interest" and amount != 0)
+            or (treatment == "positive_compensation" and amount <= 0)):
+        raise RuntimeError("Unverified DEGIRO cash yield blocks account writes")
+    value = float(amount)
+    if not isfinite(value) or Decimal(str(value)) != amount:
+        raise RuntimeError("DEGIRO cash yield cannot be represented safely")
+
+
+def normalize_cash_yield(snapshot, target_account, rules=None):
+    """Retain zero interest and distinct compensation receipts without cash effects."""
+    rules = load_cash_rules() if rules is None else rules
+    classified = classify_cash_movements(snapshot["cash_movements"], rules)
+    if any(classified[name] for name, rule in rules.items()
+           if rule.get("treatment") == "unsupported_blocking"):
+        raise RuntimeError("Unsupported DEGIRO cash category blocks account writes")
+    if not isinstance(target_account, str) or not target_account.strip():
+        raise RuntimeError("Missing Ghostfolio target account")
+    source = broker_identity(snapshot["source_account"])
+    result = []
+    for category, kind, label in (("flatex_interest", "INTEREST", "FLATEX_INTEREST"),
+                                 ("monetary_fund_compensation", "COMPENSATION", "MMF_COMPENSATION")):
+        for row in classified.get(category, []):
+            validate_cash_yield(row, category, rules[category].get("treatment"))
+            if snapshot["account_info"]["baseCurrency"] != "EUR":
+                raise RuntimeError("Unverified DEGIRO cash yield account currency")
+            result.append({"accountId": target_account,
+                "comment": f"DEGIRO#{source}:{kind}:{broker_identity(row['id'])}",
+                "currency": "EUR", "dataSource": "MANUAL", "date": broker_instant(row["date"]),
+                "fee": 0, "quantity": 1, "symbol": f"GF_DEGIRO_{source}_{label}_EUR",
+                "type": "INTEREST", "unitPrice": float(financial_decimal(row["change"]))})
+    return sorted(result, key=lambda activity: (activity["date"], activity["comment"]))
 
 
 def associate_dividends(classified):
@@ -681,8 +726,12 @@ def existing_activity_context(body, target_account):
             continue
         if profile["dataSource"] not in ("YAHOO", "MANUAL"):
             raise RuntimeError("Unsupported target asset data source")
-        if row.get("type") not in ("BUY", "SELL", "DIVIDEND", "FEE"):
+        if row.get("type") not in ("BUY", "SELL", "DIVIDEND", "FEE", "INTEREST"):
             raise RuntimeError("Unsupported target activity type blocks synchronization")
+        if row.get("type") == "INTEREST" and (
+                profile["dataSource"] != "MANUAL" or row.get("currency") != "EUR"
+                or financial_decimal(row["quantity"]) != 1 or financial_decimal(row["fee"]) != 0):
+            raise RuntimeError("Unverified target interest representation")
         if not core.activity_is_active(row) or not core.activity_date_is_current(row):
             raise RuntimeError("Inactive or future target activity blocks synchronization")
         if row.get("type") in ("BUY", "SELL"):
@@ -709,6 +758,25 @@ def activity_signature(activity):
         raise RuntimeError("Incomplete Ghostfolio activity evidence") from None
 
 
+def validate_cash_yield_identity(activity, namespace):
+    """Canonical yield identities retain exact type, units and source symbol."""
+    comment = activity.get("comment")
+    for kind, label in (("INTEREST", "FLATEX_INTEREST"), ("COMPENSATION", "MMF_COMPENSATION")):
+        if not isinstance(comment, str) or not comment.startswith(namespace + kind + ":"):
+            continue
+        source = namespace.removeprefix("DEGIRO#").removesuffix(":")
+        amount = financial_decimal(activity.get("unitPrice"))
+        if (activity.get("type") != "INTEREST" or activity.get("dataSource") != "MANUAL"
+                or activity.get("symbol") != f"GF_DEGIRO_{source}_{label}_EUR"
+                or activity.get("currency") != "EUR"
+                or financial_decimal(activity.get("quantity")) != 1
+                or financial_decimal(activity.get("fee")) != 0
+                or amount % CURRENCY_QUANTA["EUR"] != 0
+                or (kind == "INTEREST" and amount != 0)
+                or (kind == "COMPENSATION" and amount <= 0)):
+            raise RuntimeError("Invalid canonical DEGIRO cash yield evidence")
+
+
 def pending_activities(activities, existing, target_account, source_account):
     """Canonical identities never fall back to proximity or another account."""
     namespace = f"DEGIRO#{broker_identity(source_account)}:"
@@ -719,10 +787,11 @@ def pending_activities(activities, existing, target_account, source_account):
             continue
         if row.get("accountId") != target_account["id"]:
             raise RuntimeError("DEGIRO identity is owned by another target account")
-        if not re.fullmatch(re.escape(namespace) + r"(TRADE|DIVIDEND|FEE):[1-9][0-9]*", comment):
+        if not re.fullmatch(re.escape(namespace) + r"(TRADE|DIVIDEND|FEE|INTEREST|COMPENSATION):[1-9][0-9]*", comment):
             raise RuntimeError("Malformed existing DEGIRO canonical identity")
         if comment in known:
             raise RuntimeError("Duplicate existing DEGIRO canonical identity")
+        validate_cash_yield_identity(row, namespace)
         known[comment] = row
     result = []
     seen = {}
@@ -730,6 +799,7 @@ def pending_activities(activities, existing, target_account, source_account):
         if activity.get("accountId") != target_account["id"]:
             raise RuntimeError("Candidate target account mismatch")
         comment = activity["comment"]
+        validate_cash_yield_identity(activity, namespace)
         signature = activity_signature(activity)
         if comment in seen:
             if signature != seen[comment]:
@@ -748,7 +818,7 @@ def pending_activities(activities, existing, target_account, source_account):
                 continue
             gap = abs((datetime.fromisoformat(broker_instant(row["date"])).date()
                        - datetime.fromisoformat(activity["date"]).date()).days)
-            if (gap <= 2 and (activity["type"] == "FEE" or row["symbol"] == activity["symbol"])):
+            if (gap <= 2 and (activity["type"] in ("FEE", "INTEREST") or row["symbol"] == activity["symbol"])):
                 raise RuntimeError("Manual or CSV activity requires explicit reconciliation")
         result.append(activity)
     return result
@@ -768,7 +838,7 @@ def cleanup_preflight(existing_body, manifest):
     for identity, activity in manifest["activities"].items():
         if (not isinstance(identity, str) or not isinstance(activity, dict) or set(activity) != set(TRADE_FIELDS)
                 or activity.get("accountId") != target or activity.get("comment") != identity
-                or not re.fullmatch(re.escape(namespace) + r"(TRADE|DIVIDEND|FEE):[1-9][0-9]*", identity)):
+                or not re.fullmatch(re.escape(namespace) + r"(TRADE|DIVIDEND|FEE|INTEREST|COMPENSATION):[1-9][0-9]*", identity)):
             raise RuntimeError("Unproved cleanup broker ownership")
         activity_signature(activity)
     rows, _ = existing_activity_context(existing_body, {"id": target})
@@ -977,6 +1047,7 @@ def synchronize_locked(config, snapshot, target_account, existing_body, mapping,
     activities = normalize_trades(snapshot, target_account["id"], mapping, quote_currencies)
     activities += normalize_dividends(snapshot, target_account["id"], mapping, quote_currencies)
     activities += normalize_fees(snapshot, target_account["id"])
+    activities += normalize_cash_yield(snapshot, target_account["id"])
     if any(not core.activity_date_is_current(activity) for activity in activities):
         raise RuntimeError("Future DEGIRO candidate blocks synchronization")
     pending = pending_activities(activities, existing, target_account, source)
