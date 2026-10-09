@@ -31,7 +31,7 @@ database writes. Those native paths remain byte-identical. The lab therefore
 proves transport/DTO/import/recovery behavior; it does not verify real Yahoo
 quote currency, live broker data or market-price performance.
 
-## Observed results (2026-10-08)
+## Observed results (2026-10-08 and 2026-10-09)
 
 | Scenario | Exact observed result |
 | --- | --- |
@@ -39,6 +39,7 @@ quote currency, live broker data or market-price performance.
 | Adapter DRY_RUN | Proposes3 rows; stored count remains1; balance remains0 |
 | First adapter import | Native SELL2, paid DIVIDEND and FEE preserve all10 canonical DTO fields; net holding8; current balance12.30EUR |
 | Repeated full sync | No proposed/imported rows; stored count remains4 |
+| Changed configured mapping after native import (2026-10-09) | Same source identities mapped from TEST to CHANGED_TEST with unchanged USD quote currency fail with the exact canonical financial-evidence conflict. Complete native activities and target balance remain unchanged; no pending intent is created |
 | Uncertain delayed INSERT | PostgreSQL BEFORE INSERT trigger blocks owned FEE999 on an advisory lock; HTTP times out; complete GET still contains only4 rows |
 | New Python process before release | Reads persisted intent and refuses synchronization; empty pending readback refuses resolution; no replay |
 | Release owned barrier | Native original request inserts exactly one row; complete count5; old request ID refuses even with positive readback. Rootless recovery CLI obtains authenticated GETs: default preflight retains intent and fresh-process fence; explicit local confirmation resolves selected request; repeated fee sync imports zero |
@@ -74,7 +75,19 @@ The first cash-barrier rehearsal failed because the controller saw Order before
 all migrations had created AccountBalance. No scenario was accepted from that
 attempt, and its resources were removed. Readiness now requires both tables.
 The controller bounds the entire driver protocol to600 seconds, with incomplete
-or oversized protocol lines rejected; failures still execute owned teardown.
+or oversized protocol lines rejected. Each barrier acquisition uses the same
+buffered `select`/`os.read` protocol with its own30-second deadline; a partial line
+cannot bypass that deadline. Invalid PID/acknowledgement, premature EOF and
+oversized output fail without echoing process data. A failed acquisition reaps
+its local subprocess before the controller tears down the owned lab.
+
+The2026-10-09 rehearsal replayed every scenario above from a freshly built
+rootless adapter image after the barrier correction. Both independent quiescence
+proofs and the mapping-change rejection passed. The generated worker, Compose
+containers/network, profile-fixture image and uniquely named adapter image were
+removed afterward. The controller pins the generated Compose name with `-p`
+and refuses optimized Python before Docker because its native evidence checks
+require assertions enabled.
 
 The CSV scenario now seeds output captured from the unchanged external V3
 converter over a public synthetic statement. Only its target account ID changes.

@@ -87,14 +87,16 @@ def main():
         'fee': 0, 'quantity': 10, 'symbol': 'TEST', 'type': 'BUY', 'unitPrice': 1}
     call('POST', '/api/v1/import', {'activities': [opening]}, 201)
 
-    def synchronize(snapshot, cfg):
+    def synchronize(snapshot, cfg, selected_mapping=None, selected_quotes=None):
         now = datetime.now(timezone.utc)
         snapshot['fetch_started_at'] = (now - timedelta(seconds=1)).isoformat()
         snapshot['fetched_at'] = now.isoformat()
         target = call('GET', '/api/v1/account/' + cfg['target_account'])
         existing = call('GET', '/api/v1/activities')
         with adapter.ghost_transport(cfg, target):
-            return adapter.synchronize_account(cfg, snapshot, target, existing, mapping, quotes,
+            return adapter.synchronize_account(cfg, snapshot, target, existing,
+                mapping if selected_mapping is None else selected_mapping,
+                quotes if selected_quotes is None else selected_quotes,
                 lambda batch: core.ghost_import_activities(cfg, batch),
                 lambda identity, amount: core.ghost_update_cash_balance(cfg, identity, amount))
 
@@ -120,6 +122,20 @@ def main():
     assert repeated['proposed'] == [] and repeated['accepted'] == []
     assert call('GET', '/api/v1/activities')['count'] == 4
     print('PASS native import: DRY_RUN zero writes;3 exact activities;net holding8;cash12.30 EUR;repeat zero imports', flush=True)
+
+    mapping_before = call('GET', '/api/v1/activities')
+    balance_before = call('GET', '/api/v1/account/' + account['id'])['balance']
+    try:
+        synchronize(data, config, {'US0378331005': 'CHANGED_TEST'}, {'CHANGED_TEST': 'USD'})
+    except RuntimeError as error:
+        assert str(error) == 'Existing DEGIRO identity changed financial evidence'
+    else:
+        raise AssertionError('Changed mapping silently adopted an existing canonical activity')
+    assert call('GET', '/api/v1/activities') == mapping_before
+    assert call('GET', '/api/v1/account/' + account['id'])['balance'] == balance_before
+    with adapter.account_journal(config) as journal:
+        assert journal['document']['pending'] is None
+    print('PASS changed mapping: canonical identity conflict before dispatch;exact native rows and cash unchanged;no pending intent', flush=True)
 
     delayed = deepcopy(data)
     delayed['transactions'] = []
