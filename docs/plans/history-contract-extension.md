@@ -32,7 +32,7 @@ holdings or prove opening balances; no automatic cutover is proposed.
 
 Create the atomic implementation issues only after agreeing their scope. Keep one
 implementation issue in progress and one owner per acceptance criterion. Existing
-policy owner14 retains interest/compensation; new independently actionable scopes
+policy owner `infra-8tt.56.14` retains interest/compensation; new independently actionable scopes
 must not be hidden inside that issue or close acceptance prematurely.
 
 ## Native representation evidence and open decisions
