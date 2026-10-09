@@ -1,7 +1,7 @@
 # ghostfolio-degiro-sync
 
 Sync DEGIRO trades, dividends and cash into self-hosted [Ghostfolio](https://ghostfol.io), on a
-schedule — sibling of [`ghostfolio-ibkr-sync`](../ghostfolio-ibkr-sync).
+schedule — sibling of [`ghostfolio-ibkr-sync`](https://github.com/flowcool/ghostfolio-ibkr-sync).
 
 The adapter provides an explicit [read-only DEGIRO procedure](docs/read-only.md).
 An explicit [DRY_RUN synchronization command](docs/synchronization.md) now
@@ -13,6 +13,31 @@ and live-validation gates; [FINDINGS.md](FINDINGS.md) preserves the reconnaissan
 Foundation: [`degiro-connector`](https://github.com/Chavithra/degiro-connector) for the dated
 activity feed (transactions + cash movements, unattended TOTP), with
 [`Export-To-Ghostfolio`](https://github.com/dickwolff/Export-To-Ghostfolio) as CSV backfill/fallback.
+
+## Operational readiness
+
+The guarded adapter implements executed BUY/SELL, paid DIVIDEND with verified
+withholding, autonomous exchange-connection FEE and verified current cash.
+DRY_RUN is the default. An unknown or ambiguous relevant event blocks the account
+before financial dispatch.
+
+Known incompatible API formats produce explicit privacy-safe errors before
+synchronization or successful read-only snapshot publication; detection uses
+response structure and content rather than a calendar cutoff. See the
+[source contract](docs/source-contract.md) for supported shapes and diagnostics.
+Legacy monetary-fund formats remain unsupported. Flatex interest and monetary-fund
+compensation, including zero-valued relevant interest rows, still block writes;
+the [accounting-policy document](docs/interest-compensation-policy.md) is a proposal
+and does not enable their import.
+
+The disposable native Ghostfolio lab proves exact import/readback, repeat imports,
+mapping stability and conservative uncertain-result recovery. Real historical
+completeness and CSV adoption remain unverified: matching old output does not
+prove omitted events, instrument identity, equivalent fees or timestamps. No
+successful whole-account real synchronization or production readiness is claimed.
+Production financial writes, cleanup and deployment require separate approval.
+Source prereleases describe delivered code and evidence; they do not publish a
+container or satisfy those acceptance gates.
 
 The deliberate-copy architecture separates the broker adapter
 (`degiro_to_ghostfolio.py`) from the immutable Ghostfolio core
