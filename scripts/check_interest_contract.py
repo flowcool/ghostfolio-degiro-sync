@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 import secrets
 import sys
-import tempfile
 import time
 import uuid
 
@@ -13,6 +12,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ghostfolio_core as core
+import lab_cleanup
 from isolated_acceptance import GHOST_IMAGE, POSTGRES_IMAGE, REDIS_IMAGE, run
 
 
@@ -98,59 +98,57 @@ def probe(host):
             'balance_eur': 0, 'created': 3, 'immutable_core_evidence': True}
 
 
+def interest(project, directory, state):
+    password = secrets.token_hex(24)
+    services = {
+        'postgres': {'image': POSTGRES_IMAGE, 'networks': ['lab'],
+            'tmpfs': ['/var/lib/postgresql/data'],
+            'environment': {'POSTGRES_DB': 'interestlab', 'POSTGRES_USER': 'interestlab',
+                            'POSTGRES_PASSWORD': password},
+            'healthcheck': {'test': ['CMD-SHELL', 'pg_isready -U interestlab -d interestlab'],
+                'interval': '1s', 'timeout': '3s', 'retries': 30}},
+        'redis': {'image': REDIS_IMAGE, 'networks': ['lab']},
+        'ghostfolio': {'image': GHOST_IMAGE, 'networks': ['lab'],
+            'depends_on': {'postgres': {'condition': 'service_healthy'},
+                           'redis': {'condition': 'service_started'}},
+            'environment': {'DATABASE_URL': 'postgresql://interestlab:' + password + '@postgres:5432/interestlab',
+                'ACCESS_TOKEN_SALT': secrets.token_hex(32), 'JWT_SECRET_KEY': secrets.token_hex(32),
+                'NODE_ENV': 'production', 'REDIS_HOST': 'redis', 'REDIS_PORT': '6379'}}}
+    compose = directory / 'compose.yaml'
+    compose.write_text(yaml.safe_dump({'name': project,
+        'networks': {'lab': {'internal': True}}, 'services': services}))
+    compose.chmod(0o600)
+    command = compose_command(project, compose)
+    run(*command, 'up', '-d', '--pull', 'never', timeout=120)
+    identities = {name: run(*command, 'ps', '-q', name).strip() for name in services}
+    info = {name: inspect_owned_container(identity, project)
+            for name, identity in identities.items()}
+    ensure(info['ghostfolio']['Config']['Image'] == GHOST_IMAGE)
+    network = project + '_lab'
+    ensure(json.loads(run('docker', 'network', 'inspect', network))[0]['Internal'] is True)
+    host = 'http://' + info['ghostfolio']['NetworkSettings']['Networks'][network]['IPAddress'] + ':3333'
+    sql = ['docker', 'exec', '-i', identities['postgres'], 'psql', '-U', 'interestlab',
+           '-d', 'interestlab', '-v', 'ON_ERROR_STOP=1', '-At']
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        try:
+            ensure(run(*sql, input_text='SELECT count(*) FROM "Order";\n').strip() == '0')
+            with requests.Session() as readiness:
+                readiness.trust_env = False
+                response = readiness.get(host + '/api/v1/health', timeout=(3, 3), allow_redirects=False)
+                if response.status_code == 200:
+                    break
+        except (RuntimeError, AssertionError, requests.RequestException):
+            pass
+        time.sleep(.5)
+    else:
+        raise RuntimeError('Owned interest instance not ready')
+    print(json.dumps(probe(host), sort_keys=True), flush=True)
+
+
 def main():
     project = 'degiro-interest-' + uuid.uuid4().hex[:12]
-    with tempfile.TemporaryDirectory(prefix='degiro-interest-') as directory:
-        directory = Path(directory)
-        password = secrets.token_hex(24)
-        services = {
-            'postgres': {'image': POSTGRES_IMAGE, 'networks': ['lab'],
-                'tmpfs': ['/var/lib/postgresql/data'],
-                'environment': {'POSTGRES_DB': 'interestlab', 'POSTGRES_USER': 'interestlab',
-                                'POSTGRES_PASSWORD': password},
-                'healthcheck': {'test': ['CMD-SHELL', 'pg_isready -U interestlab -d interestlab'],
-                    'interval': '1s', 'timeout': '3s', 'retries': 30}},
-            'redis': {'image': REDIS_IMAGE, 'networks': ['lab']},
-            'ghostfolio': {'image': GHOST_IMAGE, 'networks': ['lab'],
-                'depends_on': {'postgres': {'condition': 'service_healthy'},
-                               'redis': {'condition': 'service_started'}},
-                'environment': {'DATABASE_URL': 'postgresql://interestlab:' + password + '@postgres:5432/interestlab',
-                    'ACCESS_TOKEN_SALT': secrets.token_hex(32), 'JWT_SECRET_KEY': secrets.token_hex(32),
-                    'NODE_ENV': 'production', 'REDIS_HOST': 'redis', 'REDIS_PORT': '6379'}}}
-        compose = directory / 'compose.yaml'
-        compose.write_text(yaml.safe_dump({'name': project,
-            'networks': {'lab': {'internal': True}}, 'services': services}))
-        compose.chmod(0o600)
-        command = compose_command(project, compose)
-        try:
-            run(*command, 'up', '-d', '--pull', 'never', timeout=120)
-            identities = {name: run(*command, 'ps', '-q', name).strip() for name in services}
-            info = {name: inspect_owned_container(identity, project)
-                    for name, identity in identities.items()}
-            ensure(info['ghostfolio']['Config']['Image'] == GHOST_IMAGE)
-            network = project + '_lab'
-            ensure(json.loads(run('docker', 'network', 'inspect', network))[0]['Internal'] is True)
-            host = 'http://' + info['ghostfolio']['NetworkSettings']['Networks'][network]['IPAddress'] + ':3333'
-            sql = ['docker', 'exec', '-i', identities['postgres'], 'psql', '-U', 'interestlab',
-                   '-d', 'interestlab', '-v', 'ON_ERROR_STOP=1', '-At']
-            deadline = time.monotonic() + 120
-            while time.monotonic() < deadline:
-                try:
-                    ensure(run(*sql, input_text='SELECT count(*) FROM "Order";\n').strip() == '0')
-                    with requests.Session() as readiness:
-                        readiness.trust_env = False
-                        response = readiness.get(host + '/api/v1/health', timeout=(3, 3), allow_redirects=False)
-                        if response.status_code == 200:
-                            break
-                except (RuntimeError, AssertionError, requests.RequestException):
-                    pass
-                time.sleep(.5)
-            else:
-                raise RuntimeError('Owned interest instance not ready')
-            print(json.dumps(probe(host), sort_keys=True), flush=True)
-        finally:
-            run(*command, 'down', timeout=60)
-            print('Owned interest containers/network removed', flush=True)
+    lab_cleanup.execute(project, lambda directory, state: interest(project, directory, state))
 
 
 if __name__ == '__main__':

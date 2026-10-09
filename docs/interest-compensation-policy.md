@@ -75,7 +75,10 @@ Observed on 2026-10-09 at Ghostfolio image digest
 | Same instant and amount, different cash-event comment | One distinct new activity |
 | Full account readback | Three activities; interest total EUR 20; account cash remains EUR 0 |
 
-Both successful and failed runs remove only their owned containers and network.
+Both successful and failed runs attempt independent bounded cleanup of owned
+containers and the internal network. Failed teardown retains a private nonsecret
+ownership record for explicit recovery; catchable termination uses the same path.
+SIGKILL cannot guarantee cleanup. See the [lab recovery procedure](isolated-acceptance.md#cleanup-and-rollback-preflight).
 The database is temporary; no shared image is deleted. Offline tests verify
 changed financial readback and aggregate rejection, credential-log privacy,
 explicit EUR aggregate context and rejection of foreign/exposed container state.
@@ -128,8 +131,9 @@ refund/reversal refusal, repeat zero and uncertain-request fencing, then isolate
 native acceptance and private source/statement reconciliation. Native-contract
 proof above does not close those future integration criteria or C13-C14.
 
-Rollback of this characterization is a scoped Git revert. Lab rollback is
-`docker compose down` for the exact temporary Compose file created by the script;
-the `finally` path performs it before deleting that file. Keep broker archives
+Rollback of this characterization is a scoped Git revert. Lab rollback uses
+`scripts/lab_cleanup.py --recover <private-ownership-record>` when automatic
+teardown is incomplete. The temporary authentication manifest is removed;
+recovery independently revalidates exact resource IDs and UUID project labels. Keep broker archives
 and unresolved write journals intact. No live financial rollback, production
 interruption or deployment is part of this proposal.
