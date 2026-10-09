@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from scripts.isolated_acceptance import compose_command, driver_lines
+from scripts.isolated_acceptance import acquire_barrier, compose_command, driver_lines
 
 
 @pytest.mark.parametrize('program,expected', [
@@ -57,3 +57,55 @@ else:
     result = subprocess.run([sys.executable, '-O', '-c', program],
         capture_output=True, timeout=10)
     assert result.returncode == 0
+
+
+def test_barrier_preserves_split_identity_and_acknowledgement():
+    program = '''
+import os, sys
+assert sys.stdin.readline() == 'SELECT pg_backend_pid();\\n'
+assert sys.stdin.readline() == 'SELECT pg_advisory_lock(81005611);\\n'
+os.write(1, b'12')
+os.write(1, b'3\\n\\n')
+sys.stdin.read()
+'''
+    process, identity = acquire_barrier([sys.executable, '-c', program], timeout=5)
+    try:
+        assert identity == 123
+        assert process.poll() is None
+    finally:
+        process.terminate()
+        process.wait(timeout=5)
+        for stream in (process.stdin, process.stdout, process.stderr):
+            stream.close()
+
+
+@pytest.mark.parametrize('output,hang,message', [
+    (b'', True, 'deadline'),
+    (b'123', True, 'deadline'),
+    (b'123\n', True, 'deadline'),
+    (b'123\n', False, 'Incomplete'),
+    (b'sensitive-sentinel\n\n', False, 'identity'),
+    (b'0\n\n', False, 'identity'),
+    (b'2147483648\n\n', False, 'identity'),
+    (b'123\nsensitive-sentinel\n', False, 'acknowledgement'),
+    (b'\xff\n\n', False, 'Incomplete'),
+    (b'x' * 9000, False, 'line budget'),
+])
+def test_barrier_failures_are_bounded_private_and_reap_process(monkeypatch, output, hang, message):
+    created = []
+    original = subprocess.Popen
+
+    def start(*args, **kwargs):
+        process = original(*args, **kwargs)
+        created.append(process)
+        return process
+
+    monkeypatch.setattr('scripts.isolated_acceptance.subprocess.Popen', start)
+    program = ('import os, sys, time; sys.stdin.readline(); sys.stdin.readline(); '
+        f'os.write(1, {output!r}); ' + ('time.sleep(10)' if hang else ''))
+    with pytest.raises(RuntimeError, match=message) as failure:
+        acquire_barrier([sys.executable, '-c', program], timeout=.2 if hang else 5)
+    assert 'sensitive-sentinel' not in str(failure.value)
+    assert len(created) == 1 and created[0].poll() is not None
+    assert all(stream.closed for stream in
+        (created[0].stdin, created[0].stdout, created[0].stderr))

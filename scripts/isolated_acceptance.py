@@ -51,6 +51,38 @@ def driver_lines(process, timeout=600):
             yield line.decode('utf-8')
 
 
+def acquire_barrier(sql_command, timeout=30):
+    process = subprocess.Popen(sql_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True)
+    try:
+        process.stdin.write('SELECT pg_backend_pid();\nSELECT pg_advisory_lock(81005611);\n')
+        process.stdin.flush()
+        lines = driver_lines(process, timeout=timeout)
+        identity = next(lines).strip()
+        if not identity.isascii() or not identity.isdecimal() or len(identity) > 10:
+            raise RuntimeError('Invalid owned barrier process identity')
+        identity = int(identity)
+        if not 0 < identity <= 2147483647:
+            raise RuntimeError('Invalid owned barrier process identity')
+        if next(lines).strip() != '':
+            raise RuntimeError('Invalid owned barrier acquisition acknowledgement')
+        return process, identity
+    except BaseException as error:
+        if process.poll() is None:
+            process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+        finally:
+            for stream in (process.stdin, process.stdout, process.stderr):
+                stream.close()
+        if isinstance(error, (StopIteration, UnicodeDecodeError)):
+            raise RuntimeError('Incomplete owned barrier response') from None
+        raise
+
+
 def main():
     if not __debug__:
         raise RuntimeError('Owned acceptance requires Python assertions enabled')
@@ -138,21 +170,12 @@ CREATE TRIGGER c13_owned_cash_delay BEFORE INSERT OR UPDATE ON "AccountBalance"
 FOR EACH ROW EXECUTE FUNCTION c13_block_owned_cash();
 ''')
 
-            def acquire_barrier():
-                process = subprocess.Popen(sql_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE, text=True)
-                process.stdin.write('SELECT pg_backend_pid();\nSELECT pg_advisory_lock(81005611);\n')
-                process.stdin.flush()
-                identity = int(process.stdout.readline().strip())
-                assert process.stdout.readline().strip() == ''
-                return process, identity
-
             def release_barrier(process):
                 process.stdin.write('SELECT pg_advisory_unlock(81005611);\n\\q\n')
                 process.stdin.flush()
                 assert process.wait(timeout=10) == 0
 
-            barrier, barrier_pid = acquire_barrier()
+            barrier, barrier_pid = acquire_barrier(sql_command)
             run('docker', 'run', '-d', '--name', worker, '--network', network,
                 '--read-only', '--tmpfs', '/tmp:rw,nosuid,nodev,size=32m', '--cap-drop=ALL',
                 '--security-opt=no-new-privileges',
@@ -170,7 +193,7 @@ FOR EACH ROW EXECUTE FUNCTION c13_block_owned_cash();
                 print(line.strip(), flush=True)
                 if line.startswith('ARM_BARRIER:'):
                     assert barrier.poll() is not None
-                    barrier, barrier_pid = acquire_barrier()
+                    barrier, barrier_pid = acquire_barrier(sql_command)
                     driver.stdin.write('armed\n')
                     driver.stdin.flush()
                 elif line.startswith(('BARRIER_READY:', 'CASH_RELEASE_READY:', 'QUIESCENCE_READY:')):
