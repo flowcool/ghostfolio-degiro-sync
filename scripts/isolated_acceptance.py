@@ -26,6 +26,10 @@ def run(*args, input_text=None, timeout=60):
     return result.stdout
 
 
+def compose_command(project, path):
+    return ['docker', 'compose', '-p', project, '-f', str(path)]
+
+
 def driver_lines(process, timeout=600):
     """Bound the whole lab protocol, including a driver that never reaches EOF."""
     deadline = time.monotonic() + timeout
@@ -48,6 +52,8 @@ def driver_lines(process, timeout=600):
 
 
 def main():
+    if not __debug__:
+        raise RuntimeError('Owned acceptance requires Python assertions enabled')
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--runtime-image', required=True)
     args = parser.parse_args()
@@ -86,7 +92,7 @@ process.stdout.write(source.replace(old, replacement));
         compose = directory / 'compose.yaml'
         compose.write_text(yaml.safe_dump({'name': project, 'networks': {'lab': {'internal': True}}, 'services': services}))
         compose.chmod(0o600)
-        command = ['docker', 'compose', '-f', str(compose)]
+        command = compose_command(project, compose)
         barrier = None
         driver = None
         try:

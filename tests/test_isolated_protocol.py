@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from scripts.isolated_acceptance import driver_lines
+from scripts.isolated_acceptance import compose_command, driver_lines
 
 
 @pytest.mark.parametrize('program,expected', [
@@ -34,3 +34,26 @@ def test_driver_protocol_failure_is_bounded(program, message):
             process.terminate()
         process.wait(timeout=5)
         process.stdout.close()
+
+
+def test_acceptance_compose_project_overrides_environment(monkeypatch, tmp_path):
+    monkeypatch.setenv('COMPOSE_PROJECT_NAME', 'unowned-production')
+    assert compose_command('owned-uuid', tmp_path / 'compose.yaml') == [
+        'docker', 'compose', '-p', 'owned-uuid', '-f', str(tmp_path / 'compose.yaml')]
+
+
+def test_optimized_acceptance_refuses_before_docker_or_argument_handling():
+    program = '''
+import scripts.isolated_acceptance as lab
+lab.run = lambda *args, **kwargs: (_ for _ in ()).throw(SystemExit('Docker called'))
+try:
+    lab.main()
+except RuntimeError as error:
+    if str(error) != 'Owned acceptance requires Python assertions enabled':
+        raise
+else:
+    raise SystemExit('Optimized harness accepted')
+'''
+    result = subprocess.run([sys.executable, '-O', '-c', program],
+        capture_output=True, timeout=10)
+    assert result.returncode == 0
