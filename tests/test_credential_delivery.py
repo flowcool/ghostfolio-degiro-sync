@@ -149,3 +149,73 @@ def test_termination_blocks_both_signals_before_cleanup_transition(monkeypatch):
         delivery.terminated(signal.SIGTERM, None)
     assert error.value.code == 128 + signal.SIGTERM
     assert calls == [(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})]
+
+
+@pytest.mark.parametrize('failure', [None, 'save', 'unlink', 'remove'])
+@pytest.mark.parametrize('primary_failure', [False, True])
+def test_main_finalization_restores_signal_state_and_preserves_primary_error(
+        tmp_path, monkeypatch, capsys, failure, primary_failure):
+    import sys
+    import yaml
+
+    monkeypatch.setattr(delivery, '__file__', str(tmp_path / 'scripts/check.py'))
+    monkeypatch.setattr(sys, 'argv', ['check.py', '--loader', 'synthetic', '--image', 'synthetic'])
+    monkeypatch.setattr(delivery, 'loader_fixture', lambda *args, **kwargs: {})
+    real_save, real_unlink = delivery.save_record, Path.unlink
+    saves = []
+
+    def save(record, project, resources):
+        saves.append(record)
+        if failure == 'save' and len(saves) == 3:
+            raise OSError('PRIVATE-FAILURE-SENTINEL')
+        real_save(record, project, resources)
+
+    def check(image, directory, project, record, resources, *args):
+        if not resources:
+            resources['synthetic-container'] = 'a' * 64
+            save(record, project, resources)
+        if primary_failure:
+            raise ValueError('primary operation failed')
+
+    def remove(*args):
+        if failure == 'remove':
+            raise OSError('PRIVATE-FAILURE-SENTINEL')
+
+    def unlink(path, *args, **kwargs):
+        if failure == 'unlink' and path.suffix == '.yaml':
+            raise OSError('PRIVATE-FAILURE-SENTINEL')
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(delivery, 'save_record', save)
+    monkeypatch.setattr(delivery, 'check_container', check)
+    monkeypatch.setattr(delivery, 'remove_owned', remove)
+    monkeypatch.setattr(Path, 'unlink', unlink)
+    handlers = {signum: signal.getsignal(signum) for signum in delivery.SIGNALS}
+    mask = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+    try:
+        if primary_failure:
+            with pytest.raises(ValueError, match='primary operation failed'):
+                delivery.main()
+        elif failure:
+            with pytest.raises(RuntimeError, match='lab cleanup incomplete'):
+                delivery.main()
+        else:
+            delivery.main()
+        assert {signum: signal.getsignal(signum) for signum in handlers} == handlers
+        assert signal.pthread_sigmask(signal.SIG_BLOCK, set()) == mask
+    finally:
+        # Keep a failing regression from contaminating the runner's signal state.
+        for signum, handler in handlers.items():
+            signal.signal(signum, handler)
+        signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+    output = capsys.readouterr()
+    assert 'PRIVATE-FAILURE-SENTINEL' not in output.out + output.err
+    record = saves[0]
+    if failure:
+        assert str(record) in output.err
+        assert record.exists() and record.stat().st_mode & 0o777 == 0o600
+        body = yaml.safe_load(record.read_text())
+        assert body['containers'] == ({'synthetic-container': 'a' * 64}
+                                      if failure in ('save', 'remove') else {})
+    else:
+        assert not record.exists() and output.err == ''

@@ -243,23 +243,31 @@ def main():
                                     environment, generation, cron)
                 print(f'PASS run-once and real cron generation {generation}; recreate reloads environment', flush=True)
     finally:
+        primary = sys.exc_info()[1]
         mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
         failed = False
-        for name, identity in list(resources.items()):
+        try:
+            for name, identity in list(resources.items()):
+                try:
+                    remove_owned(identity, name, project)
+                    del resources[name]
+                except Exception:
+                    failed = True
             try:
-                remove_owned(identity, name, project)
-                del resources[name]
+                save_record(record, project, resources)
+                if not failed:
+                    record.unlink()
             except Exception:
                 failed = True
-        save_record(record, project, resources)
-        if failed:
-            print('Synthetic credential cleanup incomplete; ownership record: ' + str(record), file=sys.stderr)
-        else:
-            record.unlink()
-        for signum, handler in previous.items():
-            signal.signal(signum, handler)
-        signal.pthread_sigmask(signal.SIG_SETMASK, mask)
-        if failed and sys.exc_info()[0] is None:
+            if failed:
+                print('Synthetic credential cleanup incomplete; ownership record: ' + str(record), file=sys.stderr)
+        finally:
+            try:
+                for signum, handler in previous.items():
+                    signal.signal(signum, handler)
+            finally:
+                signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+        if failed and primary is None:
             raise RuntimeError('Synthetic credential lab cleanup incomplete')
 
 
