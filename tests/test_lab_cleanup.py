@@ -206,7 +206,7 @@ assert not list((Path(sys.argv[1]) / 'tmp/lab-recovery').glob('*.yaml'))
     assert result.returncode == 0, result.stderr.decode()
 
 
-@pytest.mark.parametrize('location', ['handler-exit', 'cleanup-entry'])
+@pytest.mark.parametrize('location', ['handler-exit', 'cleanup-entry', 'ordinary-failure'])
 def test_second_signal_cannot_interrupt_cleanup_transition(tmp_path, location):
     program = '''
 import os, signal, sys
@@ -229,19 +229,25 @@ def terminated(signum, frame):
             injected.append('handler-exit')
             os.kill(os.getpid(), signal.SIGINT)
 def install(signum, handler):
-    if sys.argv[2] == 'cleanup-entry' and handler == signal.SIG_IGN and not injected:
-        injected.append('cleanup-entry')
+    if sys.argv[2] in ('cleanup-entry', 'ordinary-failure') and handler == signal.SIG_IGN and not injected:
+        injected.append(sys.argv[2])
         os.kill(os.getpid(), signal.SIGINT)
     return original_signal(signum, handler)
 lab.terminated = terminated
 signal.signal = install
 def operation(directory, state):
     assert state['record'].exists()
+    if sys.argv[2] == 'ordinary-failure':
+        raise ValueError('synthetic primary failure')
     os.kill(os.getpid(), signal.SIGTERM)
 try:
     lab.execute('degiro-c13-aaaaaaaaaa', operation)
 except SystemExit as error:
+    assert sys.argv[2] != 'ordinary-failure'
     assert error.code == 143, error.code
+except ValueError as error:
+    assert sys.argv[2] == 'ordinary-failure'
+    assert str(error) == 'synthetic primary failure'
 else:
     raise AssertionError('First SIGTERM was ignored')
 assert injected == [sys.argv[2]]
