@@ -139,6 +139,17 @@ def test_raw_bodies_keep_provenance_and_unverified_windows(tmp_path):
     assert len(result['cash_identity_diagnostics']['repeated_bodies_within_response']) == 1
 
 
+@pytest.mark.parametrize('status', [401, 500])
+@pytest.mark.parametrize('endpoint', ['accountoverview', 'transactions'])
+def test_unsuccessful_archived_response_is_refused(tmp_path, status, endpoint):
+    rows = [movement()]
+    body = {'data': {'cashMovements': rows} if endpoint == 'accountoverview' else rows}
+    (tmp_path / 'window-000.json').write_text(json.dumps({'capture': {
+        'endpoint': endpoint, 'http_status': status, 'dates': {}}, 'body': body}), encoding='utf-8')
+    with pytest.raises(RuntimeError, match='Unsuccessful archived response'):
+        report.archive_rows(tmp_path, lambda path: path.read_text(encoding='utf-8'))
+
+
 def test_conflicting_stable_ids_are_reported_without_collapsing_bodies():
     entries = {'a': {'body': movement('10'), 'occurrences': [{'path': 'first'}]},
         'b': {'body': movement('11'), 'occurrences': [{'path': 'second'}]}}

@@ -118,7 +118,7 @@ The offline [saved-input diagnostic](../scripts/reconcile_saved.py) compares the
 retained recent source, full destination and verified eight-ISIN mapping. It also
 rereads both raw window archives and the captured statement. It binds 151 input
 files plus four implementation files by SHA256, verifies them unchanged before
-publishing a new mode0600 YAML report and disables network access. It has no broker login, HTTP client, adoption,
+publishing a new mode `0600` YAML report and disables network access. It has no broker login, HTTP client, adoption,
 cleanup or journal-confirmation operation. Private rows, created IDs, symbols
 and amounts are retained only in the ignored report.
 
