@@ -372,3 +372,43 @@ def test_run_sync_pending_blocks_before_broker_login(config, snapshot, monkeypat
     monkeypatch.setattr(adapter, 'read_degiro', lambda *args: pytest.fail('Pending intent logged into broker'))
     with pytest.raises(RuntimeError, match='durable write intent'):
         adapter.run_sync(NOW.date(), NOW.date())
+
+
+@pytest.mark.parametrize('confirm', [False, True])
+def test_recovery_cli_emits_actual_complete_readback_digest_without_private_rows(
+        config, snapshot, monkeypatch, capsys, confirm):
+    import hashlib
+    from scripts import recover_degiro
+    intent = pending_import(config, snapshot)
+    rows = [opening_holding()] + [activity_row(activity, str(index))
+        for index, activity in enumerate(intent['payload'].values())]
+    body = {'activities': rows, 'count': len(rows)}
+    expected = hashlib.sha256(json.dumps(body, sort_keys=True,
+        separators=(',', ':'), allow_nan=False).encode()).hexdigest()
+    path = next(Path(config['state_dir']).glob('*.yaml'))
+    before = path.read_bytes()
+    environment = {'GHOST_HOST': config['ghost_host'], 'GHOST_TOKEN': 'TOKEN-SENTINEL',
+        'GHOST_ACCOUNT_ID': config['target_account'], 'DEGIRO_ACCOUNT_ID': config['source_account'],
+        'STATE_DIR': config['state_dir']}
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+    calls = []
+    def send(session, request, **options):
+        assert request.method == 'GET'
+        calls.append(request.url)
+        return response(TARGET if request.url.endswith('/target-a') else body)
+    monkeypatch.setattr(requests.Session, 'send', send)
+    args = ['--expected-intent-id', intent['id']]
+    if confirm:
+        args.append('--confirm-local-state')
+    assert recover_degiro.main(args) == 0
+    output = capsys.readouterr()
+    assert 'snapshot SHA-256=' + expected in output.out and not output.err
+    assert '2 exact activities' in output.out
+    for private in ('TOKEN-SENTINEL', intent['id'], 'target-a', 'DEGIRO#'):
+        assert private not in output.out
+    assert len(calls) == 2
+    if confirm:
+        assert document(config)['pending'] is None
+    else:
+        assert path.read_bytes() == before

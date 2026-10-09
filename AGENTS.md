@@ -68,3 +68,17 @@ or the next action requires an explicit authorization that has not been granted.
 An explicit pause request wins: finish only the current task when Florent permits
 that completion, reconcile durable state, then pause without selecting more work.
 Keep the review-before-merge and production authorization gates above.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in the shared Beads database, scoped with `project=ghostfolio-degiro-sync`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The canonical triage roles use the default label vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository. See `docs/agents/domain.md`.

@@ -78,11 +78,22 @@ also refuses overlap rather than waiting.
 ```
 
 The default verifies all expected activities and retains the pending journal.
+Successful preview and confirmation print `snapshot SHA-256=<digest>` alongside
+the exact matched count and local-state action. This is the SHA-256 of the
+complete activities readback used by that invocation, computed by the adapter
+without publishing the rows, account IDs, token or request payload. Retain it
+with the selected request and command evidence when documenting recovery. A
+later invocation may have a different digest because unrelated activities changed;
+each invocation obtains and verifies fresh GET evidence under the account lock.
+The digest is an audit reference, not a substitute for exact ownership/financial
+matching, independent quiescence, statement completeness or recovery approval.
+A failed verification emits no success digest.
+
 Only a subsequent explicit invocation with `--confirm-local-state` confirms that
 selected local intent, obtaining fresh evidence again. Neither mode sends a
 financial mutation. The script ships at `/app/scripts/recover_degiro.py` in the
 rootless image and can run against the same private persistent state mount under
-the same UID. Its output contains counts and outcome only, not IDs, DTOs or tokens.
+the same UID. Its output contains counts, outcome and a snapshot digest, not IDs, DTOs or tokens.
 Transport and JSON errors return failure without private details. A persistence
 failure requires inspection of the journal; do not assume the state replacement
 did or did not complete after a filesystem failure.
