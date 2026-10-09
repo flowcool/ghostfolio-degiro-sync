@@ -19,6 +19,6 @@ def test_keyed_rules_and_synthetic_contract_have_unique_matches():
                        if "description_exact" in rule else
                        re.fullmatch(rule["description_pattern"], row["description"]))]
         assert matches == [expected]
-    for name in ("flatex_interest", "monetary_fund_compensation"):
-        assert rules[name]["treatment"] == "unsupported_blocking"
-        assert rules[name]["follow_up"] == "infra-8tt.56.14"
+    assert rules["flatex_interest"]["treatment"] == "zero_interest"
+    assert rules["monetary_fund_compensation"]["treatment"] == "positive_compensation"
+    assert rules["monetary_fund_compensation"]["sign"] == "positive"

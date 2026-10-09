@@ -98,7 +98,7 @@ def test_whole_account_validation_precedes_post(snapshot, mutation):
         snapshot['cash_movements'][0]['description'] = 'Unknown'
     elif mutation == 'unsupported':
         snapshot['cash_movements'].append({'id': 500, 'type': 'CASH_TRANSACTION',
-            'description': 'Flatex Interest Income', 'change': 0, 'currency': 'EUR',
+            'description': 'Flatex Interest Income', 'change': 1, 'currency': 'EUR',
             'date': '2026-01-01T00:00:00Z', 'valueDate': '2026-01-01T00:00:00Z'})
     elif mutation == 'currency':
         snapshot['account_info']['baseCurrency'] = 'USD'
@@ -112,8 +112,9 @@ def test_whole_account_validation_precedes_post(snapshot, mutation):
         run(snapshot, dry_run=False)
 
 
-@pytest.mark.parametrize('category', ['flatex_interest', 'monetary_fund_compensation'])
-@pytest.mark.parametrize('amount', [0, 10, -10])
+@pytest.mark.parametrize('category,amount', [('flatex_interest', 10),
+    ('flatex_interest', -10), ('monetary_fund_compensation', 0),
+    ('monetary_fund_compensation', -10)])
 def test_accounting_policy_blocks_all_writes_for_unsupported_movement(snapshot, category, amount):
     evidence = yaml.safe_load((Path(__file__).parent / 'fixtures/degiro_contract.yaml').read_text())
     movement = deepcopy(evidence['cash_movements'][category])

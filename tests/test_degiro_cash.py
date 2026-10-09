@@ -220,7 +220,7 @@ def test_optional_accrued_interest_without_value_is_observed(snapshot):
 
 def test_unknown_or_unsupported_ledger_blocks_cash(snapshot):
     row = {'id': 10, 'type': 'CASH_TRANSACTION', 'description': 'Flatex Interest Income',
-        'change': 0, 'currency': 'EUR', 'date': '2026-01-01T00:00:00Z',
+        'change': 1, 'currency': 'EUR', 'date': '2026-01-01T00:00:00Z',
         'valueDate': '2026-01-01T00:00:00Z'}
     snapshot['cash_movements'].append(row)
     with pytest.raises(RuntimeError, match='blocks account writes'):

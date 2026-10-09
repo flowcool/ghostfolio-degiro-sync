@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 
 import requests
 import yaml
@@ -360,6 +361,104 @@ def main():
         print('PASS uncertain cash: native PUT response lost;restart no replay;' +
             ('release changes balance exactly once;matching balance retains intent' if completion else
              'independent owned quiescence cancels delayed PUT;balance unchanged;intent retained'), flush=True)
+    print('Stage: cash-yield native setup', flush=True)
+    call('PUT', '/api/v1/user/setting', {'baseCurrency': 'EUR'})
+    yield_account = call('POST', '/api/v1/account', {'name': 'Synthetic cash yield',
+        'currency': 'EUR', 'balance': 0, 'platformId': None}, 201)
+    yield_data = deepcopy(delayed)
+    yield_data.update(source_account='904', transactions=[], cash_movements=[
+        {'id': 1601, 'type': 'COMPENSATION_BOOKING',
+         'description': 'Compensation Fonds Monétaires DEGIRO', 'currency': 'EUR', 'change': 2.5,
+         'date': '2025-06-01T12:00:00+02:00', 'valueDate': '2025-06-01T00:00:00+02:00'},
+        {'id': 1602, 'type': 'CASH_TRANSACTION',
+         'description': 'Flatex Interest Income', 'currency': 'EUR', 'change': 0,
+         'date': '2025-06-01T12:00:00+02:00', 'valueDate': '2025-06-01T00:00:00+02:00'},
+        {'id': 1603, 'type': 'COMPENSATION_BOOKING',
+         'description': 'Compensation Fonds Monétaires DEGIRO', 'currency': 'EUR', 'change': 2.5,
+         'date': '2025-06-01T12:00:00+02:00', 'valueDate': '2025-06-01T00:00:00+02:00'}])
+    yield_config = {key: value for key, value in config.items() if not key.startswith('_')}
+    yield_config.update(source_account='904', target_account=yield_account['id'], dry_run=True)
+    before_yield = call('GET', '/api/v1/activities')
+    proposed_yield = synchronize(yield_data, yield_config)
+    print('Stage: cash-yield dry run validated', flush=True)
+    assert len(proposed_yield['proposed']) == 3 and proposed_yield['accepted'] == []
+    assert call('GET', '/api/v1/activities') == before_yield
+    assert call('GET', '/api/v1/account/' + yield_account['id'])['balance'] == 0
+    yield_config['dry_run'] = False
+    first_yield = synchronize(yield_data, yield_config)
+    print('Stage: cash-yield first import returned', flush=True)
+    assert len(first_yield['accepted']) == 3
+    assert all(row['type'] == 'INTEREST' for row in first_yield['accepted'])
+    assert sorted(row['unitPrice'] for row in first_yield['accepted']) == [0, 2.5, 2.5]
+    print('Stage: cash-yield accepted values validated', flush=True)
+    exact_yield = call('GET', '/api/v1/activities')
+    yield_rows, _ = adapter.existing_activity_context(exact_yield, yield_account)
+    print('Stage: cash-yield native context validated', flush=True)
+    assert {a['comment']: adapter.activity_signature(a) for a in yield_rows
+        if a['accountId'] == yield_account['id']} == {
+        a['comment']: adapter.activity_signature(a) for a in first_yield['accepted']}
+    print('Stage: cash-yield native financial signatures validated', flush=True)
+    assert len(adapter.cleanup_preflight(exact_yield, {'source_account': '904',
+        'target_account': yield_account['id'],
+        'activities': {a['comment']: a for a in first_yield['accepted']}})['activity_ids']) == 3
+    print('Stage: cash-yield cleanup ownership validated', flush=True)
+    assert synchronize(yield_data, yield_config)['accepted'] == []
+    repeated_yield = call('GET', '/api/v1/activities')
+    repeated_yield_rows, _ = adapter.existing_activity_context(repeated_yield, yield_account)
+    assert repeated_yield['count'] == exact_yield['count']
+    assert {a['comment']: (a['id'], adapter.activity_signature(a)) for a in repeated_yield_rows
+        if a['accountId'] == yield_account['id']} == {
+        a['comment']: (a['id'], adapter.activity_signature(a)) for a in yield_rows
+        if a['accountId'] == yield_account['id']}
+    exact_yield = repeated_yield
+    yield_totals = next(a for a in call('GET', '/api/v1/account')['accounts']
+        if a['id'] == yield_account['id'])
+    print('Stage: cash-yield exact rows and repeat validated', flush=True)
+    assert yield_totals['interestInBaseCurrency'] == 5 and yield_totals['balance'] == 12.3
+
+    for index, amount in ((0, -2.5), (1, .01)):
+        invalid_yield = deepcopy(yield_data)
+        invalid_yield['cash_movements'][index]['change'] = amount
+        try:
+            synchronize(invalid_yield, yield_config)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError('Uncharacterized yield accepted')
+        assert call('GET', '/api/v1/activities') == exact_yield
+        assert call('GET', '/api/v1/account/' + yield_account['id'])['balance'] == 12.3
+    lost_yield = deepcopy(yield_data)
+    lost_yield['cash_movements'] = [deepcopy(yield_data['cash_movements'][0])]
+    lost_yield['cash_movements'][0]['id'] = 1604
+    now = datetime.now(timezone.utc)
+    lost_yield['fetch_started_at'] = lost_yield['fetched_at'] = now.isoformat()
+    def lost_yield_response(batch):
+        accepted, ok = core.ghost_import_activities(yield_config, batch)
+        assert ok and len(accepted) == 1
+        raise requests.Timeout('Synthetic lost reply after commit')
+    target_yield = call('GET', '/api/v1/account/' + yield_account['id'])
+    with adapter.ghost_transport(yield_config, target_yield):
+        try:
+            adapter.synchronize_account(yield_config, lost_yield, target_yield, exact_yield,
+                mapping, quotes, lost_yield_response,
+                lambda *args: (_ for _ in ()).throw(AssertionError('Uncertain yield reached cash writer')))
+        except RuntimeError as error:
+            assert 'cash blocked' in str(error)
+        else:
+            raise AssertionError('Lost yield reply succeeded')
+    assert_restart_fenced(yield_config, 'import')
+    with adapter.account_journal(yield_config) as journal:
+        yield_intent = journal['document']['pending']['id']
+    assert adapter.resolve_import_intent(yield_config, call('GET', '/api/v1/activities'),
+        expected_intent_id=yield_intent) == 1
+    yield_config.pop('_uncertain_import_accounts', None)
+    assert synchronize(lost_yield, yield_config)['accepted'] == []
+    yield_final = next(a for a in call('GET', '/api/v1/account')['accounts']
+        if a['id'] == yield_account['id'])
+    assert yield_final['interestInBaseCurrency'] == 7.5 and yield_final['balance'] == 12.3
+    print('PASS cash yield:zero interest retained;distinct same-second compensation;exact native readback;'
+        'repeat zero;credit totals5/7.5 EUR;cash12.30 independently set;negative/nonzero-interest blocked;'
+        'lost response restart fenced and exact recovery without replay;cleanup ownership verified', flush=True)
     session.close()
 
 
@@ -368,4 +467,7 @@ if __name__ == '__main__':
         main()
     except Exception:
         print('Isolated acceptance failed; private HTTP/auth details suppressed', file=sys.stderr)
+        for frame in traceback.extract_tb(sys.exc_info()[2]):
+            print('Failure location: ' + Path(frame.filename).name + ':' + str(frame.lineno)
+                + ':' + frame.name, file=sys.stderr)
         sys.exit(1)

@@ -53,10 +53,9 @@ rules:
   flatex_interest:
     type: CASH_TRANSACTION
     description_exact: Flatex Interest Income
-    treatment: unsupported_blocking
-    follow_up: infra-8tt.56.14
+    treatment: zero_interest
   monetary_fund_compensation:
     type: COMPENSATION_BOOKING
     description_exact: Compensation Fonds Monétaires DEGIRO
-    treatment: unsupported_blocking
-    follow_up: infra-8tt.56.14
+    sign: positive
+    treatment: positive_compensation

@@ -108,8 +108,9 @@ def test_known_unsupported_category_blocks_entire_account(snapshot, name):
     all_rows = yaml.safe_load((Path(__file__).parent / 'fixtures/degiro_contract.yaml').read_text())['cash_movements']
     row = all_rows[name]
     row['valueDate'] = row['date']
+    row['change'] = -1
     snapshot['cash_movements'].append(row)
-    with pytest.raises(RuntimeError, match='blocks account writes'):
+    with pytest.raises(RuntimeError):
         normalize(snapshot)
 
 
@@ -124,6 +125,12 @@ def test_all_observed_categories_have_explicit_owners(snapshot):
             'date': '2026-01-03T10:00:00+01:00', 'valueDate': '2026-01-03T00:00:00+01:00',
             'currency': 'EUR', 'productId': 20, 'orderId': 'synthetic-order',
             'change': None if rule.get('treatment') == 'nonfinancial_notice' else (-1 if rule.get('sign') == 'negative' else 1)})
+    for row in rows:
+        if row['description'] in ('Flatex Interest Income', 'Compensation Fonds Monétaires DEGIRO'):
+            row.pop('productId')
+            row.pop('orderId')
+        if row['description'] == 'Flatex Interest Income':
+            row['change'] = 0
     classified = adapter.classify_cash_movements(rows)
     assert set(classified) == set(rules)
     assert all(len(values) == 1 for values in classified.values())
@@ -187,12 +194,11 @@ def test_invalid_rule_file_fails_closed(tmp_path, document):
         adapter.load_cash_rules(path)
 
 
-def test_zero_interest_remains_an_explicit_account_blocker(snapshot):
+def test_zero_interest_does_not_block_dividend_conversion(snapshot):
     snapshot['cash_movements'].append({'id': 500, 'type': 'CASH_TRANSACTION',
         'description': 'Flatex Interest Income', 'change': 0, 'currency': 'EUR',
         'date': '2026-01-01T00:00:00Z', 'valueDate': '2026-01-01T00:00:00Z'})
-    with pytest.raises(RuntimeError, match='blocks account writes'):
-        normalize(snapshot)
+    assert len(normalize(snapshot)) == 1
 
 
 def test_sweep_statement_annotation_has_no_amount():

@@ -3,9 +3,9 @@
 This document records the accounting arbitration delegated by Florent on
 2026-10-09. Zero Flatex interest will be retained as zero INTEREST activities;
 positive monetary-fund compensation will use INTEREST as a cash-yield reporting
-convention, with a distinct source identity and label. Runtime activation still
-requires the adapter integration and acceptance below. Current cash rules remain
-`unsupported_blocking` until then. Legacy NAV/fund history remains a separate
+convention, with a distinct source identity and symbol. The adapter supports
+only the observed EUR contract below, including identity, readback and recovery.
+Uncharacterized amounts, relations, currencies and source fields block writes. Legacy NAV/fund history remains a separate
 contract; production writes, cleanup and deployment are not authorized.
 
 ## Broker evidence
@@ -33,8 +33,8 @@ Florent supplied an explanation that compensation offsets negative yield on
 cash held in money-market funds, rather than brokerage fees or margin debit
 interest, and delegated the reporting choice. The official
 [DEGIRO Investment Services Conditions](https://www.degiro.ch/data/pdf/fr/Conditions_Services_De_Placement.pdf)
-(article 10.2.1, PDF page 24) confirm standing instructions to invest client cash
-in money-market funds. Articles 10.1.1 and 10.3.3 describe their gradual replacement
+(articles 10.1.2 and 10.2.1, PDF page 24) confirm standing instructions to invest
+client cash in money-market funds for clients offered and choosing that option. Articles 10.1.1 and 10.3.3 describe their gradual replacement
 with bank cash accounts. The official
 [money-market fund document page](https://www.degiro.fr/helpdesk/documents/fonds-monetaires)
 links [Participations, dated 2022-03-30](https://www.degiro.fr/data/pdf/fr/PSP_Participations.pdf),
@@ -129,10 +129,9 @@ Identity design for implementation:
   MANUAL symbol `GF_DEGIRO_<source-account>_FLATEX_INTEREST_<currency>`.
 - Positive compensation: `DEGIRO#<source-account>:COMPENSATION:<stable-cash-id>`,
   MANUAL symbol `GF_DEGIRO_<source-account>_MMF_COMPENSATION_<currency>` and
-  human-readable label "DEGIRO money-market fund compensation".
+  descriptive symbol identifying DEGIRO money-market fund compensation.
 
-These are specified identities to integrate and test, not supported runtime
-comments today. Target account must participate in ownership and duplicate
+These are supported runtime identities. Target account must participate in ownership and duplicate
 validation; separate same-day events remain separate. Preserve the cash amount
 and currency without implicit FX or scaling. For compensation the stored amount
 is the observed credit; fee 0 means no fee is attached to that activity and does
@@ -142,10 +141,12 @@ relationships and must block if unsupported. Native import must not increment
 account cash, which is set only from the independently verified final snapshot.
 Missing or ambiguous source or readback evidence blocks the whole account.
 
-The adapter currently rejects target INTEREST types and canonical INTEREST
-comments. Both boundaries, broker conversion, uncertain-import recovery,
-manual/CSV overlap, cleanup ownership and repeat readback must be tested before
-enabling a policy. This work belongs in the adapter; the immutable core must not
+The adapter accepts these INTEREST and COMPENSATION identities with exact
+EUR/MANUAL symbols, quantity 1 and fee 0. Canonical zero-interest amounts must
+stay zero; compensation amounts must stay positive. Manual/CSV INTEREST near a
+candidate blocks regardless of its custom symbol, requiring explicit reconciliation.
+Cleanup preflight and uncertain-import recovery use the same exact identity/readback
+checks; cleanup still performs no deletion. This work belongs in the adapter; the immutable core must not
 be forked. Native support alone cannot relax the full-history or unsupported
 category gates. Current cash is a separately validated final snapshot, not a sum
 of these movements; native import must not also credit the account balance.
@@ -156,15 +157,39 @@ Adopted on 2026-10-09 under Florent's delegated accounting arbitration, revised
 following his supplied economic explanation and official framework sources.
 The [README](../README.md#accounting-policy-preserve-cash-yield-and-source-identity)
 states the rationale. No further operator accounting choice is a prerequisite
-for this bounded representation. Runtime blocks remain until implementation
-passes its gates; existing whole-account rejection regressions continue to apply.
+for this bounded representation. The implemented rules admit only zero EUR
+Flatex interest and positive cent-valued EUR compensation. Strict source field
+checks reject unexpected product, order, FX, tax or other financial relationships.
+Whole-account rejection regressions continue for every uncharacterized case.
 
-Before enabling the rules, prove synthetic conversion, source/target ownership,
+Verification covers synthetic conversion, source/target ownership,
 same-day distinct identities, mixed currency, negative/correction refusal,
 repeat-zero behavior and uncertain-request fencing, then isolated native adapter
-acceptance and private source/CSV reconciliation. The existing native-contract
-proof alone does not close those integration criteria or C13-C14. Legacy NAV
+acceptance and private source/CSV reconciliation. Selected private annual/split
+conversion signatures agree for all 17 events (16 zero interest and one positive
+compensation); the complete CSV independently matches their date/minute, value
+date, description, currency and amount multiset. This selected-event proof does
+not establish full-account C13-C14 acceptance. Legacy NAV
 identity and CSV-transition completeness remain separately enforced.
+
+Observed adapter acceptance on 2026-10-09 using the pinned Ghostfolio image
+above and the owned runtime image manifest
+`sha256:095ff45d1a730a1cd9f0e9a3b2b0a0021527607b1838086b9c1aebba8fdb81fd`:
+
+- Dry-run retained all three synthetic events and created no activities.
+- Two equal compensation credits at the same second remained distinct; zero
+  interest was stored with quantity 1 and price 0. Exact financial/date/symbol
+  readback and cleanup ownership matched the candidate manifest.
+- Repeat created zero activities and preserved exact created IDs and financial
+  signatures. Account-write metadata is compared separately from financial data.
+- Interest totals were EUR 5 then EUR 7.5 after one further compensation; the
+  independently set cash balance stayed EUR 12.30 without adding receipt amounts.
+- Negative compensation and nonzero Flatex interest changed no activity or cash.
+- A lost reply after native insertion fenced a fresh process; exact selected
+  request readback resolved the journal, and repeat created nothing.
+- Existing native trade/dividend/fee, CSV overlap, partial cancellation and cash
+  uncertainty scenarios passed. Owned containers, network and fixture images were
+  removed; no production endpoint, credential or database was used.
 
 Rollback of this characterization is a scoped Git revert. Lab rollback uses
 `scripts/lab_cleanup.py --recover <private-ownership-record>` when automatic

@@ -59,7 +59,8 @@ def test_empty_v3_output_cannot_remove_whole_ledger_category_gate(conversion, sn
         for name in ('flatex_interest', 'monetary_fund_compensation'))
     for row in snapshot['cash_movements']:
         row.setdefault('valueDate', row['date'])
-    with pytest.raises(RuntimeError, match='Unsupported DEGIRO cash category'):
+    snapshot['cash_movements'][-1]['change'] = -1
+    with pytest.raises(RuntimeError, match='blocks account writes'):
         adapter.normalize_dividends(snapshot, TARGET['id'], MAPPING, QUOTES)
-    with pytest.raises(RuntimeError, match='Unsupported DEGIRO cash category'):
+    with pytest.raises(RuntimeError, match='blocks account writes'):
         adapter.current_cash_balance(snapshot, TARGET, snapshot['source_account'], now=NOW)

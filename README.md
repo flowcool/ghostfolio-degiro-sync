@@ -25,8 +25,10 @@ Known incompatible API formats produce explicit privacy-safe errors before
 synchronization or successful read-only snapshot publication; detection uses
 response structure and content rather than a calendar cutoff. See the
 [source contract](docs/source-contract.md) for supported shapes and diagnostics.
-Legacy monetary-fund formats remain unsupported. Flatex interest and monetary-fund
-compensation, including zero-valued relevant interest rows, still block writes.
+Legacy monetary-fund formats remain unsupported. Characterized zero EUR Flatex
+interest and positive EUR monetary-fund compensation are represented as separately
+identified INTEREST activities. Nonzero Flatex interest, zero/negative compensation
+and uncharacterized relations, currencies or source fields still block writes.
 
 ### Accounting policy: preserve cash yield and source identity
 
@@ -40,7 +42,8 @@ a dividend to an unidentified security.
 
 The operator-provided explanation identifies compensation as an offset of
 negative money-market fund yield. DEGIRO's official documents establish the
-automatic cash investment and gradual move to bank cash accounts; they do not
+automatic cash investment for clients offered and choosing the MMF option,
+and the gradual move to bank cash accounts; they do not
 specify compensation conditions. The decision combines that explanation with
 the actual API/CSV credit and the verified native INTEREST representation.
 No historical eligibility dates, thresholds or payout schedule are inferred.
@@ -54,10 +57,10 @@ broker gross/net and tax evidence. Current cash is verified independently;
 activity imports must not also increment account cash.
 
 Florent delegated this arbitration on 2026-10-09. The decision removes the
-need for further operator accounting choices; runtime support still requires
-adapter identity/readback integration, offline and isolated acceptance, and
-CSV/history reconciliation. Until those checks pass, the existing runtime blocks
-remain active. The [accounting contract and native proof](docs/interest-compensation-policy.md)
+need for further operator accounting choices. The adapter implements this narrow
+EUR contract with source/target identities, exact readback, duplicate/manual-overlap
+guards and durable uncertain-import recovery. Full-account CSV/history
+completeness remains an independent gate; yield support does not bypass it. The [accounting contract and native proof](docs/interest-compensation-policy.md)
 record the representation, evidence and implementation requirements.
 Production authorization remains separate.
 
