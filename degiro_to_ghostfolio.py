@@ -48,6 +48,35 @@ BROKER_PATHS = {
 CURRENCY_QUANTA = {"EUR": Decimal("0.01"), "USD": Decimal("0.01"), "JPY": Decimal("1")}
 TRADE_FIELDS = ("accountId", "comment", "currency", "dataSource", "date", "fee",
                 "quantity", "symbol", "type", "unitPrice")
+API_FORMAT_ERRORS = {
+    "legacy_cash": "DEGIRO import blocked: legacy monetary-fund API format is unsupported",
+    "financial_schema": "DEGIRO import blocked: incompatible execution financial fields",
+    "fx_schema": "DEGIRO import blocked: incompatible execution FX format",
+    "unknown": "DEGIRO import blocked: unrecognized API history format",
+}
+
+
+def check_api_import_format(snapshot):
+    """Recognize contract incompatibility, never infer an API version from age."""
+    if not isinstance(snapshot, dict):
+        raise RuntimeError(API_FORMAT_ERRORS["unknown"])
+    for collection in ("transactions", "cash_movements"):
+        rows = snapshot.get(collection)
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise RuntimeError(API_FORMAT_ERRORS["unknown"])
+    if any(row.get("type") in ("CASH_FUND_NAV_CHANGE", "CASH_FUND_TRANSACTION")
+           for row in snapshot["cash_movements"]):
+        raise RuntimeError(API_FORMAT_ERRORS["legacy_cash"])
+    fields = ("quantity", "price", "total", "totalInBaseCurrency", "fxRate",
+              "grossFxRate", "feeInBaseCurrency", "autoFxFeeInBaseCurrency",
+              "totalFeesInBaseCurrency")
+    for row in snapshot["transactions"]:
+        try:
+            numbers = {field: financial_decimal(row.get(field)) for field in fields}
+        except RuntimeError:
+            raise RuntimeError(API_FORMAT_ERRORS["financial_schema"]) from None
+        if numbers["fxRate"] <= 0 or numbers["grossFxRate"] <= 0:
+            raise RuntimeError(API_FORMAT_ERRORS["fx_schema"])
 
 
 def financial_decimal(value):
@@ -935,6 +964,7 @@ def synchronize_locked(config, snapshot, target_account, existing_body, mapping,
     dry_run = config.get("dry_run", True)
     if type(dry_run) is not bool:
         raise RuntimeError("Invalid DRY_RUN flag")
+    check_api_import_format(snapshot)
     source = broker_identity(config.get("source_account"))
     if broker_identity(snapshot.get("source_account")) != source:
         raise RuntimeError("DEGIRO configured source account mismatch")
@@ -1191,20 +1221,22 @@ def history_windows(from_date, to_date, window_days=90):
 
 def raw_rows(envelope, collection=None):
     if not isinstance(envelope, dict) or "data" not in envelope:
-        raise RuntimeError("Invalid DEGIRO data envelope")
+        raise RuntimeError(API_FORMAT_ERRORS["unknown"])
     rows = envelope["data"]
     if collection:
         if not isinstance(rows, dict) or collection not in rows:
-            raise RuntimeError("Invalid DEGIRO cash envelope")
+            raise RuntimeError(API_FORMAT_ERRORS["unknown"])
         rows = rows[collection]
     if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
-        raise RuntimeError("Invalid DEGIRO history rows")
+        raise RuntimeError(API_FORMAT_ERRORS["unknown"])
     return rows
 
 
 def merge_history(existing, rows, require_ids=True, cash=False, identity_field="id"):
     """Keep equal overlap rows once; reject missing identities or conflicting content."""
     for row in rows:
+        if cash and row.get("type") in ("CASH_FUND_NAV_CHANGE", "CASH_FUND_TRANSACTION"):
+            raise RuntimeError(API_FORMAT_ERRORS["legacy_cash"])
         identity = row.get(identity_field)
         if (isinstance(identity, bool) or not isinstance(identity, (str, int))
                 or not str(identity).strip()):
@@ -1338,9 +1370,11 @@ def read_degiro(from_date, to_date, window_days=90, report_locale=None, orders=F
                         or report.lstrip().startswith("<")):
                     raise RuntimeError("Invalid DEGIRO CSV report response")
                 data["account_report_csv"] = report
-        except Exception:
+        except Exception as error:
             reason = getattr(session, "degiro_diagnostics", {}).get("auth_reason")
-            if stage == "login" and reason in AUTH_FAILURE_REASONS:
+            if str(error) in API_FORMAT_ERRORS.values():
+                failure = RuntimeError(str(error))
+            elif stage == "login" and reason in AUTH_FAILURE_REASONS:
                 failure = RuntimeError(f"DEGIRO login failed: {reason}")
             else:
                 failure = RuntimeError(f"DEGIRO read failed at {stage}; no financial writes attempted")
@@ -1434,12 +1468,15 @@ def main(argv=None):
         save_private_snapshot(data, output)
     except Exception as error:
         if args.sync:
-            log.error("DEGIRO sync failed; unknown, incomplete or uncertain account state blocks writes")
+            message = str(error)
+            log.error("%s", message if message in API_FORMAT_ERRORS.values() else
+                      "DEGIRO sync failed; unknown, incomplete or uncertain account state blocks writes")
             return 1
         stages = ("login", "client_discovery", "transactions", "account_overview", "products",
                   "account_info", "account_update", "account_report", "order_history")
         messages = {f"DEGIRO read failed at {stage}; no financial writes attempted" for stage in stages}
         messages.add("DEGIRO logout failed")
+        messages.update(API_FORMAT_ERRORS.values())
         messages.update(f"DEGIRO login failed: {reason}" for reason in AUTH_FAILURE_REASONS)
         message = str(error)
         log.error("%s", message if message in messages else

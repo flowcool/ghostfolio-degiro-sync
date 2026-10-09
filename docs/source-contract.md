@@ -132,6 +132,25 @@ Standalone annual exchange fees follow the separately verified
 [FEE/MANUAL contract](fee-contract.md). Brokerage and AutoFX are excluded from
 those fees; ambiguous commission-to-execution reconciliation blocks the account.
 
+## Import format diagnostics
+
+The operator distinguishes the supported financial contract from recognized legacy
+fund markers and unknown/incompatible response shapes. No broker-provided format
+version or calendar cutoff has been proved: a compatible 2019 payload uses the
+same checks as one dated 2026. `CASH_FUND_NAV_CHANGE` and `CASH_FUND_TRANSACTION`
+produce a legacy monetary-fund format error; missing/nonfinite execution fields
+and nonpositive FX rates produce separate incompatible-contract errors. A zero
+rate is not automatically evidence that an API response is old.
+
+Errors are fixed strings, preserved through the sanitized broker reader and both
+CLI modes. Unknown envelopes, including ancient `data: {}`, are never converted
+to empty history. Known legacy detection stops before merging cash events or any
+financial dispatch; preflight still validates the entire account afterward for
+compatible shapes. No missing amount, identity, currency or rate is synthesized.
+Read-only diagnostics still guarantee logout and retain credential privacy.
+Future historical support is separately tracked; these messages do not broaden
+import support or authorize a cash/category exception.
+
 ## Historical scope extension findings
 
 The full raw-window stable set contains 110 paid dividend rows and 112 withholding
