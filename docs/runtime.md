@@ -44,6 +44,112 @@ bearer provisioning is separate. Never pass secret values as command-line
 arguments or print a Docker inspection containing the environment. An eventual
 production Compose/runtime-secret setup belongs to the authorized infra rollout.
 
+## Prepared unattended credential contract
+
+The completed Bitwarden bootstrap and the existing agentvm SOPS loader are the
+starting point, not installed production provisioning. `secrets.pointer.yaml`
+identifies the encrypted broker store and host loader. Bitwarden is used only
+for authorized bootstrap/renewal; the runtime does not log into the vault.
+The prepared boundary reuses that loader and Docker's environment-name passing,
+without adding SOPS, an age key, a decryptor or a secret service to the app image.
+
+| Boundary | Contract |
+| --- | --- |
+| Broker source | Off-git SOPS dotenv, exactly `DEGIRO_USERNAME`, `DEGIRO_PASSWORD`, `DEGIRO_TOTP_SECRET`; restricted host-side access |
+| Host decrypt | Existing `run-degiro-env.py` runs SOPS with captured output, a 60-second limit and the host key; validates the complete nonempty key set before executing a child |
+| Ghostfolio source | Independently provisioned `GHOST_TOKEN` in the launcher environment; an already valid bearer, with no token exchange in this scope |
+| Injection | `docker run --env NAME` copies values from the loader's child environment; values never appear in argv or a plaintext env file |
+| Container access | UID/GID10001 receives the four variables; it cannot access the SOPS source, host key or Bitwarden |
+| Cron | Supercronic's Python child inherits the container environment; no decrypt or vault access happens per minute/job |
+| Restart/refresh | Start a fresh host loader process and recreate the container. The environment is a snapshot; direct `docker restart` retains old values and is outside this contract |
+| Unavailable source | Missing/unreadable store, unavailable key/decryption failure, timeout or invalid key set stops the loader before Docker/application execution; stale inherited broker variables do not provide a fallback |
+
+Infra owns target-host provisioning and refresh, including the independent
+Ghostfolio bearer lifecycle. The supported launcher uses `--restart=no` and
+foreground `docker run --rm`: any host supervisor restart must rerun the loader
+and create a new container. A credential rotation requires a controlled stop
+and recreation of a cron container; changing the encrypted file cannot update
+an existing process. Source loss while an already running cron exists does not
+revoke its in-memory credentials; infra must stop it if continued use is no
+longer authorized. Job/authentication errors remain application failures, with
+no automatic vault refresh or broker-login retry.
+
+The existing loader inherits `GHOST_TOKEN` from its caller. Its private dotenv
+format uses one literal nonempty value per line, split on the first `=`; it
+does not evaluate shell quoting or expansion and does not support embedded
+newlines. Infra must preserve that representation when provisioning/rotating.
+Host administrators and Docker-daemon operators can read process/container
+environments. Docker also persists the injected values in container metadata
+for the container's lifetime; daemon backups/snapshots may retain them after
+removal. SOPS protects the source store, not that Docker metadata. Target-host
+Docker-data and backup protection therefore need explicit infra verification.
+Restrict that access; never dump Docker inspection, decrypted
+output, a shell trace or a crash/core dump. This boundary is not a mechanism
+for hiding credentials from the Docker administrator.
+
+### Synthetic preparation evidence
+
+After building the image above, run:
+
+```sh
+.venv/bin/python scripts/check_credential_delivery.py \
+  --loader /home/flow/claude_project/infra/rotation/run-degiro-env.py \
+  --image ghostfolio-degiro-sync:local
+```
+
+The driver accepts only the reviewed loader bytes, SHA256
+`f605a539aa0348cc82d161861d5630d381c23db52a513cb4bbc65bcebd8ecc51`.
+It substitutes a synthetic store, SOPS subprocess and child execution boundary
+before calling the loader; no real encrypted store, key, vault or SOPS container
+is used. Six unavailable/invalid-source cases must suppress private diagnostics
+and execute no child. Valid output supplies all three broker variables and
+preserves the independently supplied synthetic bearer.
+
+The resulting synthetic environment enters disposable, network-disabled,
+rootless containers through environment names. The actual entrypoint and actual
+minute cron run a hashes-only replacement of the broker script, proving child
+delivery without broker/HTTP activity. Two generations exercise recreation and
+credential refresh for both run-once and cron. Passing this is harness evidence,
+not actual broker authentication or proof that the target host is provisioned.
+
+Ownership records under ignored `tmp/credential-recovery/` contain only names,
+IDs and the UUID label, mode0600. Normal cleanup rechecks exact ID/name/label,
+then removes only those containers. Failed cleanup retains the record; inspect
+only identity and label before retrying exact-ID removal. SIGKILL can require
+that manual recovery. Never prune the host or inspect `Config.Env`.
+
+### Installation and rollback handoff to infra
+
+The target needs Docker, the approved immutable app image, UID/GID10001 access
+to its mounted files, a host-side private SOPS store encrypted for that host's
+key, a bounded host loader equivalent to the reviewed agentvm loader, and
+independent bearer provisioning. The current agentvm key/path is not proof of
+target-host decryption access. Infra selects the target host, supervisor,
+source/key paths and refresh procedure during the separately authorized rollout.
+
+The launcher template is an argument vector, not a shell secret-substitution
+recipe: invoke `python3 HOST_LOADER docker run --rm --restart=no`, followed by
+`--env DEGIRO_USERNAME --env DEGIRO_PASSWORD --env DEGIRO_TOTP_SECRET
+--env GHOST_TOKEN`, explicitly allowlisted nonsecret account/origin settings,
+`DRY_RUN=1`, and the reviewed image digest. Supply `CRON` only for cron mode.
+Use a read-only mapping mount and, for live mode, a persistent private0700
+`STATE_DIR` owned by UID10001. The production network must reach the approved
+broker/Ghostfolio origins; the validation driver's `--network=none` is lab-only.
+No published app port is needed. Preserve existing hardening (read-only root,
+tmpfs, dropped capabilities and no-new-privileges). Do not use a Compose
+plaintext env file or place secret values in Compose interpolation.
+
+Before installation, infra must verify target decryption/UID access, install
+the supervisor/refresh procedure and its controlled stop mechanism, and record
+the exact old/new image digests and restoration commands. Production approval,
+account backup/restore and scheduled financial reconciliation belong to the
+rollout gate; this preparation does not authorize them. Rollback here is the
+exact preparation Git revert and cleanup of positively owned synthetic
+containers. No existing SOPS store/loader, app image, broker session or
+production service is modified. Production rollback must stop the owned
+scheduler, restore the approved prior image/config and rerun the host loader;
+it must not resurrect stale plaintext credentials or claim to undo activities.
+
 Without `CRON`, the entrypoint runs `--sync` once. With `CRON`, exactly five
 numeric schedule fields are accepted and supercronic validates them. Named
 shortcuts and embedded commands/newlines are rejected. Only the fixed sync command

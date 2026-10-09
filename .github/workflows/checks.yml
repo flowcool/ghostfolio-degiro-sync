@@ -52,5 +52,14 @@ jobs:
           python-version: "3.12"
       - name: Build runtime on native architecture without publication
         run: docker build --build-arg TARGETARCH=${{ matrix.arch }} --build-arg APP_VERSION="${GITHUB_SHA}" -t degiro-smoke:ci .
+      - name: Scan image for fixable high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: degiro-smoke:ci
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore
       - name: Isolated run-once and real cron smoke
         run: python scripts/smoke_container.py degiro-smoke:ci
