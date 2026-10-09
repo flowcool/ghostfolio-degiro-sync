@@ -41,6 +41,25 @@ Ten dividend/withholding pairs remained uniquely associated. Count agreement and
 that alternate API export do not prove an independent manual statement or unlimited
 history. `history_completeness_verified` remains false.
 
+An offline comparison of those three recent executions with the same saved
+destination found one financial candidate for each: same broker-local calendar
+day, BUY/SELL side, absolute quantity, unit price and activity currency. The
+candidate profile currencies also agree with the broker currencies (two JPY,
+one USD). However, all 29 distinct target asset profiles lack an ISIN, so this
+does not establish an independent instrument mapping. A broker ticker matches
+one target symbol for the USD candidate; ticker equality is not adopted as proof.
+
+Using each candidate symbol only as an explicitly unverified placeholder, the
+source arithmetic reproduces the candidate price and quantity but not its fee:
+all three existing fees differ from the API total brokerage-plus-AutoFX fee
+converted into the security currency. The timestamps differ as well; source
+minus target is approximately -30,997, -26,086 and -1,093 seconds. These are
+recorded mismatches, not a diagnosed timezone correction or permitted tolerance.
+Comments are not canonical API execution identities. Do not infer missing trades
+from a failed ISIN join, infer instrument identity from matching financial values,
+adopt these candidates or rewrite their fees/dates automatically. Original input
+hashes were unchanged and the comparison used no network or financial callbacks.
+
 The full ledger contains four Flatex interest rows and one monetary-fund
 compensation row. Dividend normalization and current-cash acceptance both stop
 at the unsupported-category gate. No successful real synchronization DRY_RUN or
