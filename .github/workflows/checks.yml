@@ -50,6 +50,22 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.12"
+      - name: Use public Docker Hub cache on this disposable runner
+        run: |
+          sudo python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path('/etc/docker/daemon.json')
+          config = json.loads(path.read_text()) if path.exists() else {}
+          mirrors = config.get('registry-mirrors', [])
+          mirror = 'https://mirror.gcr.io'
+          config['registry-mirrors'] = [mirror] + [item for item in mirrors if item != mirror]
+          path.parent.mkdir(parents=True, exist_ok=True)
+          path.write_text(json.dumps(config) + '\n')
+          PY
+          sudo systemctl restart docker
+          docker info --format '{{json .RegistryConfig.Mirrors}}'
       - name: Build runtime on native architecture without publication
         run: docker build --build-arg TARGETARCH=${{ matrix.arch }} --build-arg APP_VERSION="${GITHUB_SHA}" -t degiro-smoke:ci .
       - name: Scan image for fixable high and critical vulnerabilities

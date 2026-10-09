@@ -16,6 +16,24 @@ by the validation workflow.
 
 ## Build and isolated validation
 
+CI configures Google's public Docker Hub cache in the Docker daemon on each
+disposable runner, preserving existing daemon settings and other mirrors. This
+avoids the shared runners' anonymous Docker Hub quota on cache hits. The Python
+OCI index digest remains literal in the unchanged `Dockerfile`, with no
+floating-tag fallback. A cache miss falls back to Docker Hub at the same digest
+and can still encounter its quota. Google does not guarantee cache retention.
+See the
+[Google cache documentation](https://cloud.google.com/artifact-registry/docs/pull-cached-dockerhub-images).
+Both amd64 and arm64 images at this exact digest were pulled successfully from
+the cache before introducing the CI override; native CI verifies build and smoke
+behavior on both architectures. No registry credentials are introduced. Local
+Docker daemon configuration and production hosts are unchanged.
+
+To roll back, revert the scoped change commit (or `git revert -m 1
+<merge-commit>` after integration) to remove the CI daemon-configuration step and
+documentation together. The next disposable runner uses its original registry
+configuration. This affects builds only and requires no production service action.
+
 On a native amd64 host:
 
 ```sh
