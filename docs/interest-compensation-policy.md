@@ -1,11 +1,12 @@
-# Interest and monetary-fund compensation: conservative policy and future options
+# Interest and monetary-fund compensation: adopted reporting policy
 
-This document prepares the accounting decision owned by `infra-8tt.56.14`.
-The conservative blocking policy is adopted; candidate future representations
-below remain unenabled. This does not approve new importer support. The current `cash-rules.yaml` entries
-remain `unsupported_blocking`, including zero interest. The approved delivery
-scope and gates C1-C15 remain unchanged; legacy NAV/fund history has a separate
-future owner. Production writes, cleanup and deployment are not authorized.
+This document records the accounting arbitration delegated by Florent on
+2026-10-09. Zero Flatex interest will be retained as zero INTEREST activities;
+positive monetary-fund compensation will use INTEREST as a cash-yield reporting
+convention, with a distinct source identity and label. Runtime activation still
+requires the adapter integration and acceptance below. Current cash rules remain
+`unsupported_blocking` until then. Legacy NAV/fund history remains a separate
+contract; production writes, cleanup and deployment are not authorized.
 
 ## Broker evidence
 
@@ -21,9 +22,33 @@ multisets on local date/minute, value date, description, currency and amount:
 16 interest rows and one compensation row. This establishes those recorded
 movements; CSV minute precision does not replace API timestamps or identities.
 No positive interest, negative interest, withholding relationship or compensation
-product attribution has been characterized. A compensation label and a positive
-amount do not prove interest, security dividend, fee refund or NAV treatment.
+product attribution has been characterized. The label and amount alone do not
+establish tax treatment, contractual bank interest, a security dividend, fee
+refund or product-level NAV allocation.
 Private amounts, account identities and input rows are not published here.
+
+## Decision evidence and limits
+
+Florent supplied an explanation that compensation offsets negative yield on
+cash held in money-market funds, rather than brokerage fees or margin debit
+interest, and delegated the reporting choice. The official
+[DEGIRO Investment Services Conditions](https://www.degiro.ch/data/pdf/fr/Conditions_Services_De_Placement.pdf)
+(article 10.2.1, PDF page 24) confirm standing instructions to invest client cash
+in money-market funds. Articles 10.1.1 and 10.3.3 describe their gradual replacement
+with bank cash accounts. The official
+[money-market fund document page](https://www.degiro.fr/helpdesk/documents/fonds-monetaires)
+links [Participations, dated 2022-03-30](https://www.degiro.fr/data/pdf/fr/PSP_Participations.pdf),
+which identifies the funds. Neither inspected document describes compensation
+eligibility or explicitly qualifies the account's credit.
+
+The economic explanation is operator-supplied; the MMF framework, actual credit
+and native representation are independently checked. This is sufficient for an
+explicit engineering reporting convention, without presenting the compensation
+as legally or fiscally established interest. Use INTEREST because Ghostfolio can
+record a cash-yield receipt without treating it as an external contribution or
+inventing a dividend security. Preserve a distinct compensation label and identity
+so future reclassification remains reviewable. Do not encode approximate policy
+dates, thresholds, quarterly frequency or a relationship to individual NAV rows.
 
 ## Pinned native representation
 
@@ -88,23 +113,34 @@ Stored GET rows are checked individually through immutable-core financial/date
 evidence, independently of listing order and aggregate totals.
 This proves native representability, not the unobserved positive broker contract.
 
-## Proposed decision boundaries
+## Adopted decision boundaries
 
-| Source case | Candidate future treatment | Evidence or decision still required |
+| Source case | Adopted treatment | Remaining implementation evidence |
 | --- | --- | --- |
-| Zero Flatex interest | Preserve a zero INTEREST activity with quantity 1; alternatively retain an explicitly accounted-for cash-only notice | Florent chooses the zero-event policy; an activity needs adapter identity/context/readback integration, a notice needs auditable source accounting and must not disappear silently |
-| Positive Flatex interest | INTEREST/MANUAL, quantity 1, gross amount as unit price; fee zero only when independently proved | Actual paid broker row and statement must establish gross/net amount, tax relationship and currency; native synthetic acceptance alone is insufficient |
-| Negative interest, reversal or refund | Remain blocked | Explicit signed-accounting/reversal representation; no negated DTO values, clamping or conversion to an unrelated FEE |
-| Monetary-fund compensation | Remain blocked | Broker documentation or source-bound statement proof of economic meaning; no automatic INTEREST/DIVIDEND/FEE classification from label or sign |
+| Zero Flatex interest | Retain an INTEREST/MANUAL activity, quantity 1, unit price 0, fee 0 | Exact source identity, target ownership and repeat readback; zero rows must remain accounted for |
+| Positive Flatex interest | Remain blocked until broker gross/net, tax relationship and currency are characterized | An actual paid broker row and statement; synthetic native support is insufficient |
+| Negative interest, reversal or refund | Remain blocked | Explicit signed-accounting/reversal representation; no negated DTO values, clamping or unrelated FEE |
+| Positive monetary-fund compensation | INTEREST/MANUAL as a reporting convention, quantity 1, credited amount as unit price, fee 0 | Exact cash credit and independent CSV agreement, distinct compensation identity/label, native readback and aggregate reconciliation |
+| Zero or negative compensation, corrections | Remain blocked | A characterized contract and exact representation; no broad sign-based category rule |
 
-For future INTEREST activities, a candidate canonical comment is
-`DEGIRO#<source-account>:INTEREST:<stable-cash-id>` and a candidate MANUAL symbol
-is `GF_DEGIRO_<source-account>_FLATEX_INTEREST_EUR`. These are design examples,
-not current supported identities. Target account must participate in ownership
-and duplicate validation; separate same-day rows must remain separate.
-Source amounts/currency must be preserved without implicit FX or price scaling.
-Fees, withholding and reversals need their own exact relationships. Missing or
-ambiguous evidence blocks the whole account.
+Identity design for implementation:
+
+- Zero Flatex interest: `DEGIRO#<source-account>:INTEREST:<stable-cash-id>`,
+  MANUAL symbol `GF_DEGIRO_<source-account>_FLATEX_INTEREST_<currency>`.
+- Positive compensation: `DEGIRO#<source-account>:COMPENSATION:<stable-cash-id>`,
+  MANUAL symbol `GF_DEGIRO_<source-account>_MMF_COMPENSATION_<currency>` and
+  human-readable label "DEGIRO money-market fund compensation".
+
+These are specified identities to integrate and test, not supported runtime
+comments today. Target account must participate in ownership and duplicate
+validation; separate same-day events remain separate. Preserve the cash amount
+and currency without implicit FX or scaling. For compensation the stored amount
+is the observed credit; fee 0 means no fee is attached to that activity and does
+not assert the absence of separate fees or tax. Do not invent gross amounts or
+withholding. Separately observed taxes, charges or corrections need their own
+relationships and must block if unsupported. Native import must not increment
+account cash, which is set only from the independently verified final snapshot.
+Missing or ambiguous source or readback evidence blocks the whole account.
 
 The adapter currently rejects target INTEREST types and canonical INTEREST
 comments. Both boundaries, broker conversion, uncertain-import recovery,
@@ -116,20 +152,19 @@ of these movements; native import must not also credit the account balance.
 
 ## Approval, validation and rollback
 
-Adopted decision on 2026-10-09, under Florent's delegated accounting arbitration:
-retain both existing blocks and preserve all source evidence, including zero
-rows. The [README](../README.md#accounting-policy-preserve-evidence-and-stop-on-uncertain-meaning)
-states the rationale. The native experiment
-makes a bounded future zero/positive-interest proposal reviewable; compensation
-still has no proved accounting representation. Florent's current-scope decision
-does not authorize implementing either proposal. Approval is required before
-changing rules, adapter behavior or introducing an explicit cash-only exception.
+Adopted on 2026-10-09 under Florent's delegated accounting arbitration, revised
+following his supplied economic explanation and official framework sources.
+The [README](../README.md#accounting-policy-preserve-cash-yield-and-source-identity)
+states the rationale. No further operator accounting choice is a prerequisite
+for this bounded representation. Runtime blocks remain until implementation
+passes its gates; existing whole-account rejection regressions continue to apply.
 
-After a policy is approved, its owning issue must prove synthetic conversion,
-exact source/target ownership, same-day distinct identities, mixed currency,
-refund/reversal refusal, repeat zero and uncertain-request fencing, then isolated
-native acceptance and private source/statement reconciliation. Native-contract
-proof above does not close those future integration criteria or C13-C14.
+Before enabling the rules, prove synthetic conversion, source/target ownership,
+same-day distinct identities, mixed currency, negative/correction refusal,
+repeat-zero behavior and uncertain-request fencing, then isolated native adapter
+acceptance and private source/CSV reconciliation. The existing native-contract
+proof alone does not close those integration criteria or C13-C14. Legacy NAV
+identity and CSV-transition completeness remain separately enforced.
 
 Rollback of this characterization is a scoped Git revert. Lab rollback uses
 `scripts/lab_cleanup.py --recover <private-ownership-record>` when automatic
