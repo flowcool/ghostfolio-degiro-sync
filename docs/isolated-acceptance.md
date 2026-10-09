@@ -138,9 +138,13 @@ project label. It never prunes the host, forces image deletion or deletes an
 operator-supplied runtime image. A runtime image built separately remains the
 caller's responsibility.
 
-Catchable SIGTERM/SIGINT raise an exit through the same cleanup path; repeated
-signals are ignored during bounded cleanup. A primary scenario failure remains
-the primary exception, with a sanitized cleanup warning if recovery is incomplete.
+Catchable SIGTERM/SIGINT atomically block both signals before raising an exit
+through the same cleanup path. Cleanup entry also blocks both signals before
+changing their handlers, so a closely timed second signal cannot interrupt the
+transition. Pending repeats are discarded while ignored; the caller's original
+handlers and signal mask are restored after bounded cleanup. A primary scenario
+failure remains the primary exception, with a sanitized cleanup warning if
+recovery is incomplete.
 A successful scenario with failed teardown exits unsuccessfully. The record is
 removed only after all cleanup steps succeed. If the process is killed with
 SIGKILL, the host crashes, Docker is unavailable or ownership checks fail,

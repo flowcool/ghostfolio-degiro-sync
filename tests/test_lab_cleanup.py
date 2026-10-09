@@ -206,6 +206,54 @@ assert not list((Path(sys.argv[1]) / 'tmp/lab-recovery').glob('*.yaml'))
     assert result.returncode == 0, result.stderr.decode()
 
 
+@pytest.mark.parametrize('location', ['handler-exit', 'cleanup-entry'])
+def test_second_signal_cannot_interrupt_cleanup_transition(tmp_path, location):
+    program = '''
+import os, signal, sys
+from pathlib import Path
+from scripts import lab_cleanup as lab
+lab.__file__ = str(Path(sys.argv[1]) / 'scripts/lab_cleanup.py')
+lab.docker = lambda *args: ''
+signals = {signal.SIGTERM, signal.SIGINT}
+previous = {signum: signal.getsignal(signum) for signum in signals}
+signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1})
+mask = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+original_terminated = lab.terminated
+original_signal = signal.signal
+injected = []
+def terminated(signum, frame):
+    try:
+        original_terminated(signum, frame)
+    finally:
+        if sys.argv[2] == 'handler-exit' and signum == signal.SIGTERM:
+            injected.append('handler-exit')
+            os.kill(os.getpid(), signal.SIGINT)
+def install(signum, handler):
+    if sys.argv[2] == 'cleanup-entry' and handler == signal.SIG_IGN and not injected:
+        injected.append('cleanup-entry')
+        os.kill(os.getpid(), signal.SIGINT)
+    return original_signal(signum, handler)
+lab.terminated = terminated
+signal.signal = install
+def operation(directory, state):
+    assert state['record'].exists()
+    os.kill(os.getpid(), signal.SIGTERM)
+try:
+    lab.execute('degiro-c13-aaaaaaaaaa', operation)
+except SystemExit as error:
+    assert error.code == 143, error.code
+else:
+    raise AssertionError('First SIGTERM was ignored')
+assert injected == [sys.argv[2]]
+assert not list((Path(sys.argv[1]) / 'tmp/lab-recovery').glob('*.yaml'))
+assert {signum: signal.getsignal(signum) for signum in signals} == previous
+assert signal.pthread_sigmask(signal.SIG_BLOCK, set()) == mask
+'''
+    result = subprocess.run([sys.executable, '-c', program, str(tmp_path), location],
+                            capture_output=True, timeout=10)
+    assert result.returncode == 0, result.stderr.decode()
+
+
 def test_exact_id_mismatch_blocks_deletion(state, monkeypatch):
     calls = []
     def docker(kind, operation, *args):

@@ -14,6 +14,7 @@ import yaml
 
 LABEL = 'com.docker.compose.project'
 KINDS = ('container', 'network', 'image')
+SIGNALS = {signal.SIGTERM, signal.SIGINT}
 
 
 def validate_project(project):
@@ -123,6 +124,8 @@ def cleanup(state):
 
 
 def terminated(signum, frame):
+    # Block both signals atomically before unwinding into the cleanup scope.
+    signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
     raise SystemExit(128 + signum)
 
 
@@ -138,8 +141,8 @@ def execute(project, operation):
     state = {'project': project, 'record': record,
              'resources': {kind: [] for kind in KINDS}, 'processes': []}
     save_record(state)
-    previous = {signum: signal.signal(signum, terminated)
-                for signum in (signal.SIGTERM, signal.SIGINT)}
+    previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+    previous = {signum: signal.signal(signum, terminated) for signum in SIGNALS}
     primary = None
     try:
         with tempfile.TemporaryDirectory(prefix=project + '-') as directory:
@@ -148,7 +151,9 @@ def execute(project, operation):
         primary = error
         raise
     finally:
-        # A repeated catchable signal must not interrupt bounded recovery.
+        # Protect the transition too: sequential handler updates leave a gap.
+        signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
+        # SIG_IGN discards pending repeats before restoring the caller's mask.
         for signum in previous:
             signal.signal(signum, signal.SIG_IGN)
         try:
@@ -161,6 +166,7 @@ def execute(project, operation):
         finally:
             for signum, handler in previous.items():
                 signal.signal(signum, handler)
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
         if failures and primary is None:
             raise RuntimeError('Owned lab cleanup incomplete; see recovery record')
 
