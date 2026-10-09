@@ -25,13 +25,31 @@ def test_supported_contract_does_not_depend_on_calendar_age(snapshot, year):
     assert snapshot == before
 
 
-@pytest.mark.parametrize('kind', ['CASH_FUND_NAV_CHANGE', 'CASH_FUND_TRANSACTION'])
+@pytest.mark.parametrize('case,reason', [
+    ('CASH_FUND_NAV_CHANGE', 'legacy_cash'),
+    ('CASH_FUND_TRANSACTION', 'legacy_cash'),
+    ('financial', 'financial_schema'),
+    ('fx', 'fx_schema'),
+    ('transactions', 'unknown'),
+    ('cash_movements', 'unknown'),
+])
 @pytest.mark.parametrize('dry_run', [True, False])
-def test_legacy_cash_markers_block_before_dispatch(snapshot, kind, dry_run):
-    snapshot['cash_movements'].append({'id': 0, 'type': kind})
-    with pytest.raises(RuntimeError, match='legacy monetary-fund API format'):
+def test_incompatible_formats_block_before_dispatch(snapshot, case, reason, dry_run):
+    if reason == 'legacy_cash':
+        snapshot['cash_movements'].append({'id': 0, 'type': case})
+    elif case == 'financial':
+        snapshot['transactions'][0]['price'] = 'CREDENTIAL_SENTINEL'
+    elif case == 'fx':
+        snapshot['transactions'][0]['fxRate'] = 0
+    else:
+        snapshot[case] = ['CREDENTIAL_SENTINEL']
+    before = deepcopy(snapshot)
+    with pytest.raises(RuntimeError) as caught:
         adapter.synchronize_locked({'dry_run': dry_run}, snapshot, {}, {}, {}, {},
             lambda *a: pytest.fail('Import dispatched'), lambda *a: pytest.fail('Cash dispatched'))
+    assert str(caught.value) == adapter.API_FORMAT_ERRORS[reason]
+    assert 'CREDENTIAL_SENTINEL' not in str(caught.value)
+    assert snapshot == before
 
 
 @pytest.mark.parametrize('field,value', [
