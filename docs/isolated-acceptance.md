@@ -118,11 +118,54 @@ A later authorized executor would still need fresh exact readback, unchanged
 ownership, bounded-ID confirmation and an independently tested rollback. Deleting
 rows alone does not restore asset profiles/market data or cancel old requests.
 
-Controller teardown removes only its UUID-named worker and its own Compose
-project containers/network. No host bindings or production service stops are
-used. If interrupted, identify the owned `degiro-c13-<uuid>` project by its Compose
-labels before cleanup; never issue broad Docker pruning. A source-code rollback
-uses Git revert and retains any actual uncertain journal.
+Both native lab controllers use `scripts/lab_cleanup.py`. Before any Docker
+mutation, it creates an operator-owned mode0600 YAML ownership record under the
+mode0700 gitignored `tmp/lab-recovery/` directory. The record contains only the
+UUID project and exact discovered container/network/image IDs. It never contains
+the temporary Compose manifest, generated passwords, tokens or environment.
+The private manifest is removed with its temporary directory even when cleanup
+fails; recovery does not require it.
+
+Cleanup independently attempts every local driver/barrier process, escalates a
+10-second terminate timeout to kill and a bounded wait, then independently
+handles containers, networks and fixture images. Each Docker command has a
+30-second timeout. Container deletion precedes network/image deletion. Partial
+Compose startup and a failed shutdown cannot skip later steps: cleanup uses
+exact Docker IDs rather than `compose down`. Immediately before each removal,
+it checks the full ID and the UUID project label; networks must also be internal.
+Generated quote containers, the worker and profile-fixture image carry the same
+project label. It never prunes the host, forces image deletion or deletes an
+operator-supplied runtime image. A runtime image built separately remains the
+caller's responsibility.
+
+Catchable SIGTERM/SIGINT atomically block both signals before raising an exit
+through the same cleanup path. Cleanup entry also blocks both signals before
+changing their handlers, so a closely timed second signal cannot interrupt the
+transition. Pending repeats are discarded while ignored; the caller's original
+handlers and signal mask are restored after bounded cleanup. A primary scenario
+failure remains the primary exception, with a sanitized cleanup warning if
+recovery is incomplete.
+A successful scenario with failed teardown exits unsuccessfully. The record is
+removed only after all cleanup steps succeed. If the process is killed with
+SIGKILL, the host crashes, Docker is unavailable or ownership checks fail,
+cleanup is **not guaranteed**. Preserve the record and recover explicitly:
+
+```sh
+.venv/bin/python scripts/lab_cleanup.py \
+  --recover tmp/lab-recovery/degiro-c13-<uuid>.yaml
+```
+
+The same command accepts an owned `degiro-interest-<uuid>.yaml` record. It refuses
+public/symlinked/foreign-owner records or invalid project/ID shapes. It discovers
+partially started resources by the recorded project label, saves their full IDs,
+then rechecks each ID/label before removal. Changed/foreign resources are rejected
+and the record survives. Do not edit the record to claim shared resources. If
+Docker state changes concurrently, stop and inspect the owned project; never
+substitute a name-only deletion or broad pruning. Local child PIDs are deliberately
+not persisted because PID reuse makes delayed PID-based deletion unsafe.
+
+Source rollback is a scoped Git revert. Preserve any actual financial uncertainty
+journal; the lab ownership record has no authority over production or such journals.
 
 ## Remaining acceptance limits
 
