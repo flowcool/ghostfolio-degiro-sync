@@ -22,6 +22,7 @@ def test_recovery_command_defaults_to_preflight(monkeypatch, capsys, confirm):
         arguments.append('--confirm-local-state')
     assert recover_degiro.main(arguments) == 0
     output = capsys.readouterr().out
+    assert 'snapshot SHA-256=' + 'f' * 64 in output
     assert ('confirmed locally' if confirm else 'verified; intent retained') in output
     assert 'TOKEN-SENTINEL' not in output and 'a' * 32 not in output
 

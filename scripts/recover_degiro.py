@@ -23,7 +23,8 @@ def main(argv=None):
             confirm=args.confirm_local_state)
         action = 'confirmed locally' if result['confirmed'] else 'verified; intent retained'
         print('Positive import recovery: ' + str(result['matched']) + ' exact activities ' + action
-              + '; GET only, no replay or financial mutation')
+              + '; GET only, no replay or financial mutation'
+              + '; snapshot SHA-256=' + result['snapshot_sha256'])
         return 0
     except Exception:
         print('Positive import recovery failed; inspect private state, no financial mutation', file=sys.stderr)
