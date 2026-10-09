@@ -65,8 +65,11 @@ Offline regressions also cover distinct payments and full-ledger category gates.
 This establishes real synthetic conversion and conservative transition refusal.
 It does not reconstruct the private July producer revision, restore its missing
 original CSV, establish historical completeness, or implement reviewed adoption.
-The [real read-only comparison](readonly-reconciliation.md) still records only
-four exact already-created dividend matches. No production acceptance follows.
+The [real read-only comparison](readonly-reconciliation.md) records four exact
+destination matches and their financial association with fresh broker source
+rows. Source seconds are truncated in the old output; neither these associations
+nor the broader history capture prove complete safe adoption. No production
+acceptance follows.
 
 All bench state is disposable. Teardown the exact owned converter container and
 Ghostfolio UUID project only; keep shared caches and other containers intact.
