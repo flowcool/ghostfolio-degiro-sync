@@ -15,6 +15,8 @@ PAGE = 'pageInfo { hasNextPage endCursor }'
 CONNECTIONS = {
     'reviews': 'reviews(first:100, after:$cursor) { nodes { id author { login } '
         'state commit { oid } body url submittedAt } ' + PAGE + ' }',
+    'comments': 'comments(first:100, after:$cursor) { nodes { id '
+        'author { login __typename } body url createdAt updatedAt } ' + PAGE + ' }',
     'threads': 'reviewThreads(first:100, after:$cursor) { nodes { id isResolved } '
         + PAGE + ' }',
     'checks': 'commits(last:1) { nodes { commit { oid statusCheckRollup { '
@@ -77,7 +79,7 @@ def connection_page(pr, connection, head):
             require(commit['oid'] == head, 'Checks do not cover the selected head')
             page = commit['statusCheckRollup']['contexts']
         else:
-            page = pr['reviews' if connection == 'reviews' else 'reviewThreads']
+            page = pr['reviewThreads' if connection == 'threads' else connection]
         nodes, info = page['nodes'], page['pageInfo']
         require(isinstance(nodes, list) and isinstance(info, dict)
             and type(info.get('hasNextPage')) is bool,
@@ -111,20 +113,94 @@ def read_connection(connection, number, head, deadline):
     raise RuntimeError('GitHub connection page budget exhausted')
 
 
-def completed_review(reviews, head, number):
+def review_time(value):
+    try:
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        require(parsed.utcoffset() is not None, 'Invalid CodeRabbit review time')
+        return parsed
+    except (AttributeError, ValueError, TypeError):
+        raise RuntimeError('Invalid CodeRabbit review time') from None
+
+
+def exact_head_reviews(reviews, head):
+    return [review for review in reviews
+        if isinstance(review.get('author'), dict)
+        and review['author'].get('login') == 'coderabbitai'
+        and isinstance(review.get('commit'), dict) and review['commit'].get('oid') == head]
+
+
+def unique_coverage_fields(pairs):
+    result = {}
+    for key, value in pairs:
+        require(key not in result, 'Duplicate CodeRabbit coverage field')
+        result[key] = value
+    return result
+
+
+def completed_comment(comments, reviews, head, number):
+    # A comment must never override a formal pending/changes-requested review.
+    prior = [(review_time(review.get('submittedAt')), review)
+        for review in reviews if isinstance(review.get('author'), dict)
+        and review['author'].get('login') == 'coderabbitai']
+    if prior:
+        newest = max(stamp for stamp, _ in prior)
+        latest = [review for stamp, review in prior if stamp == newest]
+        require(len(latest) == 1 and latest[0].get('state') in ('COMMENTED', 'APPROVED'),
+            'Latest CodeRabbit formal review is ambiguous or requests changes')
     candidates = []
-    for review in reviews:
-        author, commit = review.get('author'), review.get('commit')
+    for comment in comments:
+        author = comment.get('author')
         if (not isinstance(author, dict) or author.get('login') != 'coderabbitai'
-                or not isinstance(commit, dict) or commit.get('oid') != head):
+                or author.get('__typename') != 'Bot'):
             continue
+        body = comment.get('body')
+        require(isinstance(body, str), 'Invalid CodeRabbit comment body')
+        if 'final_review_risk_coverage:' not in body:
+            continue
+        matches = re.findall(r'^<!-- final_review_risk_coverage:(\{[^\r\n]*\}) -->$',
+            body, re.M)
+        require(len(matches) == 1 and body.count('final_review_risk_coverage:') == 1,
+            'CodeRabbit comment coverage missing or ambiguous')
         try:
-            submitted = datetime.fromisoformat(review['submittedAt'].replace('Z', '+00:00'))
-            require(submitted.utcoffset() is not None, 'Invalid CodeRabbit review time')
-        except (KeyError, AttributeError, ValueError, TypeError):
-            raise RuntimeError('Invalid CodeRabbit review time') from None
-        candidates.append((submitted, review))
+            coverage = json.loads(matches[0], object_pairs_hook=unique_coverage_fields)
+        except (ValueError, TypeError):
+            raise RuntimeError('Malformed CodeRabbit coverage metadata') from None
+        require(isinstance(coverage, dict) and set(coverage)
+            == {'sourceCommitId', 'coveredCommitId', 'kind'},
+            'Unknown CodeRabbit coverage protocol')
+        require(all(isinstance(coverage[key], str)
+            and re.fullmatch(r'[0-9a-f]{40}', coverage[key])
+            for key in ('sourceCommitId', 'coveredCommitId')),
+            'Invalid CodeRabbit coverage commit')
+        if coverage['sourceCommitId'] != head or coverage['coveredCommitId'] != head:
+            continue
+        require(coverage['kind'] == 'reviewed', 'CodeRabbit final-head review not completed')
+        start, end = '<!-- final_review_risk_start -->', '<!-- final_review_risk_end -->'
+        require(body.count(start) == 1 and body.count(end) == 1
+            and body.index(start) < body.index('<!-- final_review_risk_coverage:')
+                < body.index(end), 'CodeRabbit coverage outside completed risk section')
+        require(not re.search(r'reviews?\s+(skipped|paused|in progress)|rate[- ]limit'
+            r'|<!--\s*(?:review_in_progress|review_status)', body, re.I),
+            'Skipped, pending or rate-limited review is not evidence')
+        created, updated = review_time(comment.get('createdAt')), review_time(comment.get('updatedAt'))
+        require(updated >= created and (not prior or updated >= max(stamp for stamp, _ in prior)),
+            'CodeRabbit comment predates formal review')
+        url = comment.get('url')
+        require(isinstance(url, str) and re.fullmatch(r'https://github\.com/'
+            + re.escape(REPOSITORY) + '/pull/' + str(number) + r'#issuecomment-[0-9]+', url),
+            'Invalid CodeRabbit comment evidence')
+        candidates.append(url)
     require(candidates, 'Completed CodeRabbit review of final head missing')
+    require(len(candidates) == 1, 'Final-head CodeRabbit comment evidence ambiguous')
+    return candidates[0]
+
+
+def completed_review(reviews, head, number, comments=()):
+    candidates = []
+    for review in exact_head_reviews(reviews, head):
+        candidates.append((review_time(review.get('submittedAt')), review))
+    if not candidates:
+        return completed_comment(comments, reviews, head, number)
     newest = max(submitted for submitted, _ in candidates)
     latest = [review for submitted, review in candidates if submitted == newest]
     require(len(latest) == 1, 'Final-head CodeRabbit review evidence ambiguous')
@@ -177,7 +253,8 @@ def check_merge(number):
     require(initial.get('state') == 'OPEN' and initial.get('isDraft') is False,
         'Pull request is closed or draft')
     reviews = read_connection('reviews', number, head, deadline)
-    review_url = completed_review(reviews, head, number)
+    comments = [] if exact_head_reviews(reviews, head) else read_connection('comments', number, head, deadline)
+    review_url = completed_review(reviews, head, number, comments)
     checks = passing_checks(read_connection('checks', number, head, deadline))
     threads = read_connection('threads', number, head, deadline)
     require(all(type(thread.get('isResolved')) is bool for thread in threads),

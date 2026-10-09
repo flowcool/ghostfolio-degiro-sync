@@ -13,6 +13,7 @@ from scripts import check_pr_merge as preflight
 
 HEAD = 'a' * 40
 URL = 'https://github.com/flowcool/ghostfolio-degiro-sync/pull/24#pullrequestreview-100'
+COMMENT_URL = 'https://github.com/flowcool/ghostfolio-degiro-sync/pull/24#issuecomment-200'
 
 
 def page(nodes, next_cursor=None):
@@ -31,10 +32,21 @@ def review():
         'submittedAt': '2026-10-09T12:00:00Z'}
 
 
+def coverage_comment():
+    coverage = {'sourceCommitId': HEAD, 'coveredCommitId': HEAD, 'kind': 'reviewed'}
+    return {'id': 'comment-200', 'author': {'login': 'coderabbitai', '__typename': 'Bot'},
+        'url': COMMENT_URL, 'createdAt': '2026-10-09T12:00:00Z',
+        'updatedAt': '2026-10-09T13:00:00Z',
+        'body': '<!-- final_review_risk_start -->\n'
+            '<!-- final_review_risk_coverage:' + json.dumps(coverage) + ' -->\n'
+            '<!-- final_review_risk_end -->'}
+
+
 @pytest.fixture
 def github(monkeypatch):
     data = {'initial': metadata(), 'final': metadata(), 'base_calls': 0, 'calls': [],
         'reviews': {None: page([review()])},
+        'comments': {None: page([])},
         'checks': {None: page([
             {'id': 'test-1', '__typename': 'CheckRun', 'name': 'test',
                 'isRequired': True, 'status': 'COMPLETED', 'conclusion': 'SUCCESS'},
@@ -47,6 +59,7 @@ def github(monkeypatch):
         assert query.startswith('query(') and 'mutation' not in query
         data['calls'].append((query, cursor))
         for connection, fragment in (('reviews', 'reviews(first:'),
+                ('comments', 'comments(first:'),
                 ('threads', 'reviewThreads(first:'), ('checks', 'contexts(first:')):
             if fragment in query:
                 result = {'headRefOid': data.get('connection_head', HEAD)}
@@ -55,13 +68,121 @@ def github(monkeypatch):
                     result['commits'] = {'nodes': [{'commit': {'oid': data.get('checks_head', HEAD),
                         'statusCheckRollup': {'contexts': body}}}]}
                 else:
-                    result['reviews' if connection == 'reviews' else 'reviewThreads'] = body
+                    result[{'reviews': 'reviews', 'comments': 'comments',
+                        'threads': 'reviewThreads'}[connection]] = body
                 return result
         data['base_calls'] += 1
         return deepcopy(data['initial' if data['base_calls'] == 1 else 'final'])
 
     monkeypatch.setattr(preflight, 'gh_query', query)
     return data
+
+
+def test_authenticated_final_head_incremental_comment_is_completed_evidence(github):
+    github['reviews'][None]['nodes'][0]['commit']['oid'] = 'b' * 40
+    github['comments'][None]['nodes'] = [coverage_comment()]
+    assert preflight.check_merge(24)['review_url'] == COMMENT_URL
+
+
+@pytest.mark.parametrize('case', ['wrong_author', 'human_author', 'missing_author',
+    'stale_source', 'stale_covered', 'not_reviewed', 'duplicate_marker', 'bad_json',
+    'duplicate_field', 'extra_field', 'invalid_sha', 'missing_start', 'missing_end',
+    'outside_section', 'rate_limited', 'skipped', 'paused', 'in_progress',
+    'progress_marker', 'wrong_url', 'wrong_pr', 'bad_updated', 'naive_time',
+    'before_created', 'before_formal', 'missing_body', 'summary_only'])
+def test_comment_evidence_fails_closed(github, case):
+    github['reviews'][None]['nodes'][0]['commit']['oid'] = 'b' * 40
+    comment = coverage_comment()
+    github['comments'][None]['nodes'] = [comment]
+    if case == 'wrong_author':
+        comment['author']['login'] = 'untrusted'
+    elif case == 'human_author':
+        comment['author']['__typename'] = 'User'
+    elif case == 'missing_author':
+        comment['author'] = None
+    elif case in ('stale_source', 'stale_covered', 'not_reviewed', 'extra_field', 'invalid_sha'):
+        fields = {'sourceCommitId': HEAD, 'coveredCommitId': HEAD, 'kind': 'reviewed'}
+        if case == 'stale_source': fields['sourceCommitId'] = 'b' * 40
+        elif case == 'stale_covered': fields['coveredCommitId'] = 'b' * 40
+        elif case == 'not_reviewed': fields['kind'] = 'reused'
+        elif case == 'extra_field': fields['unknown'] = True
+        else: fields['coveredCommitId'] = 'invalid'
+        comment['body'] = comment['body'].replace(
+            json.dumps({'sourceCommitId': HEAD, 'coveredCommitId': HEAD, 'kind': 'reviewed'}),
+            json.dumps(fields))
+    elif case == 'duplicate_marker':
+        comment['body'] += '\n' + comment['body']
+    elif case == 'bad_json':
+        comment['body'] = comment['body'].replace('"kind": "reviewed"', '"kind": invalid')
+    elif case == 'duplicate_field':
+        comment['body'] = comment['body'].replace('"kind": "reviewed"',
+            '"kind": "pending", "kind": "reviewed"')
+    elif case in ('missing_start', 'missing_end'):
+        marker = 'start' if case == 'missing_start' else 'end'
+        comment['body'] = comment['body'].replace('<!-- final_review_risk_' + marker + ' -->', '')
+    elif case == 'outside_section':
+        comment['body'] = comment['body'].replace('<!-- final_review_risk_start -->\n', '')
+        comment['body'] += '\n<!-- final_review_risk_start -->'
+    elif case in ('rate_limited', 'skipped', 'paused', 'in_progress', 'progress_marker'):
+        comment['body'] += {'rate_limited': '\nRate limit exceeded', 'skipped': '\nReview skipped',
+            'paused': '\nReview paused', 'in_progress': '\nReview in progress',
+            'progress_marker': '\n<!-- review_in_progress -->'}[case]
+    elif case in ('wrong_url', 'wrong_pr'):
+        comment['url'] = 'https://untrusted.invalid' if case == 'wrong_url' else COMMENT_URL.replace('/24#', '/25#')
+    elif case in ('bad_updated', 'naive_time', 'before_created', 'before_formal'):
+        comment['updatedAt'] = {'bad_updated': None, 'naive_time': '2026-10-09T13:00:00',
+            'before_created': '2026-10-09T11:00:00Z', 'before_formal': '2026-10-09T12:30:00Z'}[case]
+        if case == 'before_formal':
+            github['reviews'][None]['nodes'][0]['submittedAt'] = '2026-10-09T14:00:00Z'
+    elif case == 'missing_body':
+        comment['body'] = None
+    else:
+        comment['body'] = 'Walkthrough only; no actionable comments.'
+    with pytest.raises(RuntimeError):
+        preflight.check_merge(24)
+
+
+@pytest.mark.parametrize('exact', [False, True])
+@pytest.mark.parametrize('state', ['CHANGES_REQUESTED', 'PENDING', 'DISMISSED'])
+def test_comment_does_not_override_formal_review_refusal(github, exact, state):
+    row = github['reviews'][None]['nodes'][0]
+    row['state'] = state
+    if not exact:
+        row['commit']['oid'] = 'b' * 40
+    github['comments'][None]['nodes'] = [coverage_comment()]
+    with pytest.raises(RuntimeError):
+        preflight.check_merge(24)
+
+
+def test_comment_pagination_and_multiple_final_head_evidence_are_not_truncated(github):
+    github['reviews'][None]['nodes'].clear()
+    github['comments'][None] = page([coverage_comment()], 'next')
+    other = coverage_comment()
+    other['id'] = 'comment-201'
+    other['url'] = COMMENT_URL.replace('-200', '-201')
+    github['comments']['next'] = page([other])
+    with pytest.raises(RuntimeError, match='ambiguous'):
+        preflight.check_merge(24)
+    assert any(cursor == 'next' for _, cursor in github['calls'])
+
+
+def test_comment_pagination_can_find_final_coverage_after_stale_comment(github):
+    github['reviews'][None]['nodes'].clear()
+    first = coverage_comment()
+    first['body'] = first['body'].replace(HEAD, 'b' * 40)
+    github['comments'][None] = page([first], 'next')
+    second = coverage_comment()
+    second['id'] = 'comment-201'
+    github['comments']['next'] = page([second])
+    assert preflight.check_merge(24)['review_url'] == COMMENT_URL
+
+
+def test_successful_comment_evidence_does_not_bypass_required_ci(github):
+    github['reviews'][None]['nodes'].clear()
+    github['comments'][None]['nodes'] = [coverage_comment()]
+    github['checks'][None]['nodes'][0]['conclusion'] = 'FAILURE'
+    with pytest.raises(RuntimeError, match='Required check'):
+        preflight.check_merge(24)
 
 
 def test_exact_final_review_green_checks_and_complete_threads(github):
