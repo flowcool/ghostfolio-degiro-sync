@@ -141,6 +141,25 @@ def test_existing_zero_interest_cannot_become_nonzero_even_without_source_row(sn
         run(data, [activity_row(row)], False)
 
 
+@pytest.mark.parametrize('index', [0, 1], ids=['compensation', 'zero-interest'])
+def test_existing_canonical_yield_requires_original_symbol_without_source_row(snapshot, index):
+    data = yield_snapshot(snapshot)
+    row = adapter.normalize_cash_yield(data, TARGET['id'])[index]
+    row['symbol'] = 'GF_CHANGED'
+    data['cash_movements'] = []
+    with pytest.raises(RuntimeError, match='canonical DEGIRO cash yield'):
+        run(data, [activity_row(row)], False)
+
+
+def test_existing_interest_requires_manual_profile_without_canonical_comment(snapshot):
+    data = yield_snapshot(snapshot)
+    row = adapter.normalize_cash_yield(data, TARGET['id'])[0]
+    row.update(comment=None, dataSource='YAHOO', symbol='TEST')
+    data['cash_movements'] = []
+    with pytest.raises(RuntimeError, match='target interest representation'):
+        run(data, [activity_row(row)], False)
+
+
 def test_manual_interest_overlap_blocks_despite_different_custom_symbol(snapshot):
     data = yield_snapshot(snapshot)
     row = adapter.normalize_cash_yield(data, TARGET['id'])[0]
