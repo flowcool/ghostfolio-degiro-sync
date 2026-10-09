@@ -33,8 +33,8 @@ Florent supplied an explanation that compensation offsets negative yield on
 cash held in money-market funds, rather than brokerage fees or margin debit
 interest, and delegated the reporting choice. The official
 [DEGIRO Investment Services Conditions](https://www.degiro.ch/data/pdf/fr/Conditions_Services_De_Placement.pdf)
-(article 10.2.1, PDF page 24) confirm standing instructions to invest client cash
-in money-market funds. Articles 10.1.1 and 10.3.3 describe their gradual replacement
+(articles 10.1.2 and 10.2.1, PDF page 24) confirm standing instructions to invest
+client cash in money-market funds for clients offered and choosing that option. Articles 10.1.1 and 10.3.3 describe their gradual replacement
 with bank cash accounts. The official
 [money-market fund document page](https://www.degiro.fr/helpdesk/documents/fonds-monetaires)
 links [Participations, dated 2022-03-30](https://www.degiro.fr/data/pdf/fr/PSP_Participations.pdf),

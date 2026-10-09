@@ -40,7 +40,8 @@ a dividend to an unidentified security.
 
 The operator-provided explanation identifies compensation as an offset of
 negative money-market fund yield. DEGIRO's official documents establish the
-automatic cash investment and gradual move to bank cash accounts; they do not
+automatic cash investment for clients offered and choosing the MMF option,
+and the gradual move to bank cash accounts; they do not
 specify compensation conditions. The decision combines that explanation with
 the actual API/CSV credit and the verified native INTEREST representation.
 No historical eligibility dates, thresholds or payout schedule are inferred.
