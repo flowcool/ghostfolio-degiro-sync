@@ -33,7 +33,8 @@ for the exact propagation and rollback procedure.
 
 Functional Python, no custom classes or type hints. The explicit Option C
 core/adapter split replaces the inherited mono-file convention. Follow
-`.claude/rules/python-conventions.md` and `.claude/rules/security.md`.
+`.claude/rules/python-conventions.md`, `.claude/rules/security.md` and
+`.claude/rules/delegation.md` (fleet delegation, model right-sizing, infra handoff).
 Runtime dependencies remain pinned; dev-only pytest never ships in the image.
 Every logic change has an offline regression. Pytest forbids network access;
 real read-only characterization is a separate operator procedure.

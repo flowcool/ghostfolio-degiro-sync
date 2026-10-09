@@ -23,6 +23,7 @@ override the historical handoff's mono-file reuse inventory.
 
 - `.claude/rules/python-conventions.md` — approved core/adapter split, functional, no type hints/classes, never log credentials.
 - `.claude/rules/security.md` — credentials from `os.environ` only; private-API breakage is expected.
+- `.claude/rules/delegation.md` — shared ghostfolio-sync operating model: when to delegate, model right-sizing (Luna→Astra), infra handoff boundary, convergence discipline.
 - Python style, pinned `requirements.txt`, offline `pytest` in `tests/`, DRY_RUN before writes.
 
 ## Git
