@@ -195,7 +195,10 @@ contracts and H4 dispositions. Independent contracts can be specified separately
 but implementation remains sequential. Acceptance owner `infra-8tt.56.11` alone
 owns C13-C14 integrated totals, repeat-zero, recovery and real write-free preflight;
 those criteria must not be duplicated in H1-H5 issues. Existing yield-policy
-ownership remains separate. Production owner `infra-8tt.56.12` alone owns C15.
+owner `infra-8tt.56.14` retains its adopted policy boundary; extending that policy
+or relaxing unsupported-category handling requires Florent's separate explicit
+approval. This specification does not reopen the already adopted EUR treatments.
+Production owner `infra-8tt.56.12` alone owns C15.
 
 ## Native representation evidence and open decisions
 
