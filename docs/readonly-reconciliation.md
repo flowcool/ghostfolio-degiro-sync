@@ -74,8 +74,8 @@ Exact statement comparison also exposes zero-valued CSV-only NAV rows, one-cent
 amount differences and changed descriptions. Private raw windows and manifests
 stay outside GitHub; these gaps do not become a history override.
 
-An explicitly approved policy for unsupported rows, scoped full-statement
-reconciliation and explicit request-bound cash/partial recovery remain prerequisites. See [the source contract](source-contract.md),
+Evidenced treatment of remaining historical rows, scoped full-statement
+reconciliation and source-bound destination transition remain prerequisites. See [the source contract](source-contract.md),
 [synchronization](synchronization.md) and [isolated acceptance limits](isolated-acceptance.md).
 
 ## Saved-input verification after cash-yield implementation (2026-10-09)
@@ -97,15 +97,129 @@ was applied. Minute equality does not establish payment association or canonical
 activity identity. The CSV is the captured broker report, not a newly supplied
 independent manual statement.
 
-Annual and split archives still contain 70 identical stable executions and 1,001
-identical nonzero-ID cash-event bodies, with byte-identical CSV reports. The annual
-archive contains 1,377 cash rows including 340 zero-ID rows; the split archive has
-1,326 cash rows including 319 zero-ID rows. Their respective exact CSV multiset
-matches are 1,254 and 1,231 of 1,366 CSV rows. Both fail the legacy-cash format gate
-and both retain unverified history. These characterization-only archives cannot
-be substituted for an accepted source snapshot or prove completeness.
+Annual and split archives contain 70 identical stable executions and 1,001
+identical nonzero-ID cash-event bodies, with byte-identical CSV reports. Earlier
+comparisons used partially merged diagnostic snapshots, whose extra retained
+rows made their counts unsuitable as authoritative reconciliation evidence.
+The raw-response comparison below supersedes those snapshot counts. Both archives
+fail the legacy-cash format gate and retain unverified history; neither can be
+substituted for an accepted source snapshot or prove completeness.
 
-The category-policy obstacle is resolved for the characterized yield rows;
-verified ISIN-to-Yahoo quote mapping, exact CSV transition semantics and history
-proof remain distinct prerequisites. No broker-ticker fallback, inferred mapping,
-completeness flag or production-write authorization was introduced.
+The category-policy obstacle is resolved for the characterized yield rows.
+Subsequent independent public Yahoo ISIN search and chart metadata verification
+established an eight-instrument mapping, retained privately with its evidence.
+Exact CSV transition semantics and history proof remain distinct prerequisites.
+No broker-ticker fallback, completeness flag or production-write authorization
+was introduced.
+
+## Recomputed raw-input reconciliation (2026-10-09)
+
+The offline [saved-input diagnostic](../scripts/reconcile_saved.py) compares the
+retained recent source, full destination and verified eight-ISIN mapping. It also
+rereads both raw window archives and the captured statement. It binds 151 input
+files plus four implementation files by SHA256, verifies them unchanged before
+publishing a new mode `0600` YAML report and disables network access. It has no broker login, HTTP client, adoption,
+cleanup or journal-confirmation operation. Private rows, created IDs, symbols
+and amounts are retained only in the ignored report.
+
+Raw bodies are compared after removing only derived cash `balance`. Every body
+retains its response path, requested dates and row index, including duplicate
+occurrences. Unique-body counts describe observations, **not an authoritative
+merged ledger**. The exact comparison preserves multiplicity between distinct
+source bodies and dated statement rows, with no rounding tolerance.
+
+| Raw comparison | Annual windows | Split windows |
+| --- | ---: | ---: |
+| Unique cash bodies | 1,340 | 1,319 |
+| Exact eight-column statement matches | 1,334 | 1,314 |
+| API bodies without an exact statement row | 6 | 5 |
+| Dated statement rows without an exact API body | 29 | 49 |
+| Description-only continuation lines, retained separately | 3 | 3 |
+| Responses missing their cash collection, not proved empty | 19 | 0 |
+
+Both byte-identical statements have 1,366 post-header lines: 1,363 dated rows and
+three description-only continuation lines. A separate comparator using Decimal
+JSON decoding independently reproduced both sets of counts. The common 1,001
+nonzero-ID cash bodies and 70 execution bodies agree exactly across widths.
+NAV remains window-dependent: 339 annual/318 split unique bodies, with 150
+annual-only and 129 split-only bodies. All are ID zero. Missing collections and
+the diagnostic counts do not establish account inception or complete coverage.
+
+Residual discrepancies have distinct explanations and limits:
+
+- Three exact date/minute/value-date/ISIN/order candidates differ only in
+  description. Each following description-only CSV line completes the API
+  description. The report retains them separately; it does not concatenate
+  descriptions or approve a new semantic normalization rule.
+- Two execution cash amounts differ by one cent from their statement counterparts.
+  Exact quantity-times-price arithmetic lands on half-cent ties. In the recent
+  case the API amount agrees with half-up and the CSV with half-even. In the older
+  case half-up and half-even agree with the CSV while the API rounds toward zero.
+  These observations do not prove a universal broker rule or authorize an epsilon.
+  Execution totals retain their unrounded precision.
+- Annual comparison has one additional NAV amount discrepancy. CSV-only NAV
+  candidates total 24 in annual comparison (22 zero, two nonzero) and 44 in split
+  comparison (20 zero, 24 nonzero). These counts include the annual amount-mismatch
+  counterpart. Their financial treatment remains unproved; zero values remain too.
+
+The 70 raw executions have the same first-failure diagnostic in both archives:
+eight normalize independently under the saved verified mapping, 55 first stop
+at absent verified mapping, three at unsupported transfers, three at invalid FX
+and one at a missing/invalid financial value. A first failure can hide additional
+contract gaps. Per-row conversion is diagnostic only: it does not relax the
+full-history import-format or whole-account gates.
+
+The recent 88-row source still has 87 exact statement matches and the one
+half-cent case. Conversion produces three SELL, ten DIVIDEND, three FEE and
+five INTEREST candidates. Against the complete saved destination:
+
+- Each SELL has exactly one same-symbol/provider/currency/broker-local-day
+  candidate with equal quantity and price, but different fee, instant and comment.
+  One candidate's fee agrees only after cent rounding; there is no precision waiver.
+- Seven dividends have exactly one such candidate with equal quantity, gross
+  payment and withholding, but different instant and comment. Three winter
+  candidates are approximately one hour later; four summer candidates agree only
+  at UTC-minute precision. Unknown producer provenance prevents a timezone policy.
+- Three dividends have no such candidate; there is also no target DIVIDEND on
+  each corresponding UTC date. This is a bounded absence observation, not proof
+  of a missing historical payment or permission to insert it.
+- Three fees and five yield candidates have no same-symbol/type/day candidate.
+  Missing candidates do not establish that their economics are absent elsewhere.
+
+The full adapter replay at the original source capture time refuses with
+`Manual or CSV activity requires explicit reconciliation`. Both financial
+callbacks are forbidden; none is invoked. No snapshot, mapping, journal or
+production state changes. This replay proves capture-time behavior, not a fresh
+real DRY_RUN or current cash. C14 remains open pending the separate
+[historical contracts](plans/history-contract-extension.md) and transition evidence;
+this diagnostic implements none of those proposed exceptions.
+
+### Reproduction and rollback
+
+Use the canonical project virtualenv and existing private files. The target file
+contains only the exact destination account ID; it is private input too.
+
+```sh
+.venv/bin/python scripts/reconcile_saved.py \
+  --source /private/recent-source.json \
+  --destination /private/ghostfolio-snapshot.json \
+  --mapping /private/verified-mapping.yaml \
+  --target-id-file /private/target-account.txt \
+  --archive /private/annual-archive \
+  --archive /private/split-archive \
+  --output tmp/reads/new-reconciliation.yaml
+```
+
+Each archive requires original `window-NNN.json`, `account-statement.csv` and
+`history-annual.json` or `history-split.json`. Snapshot product metadata supplies
+ISINs; its cash/trade arrays are not used as trusted merged history. The tool
+accepts only the observed 12-column French statement header. Unknown shapes fail
+instead of silently skipping rows. Archives are optional; the complete saved
+destination and mapping remain mandatory. Output must have an existing parent,
+be outside the repository or under ignored `tmp/`, and be new. Existing files,
+input aliases and direct symlinks are refused. Standard output contains counts
+only. A report is not an adoption manifest or complete-history proof.
+
+Blast radius is offline diagnostics and aggregate documentation. Revert the exact
+diagnostic commit to remove the tool and report update; retain original archives,
+private reports and unresolved journals. No financial or service rollback applies.
