@@ -42,6 +42,12 @@ def save_record(state):
             stream.flush()
             os.fsync(stream.fileno())
             os.replace(pending, path)
+            # Persist the renamed entry too, not only the temporary file bytes.
+            directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
         finally:
             pending.unlink(missing_ok=True)
 
