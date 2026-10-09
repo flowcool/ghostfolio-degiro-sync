@@ -78,6 +78,10 @@ Both successful and failed runs remove only their owned containers and network.
 The database is temporary; no shared image is deleted. Offline tests verify
 changed financial readback and aggregate rejection, credential-log privacy,
 explicit EUR aggregate context and rejection of foreign/exposed container state.
+Isolation and result checks remain active with Python optimization enabled;
+every Compose command explicitly pins the generated project name with `-p`.
+Stored GET rows are checked individually through immutable-core financial/date
+evidence, independently of listing order and aggregate totals.
 This proves native representability, not the unobserved positive broker contract.
 
 ## Proposed decision boundaries

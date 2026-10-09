@@ -3,6 +3,8 @@ import importlib
 import json
 import logging
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 import requests
@@ -42,7 +44,13 @@ def native(monkeypatch):
             result = {'accounts': [{'id': 'lab-account', 'balance': 0,
                 'interestInBaseCurrency': fault.get('interest', sum(r['unitPrice'] for r in rows))}]}
         elif path == 'activities':
-            result = {'count': len(rows), 'activities': rows}
+            stored = [dict(row) for row in rows]
+            if fault.get('stored_distribution') and len(stored) >= 2:
+                stored[0]['unitPrice'] -= 1
+                stored[1]['unitPrice'] += 1
+            if fault.get('stored_reverse'):
+                stored.reverse()
+            result = {'count': len(rows), 'activities': stored}
         elif path.startswith('import'):
             status = 201
             activities = body['activities']
@@ -78,7 +86,7 @@ def test_probe_proves_exact_native_outcomes_without_credential_logging(probe, na
 @pytest.mark.parametrize('field,value', [('fee', 1), ('interest', 0)])
 def test_probe_rejects_changed_accepted_evidence_or_aggregation(probe, native, field, value):
     native[1][field] = value
-    with pytest.raises((RuntimeError, AssertionError)):
+    with pytest.raises(RuntimeError):
         probe.probe('http://192.0.2.1:3333')
 
 
@@ -90,5 +98,43 @@ def test_probe_rejects_changed_accepted_evidence_or_aggregation(probe, native, f
 def test_probe_rejects_foreign_or_exposed_container(probe, monkeypatch, labels, binds, ports):
     info = {'Config': {'Labels': labels}, 'HostConfig': {'Binds': binds, 'PortBindings': ports}}
     monkeypatch.setattr(probe, 'run', lambda *args: json.dumps([info]))
-    with pytest.raises(AssertionError):
+    with pytest.raises(RuntimeError):
         probe.inspect_owned_container('selected-container', 'owned')
+
+
+def test_probe_rejects_redistributed_stored_amount_with_unchanged_total(probe, native):
+    native[1]['stored_distribution'] = True
+    with pytest.raises(RuntimeError, match='financial evidence'):
+        probe.probe('http://192.0.2.1:3333')
+
+
+def test_exact_stored_evidence_accepts_reordered_listing(probe, native):
+    native[1]['stored_reverse'] = True
+    assert probe.probe('http://192.0.2.1:3333')['created'] == 3
+
+
+def test_compose_project_is_pinned_despite_environment_override(probe, monkeypatch, tmp_path):
+    monkeypatch.setenv('COMPOSE_PROJECT_NAME', 'shared-production')
+    assert probe.compose_command('owned-uuid', tmp_path / 'compose.yaml') == [
+        'docker', 'compose', '-p', 'owned-uuid', '-f', str(tmp_path / 'compose.yaml')]
+
+
+def test_optimized_python_retains_isolation_and_evidence_checks(probe):
+    program = '''
+import json
+import check_interest_contract as probe
+probe.run = lambda *args: json.dumps([{'Config': {'Labels': {
+    'com.docker.compose.project': 'foreign'}},
+    'HostConfig': {'Binds': None, 'PortBindings': None}}])
+for check in (lambda: probe.ensure(False),
+              lambda: probe.inspect_owned_container('selected', 'owned')):
+    try:
+        check()
+    except RuntimeError:
+        pass
+    else:
+        raise SystemExit('Optimized safety check bypassed')
+'''
+    result = subprocess.run([sys.executable, '-O', '-c', program],
+        cwd=Path(probe.__file__).parent, capture_output=True, timeout=10)
+    assert result.returncode == 0

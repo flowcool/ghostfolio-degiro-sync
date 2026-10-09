@@ -16,10 +16,26 @@ import ghostfolio_core as core
 from isolated_acceptance import GHOST_IMAGE, POSTGRES_IMAGE, REDIS_IMAGE, run
 
 
+def ensure(condition):
+    if not condition:
+        raise RuntimeError('Owned interest probe evidence or isolation check failed')
+
+
+def compose_command(project, path):
+    return ['docker', 'compose', '-p', project, '-f', str(path)]
+
+
+def verify_stored(activities, body):
+    ensure(type(body.get('count')) is int and body['count'] == len(activities))
+    accepted = core.accepted_import_subset(activities, body)
+    ensure(sorted(accepted, key=lambda row: row['comment']) ==
+           sorted(activities, key=lambda row: row['comment']))
+
+
 def inspect_owned_container(identity, project):
     info = json.loads(run('docker', 'inspect', identity))[0]
-    assert info['Config']['Labels']['com.docker.compose.project'] == project
-    assert not info['HostConfig']['Binds'] and not info['HostConfig']['PortBindings']
+    ensure(info['Config']['Labels']['com.docker.compose.project'] == project)
+    ensure(not info['HostConfig']['Binds'] and not info['HostConfig']['PortBindings'])
     return info
 
 
@@ -48,33 +64,34 @@ def probe(host):
                       {**base, 'comment': 'DEGIRO#123:INTEREST:102', 'unitPrice': 0}]
         config = {'ghost_host': host, 'ghost_token': token, 'dry_run': True}
         proposed, ok = core.ghost_import_activities(config, activities)
-        assert ok is True and proposed == activities
-        assert call('GET', '/api/v1/activities')['count'] == 0
+        ensure(ok is True and proposed == activities)
+        ensure(call('GET', '/api/v1/activities')['count'] == 0)
         preview = call('POST', '/api/v1/import?dryRun=true', {'activities': activities}, 201)
-        assert core.accepted_import_subset(activities, preview) == activities
-        assert call('GET', '/api/v1/activities')['count'] == 0
+        ensure(core.accepted_import_subset(activities, preview) == activities)
+        ensure(call('GET', '/api/v1/activities')['count'] == 0)
         created = call('POST', '/api/v1/import', {'activities': activities}, 201)
-        assert core.accepted_import_subset(activities, created) == activities
+        ensure(core.accepted_import_subset(activities, created) == activities)
         listed = call('GET', '/api/v1/activities')
-        assert listed['count'] == 2
-        assert {row['comment'] for row in listed['activities']} == {a['comment'] for a in activities}
+        verify_stored(activities, listed)
+        ensure({row['comment'] for row in listed['activities']} == {a['comment'] for a in activities})
         for row in listed['activities']:
-            assert row['type'] == 'INTEREST' and row['accountId'] == account['id']
-            assert row['assetProfile']['dataSource'] == 'MANUAL'
-            assert row['assetProfile']['symbol'] == base['symbol']
+            ensure(row['type'] == 'INTEREST' and row['accountId'] == account['id'])
+            ensure(row['assetProfile']['dataSource'] == 'MANUAL')
+            ensure(row['assetProfile']['symbol'] == base['symbol'])
         repeat = call('POST', '/api/v1/import', {'activities': activities}, 201)
-        assert core.accepted_import_subset(activities, repeat) == []
+        ensure(core.accepted_import_subset(activities, repeat) == [])
         for field in ('quantity', 'unitPrice', 'fee'):
             invalid = [{**activities[0], field: -1, 'comment': 'DEGIRO#123:INTEREST:999'}]
             call('POST', '/api/v1/import?dryRun=true', {'activities': invalid}, 400)
-            assert call('GET', '/api/v1/activities')['count'] == 2
+            ensure(call('GET', '/api/v1/activities')['count'] == 2)
         distinct = [{**activities[0], 'comment': 'DEGIRO#123:INTEREST:103'}]
         accepted = call('POST', '/api/v1/import', {'activities': distinct}, 201)
-        assert core.accepted_import_subset(distinct, accepted) == distinct
+        ensure(core.accepted_import_subset(distinct, accepted) == distinct)
         accounts = call('GET', '/api/v1/account')['accounts']
         current = next(row for row in accounts if row['id'] == account['id'])
-        assert current['interestInBaseCurrency'] == 20 and current['balance'] == 0
-        assert call('GET', '/api/v1/activities')['count'] == 3
+        ensure(current['interestInBaseCurrency'] == 20 and current['balance'] == 0)
+        final = call('GET', '/api/v1/activities')
+        verify_stored(activities + distinct, final)
         return {'positive_and_zero_accepted': True, 'preview_created': 0,
             'repeat_created': 0, 'negative_quantity_price_fee_rejected': True,
             'distinct_same_second_created': 1, 'interest_total_eur': 20,
@@ -104,22 +121,22 @@ def main():
         compose.write_text(yaml.safe_dump({'name': project,
             'networks': {'lab': {'internal': True}}, 'services': services}))
         compose.chmod(0o600)
-        command = ['docker', 'compose', '-f', str(compose)]
+        command = compose_command(project, compose)
         try:
             run(*command, 'up', '-d', '--pull', 'never', timeout=120)
             identities = {name: run(*command, 'ps', '-q', name).strip() for name in services}
             info = {name: inspect_owned_container(identity, project)
                     for name, identity in identities.items()}
-            assert info['ghostfolio']['Config']['Image'] == GHOST_IMAGE
+            ensure(info['ghostfolio']['Config']['Image'] == GHOST_IMAGE)
             network = project + '_lab'
-            assert json.loads(run('docker', 'network', 'inspect', network))[0]['Internal'] is True
+            ensure(json.loads(run('docker', 'network', 'inspect', network))[0]['Internal'] is True)
             host = 'http://' + info['ghostfolio']['NetworkSettings']['Networks'][network]['IPAddress'] + ':3333'
             sql = ['docker', 'exec', '-i', identities['postgres'], 'psql', '-U', 'interestlab',
                    '-d', 'interestlab', '-v', 'ON_ERROR_STOP=1', '-At']
             deadline = time.monotonic() + 120
             while time.monotonic() < deadline:
                 try:
-                    assert run(*sql, input_text='SELECT count(*) FROM "Order";\n').strip() == '0'
+                    ensure(run(*sql, input_text='SELECT count(*) FROM "Order";\n').strip() == '0')
                     with requests.Session() as readiness:
                         readiness.trust_env = False
                         response = readiness.get(host + '/api/v1/health', timeout=(3, 3), allow_redirects=False)
