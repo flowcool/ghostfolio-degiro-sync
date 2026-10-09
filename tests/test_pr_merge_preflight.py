@@ -185,6 +185,30 @@ def test_successful_comment_evidence_does_not_bypass_required_ci(github):
         preflight.check_merge(24)
 
 
+@pytest.mark.parametrize('change', ['deleted', 'edited', 'formal_veto'])
+def test_comment_proof_changed_during_preflight_is_refused(github, monkeypatch, change):
+    github['reviews'][None]['nodes'].clear()
+    github['comments'][None]['nodes'] = [coverage_comment()]
+    original = preflight.gh_query
+
+    def query(*args, **kwargs):
+        result = original(*args, **kwargs)
+        if 'contexts(first:' in args[0]:
+            if change == 'deleted':
+                github['comments'][None]['nodes'].clear()
+            elif change == 'edited':
+                github['comments'][None]['nodes'][0]['body'] += '\nUpdated concern'
+            else:
+                veto = review()
+                veto.update(state='CHANGES_REQUESTED', submittedAt='2026-10-09T14:00:00Z')
+                github['reviews'][None]['nodes'] = [veto]
+        return result
+
+    monkeypatch.setattr(preflight, 'gh_query', query)
+    with pytest.raises(RuntimeError, match='evidence changed'):
+        preflight.check_merge(24)
+
+
 def test_exact_final_review_green_checks_and_complete_threads(github):
     assert preflight.check_merge(24) == {'ready': True, 'head': HEAD,
         'review_url': URL, 'required_checks': 1}

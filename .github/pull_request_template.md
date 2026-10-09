@@ -61,5 +61,9 @@ accept one authenticated CodeRabbit bot comment containing its machine-readable
 final head and kind must be `reviewed`. A summary alone, reused/stale coverage,
 malformed or ambiguous evidence, a pending/changes-requested formal review, and
 skipped/rate-limited reviews fail closed. Comments use the same bounded pagination
-and head checks. There is no review-reuse exception or bypass flag. Roll back this
+and head checks. Comment-based readiness also re-reads reviews and comments at
+the end and refuses changed or deleted evidence and new formal vetoes. These are
+sequential snapshots: evidence can still change after preflight, so inspect any
+new reviewer update before merging. The helper is not atomic merge enforcement.
+There is no review-reuse exception or bypass flag. Roll back this
 evidence-format support with a scoped Git revert; no production action is needed.

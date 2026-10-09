@@ -261,6 +261,13 @@ def check_merge(number):
         'Review conversation metadata incomplete')
     require(all(thread['isResolved'] for thread in threads),
         'Unresolved review conversation blocks merge')
+    if comments:
+        refreshed_reviews = read_connection('reviews', number, head, deadline)
+        refreshed_comments = read_connection('comments', number, head, deadline)
+        require(refreshed_reviews == reviews and refreshed_comments == comments,
+            'CodeRabbit review evidence changed during preflight')
+        require(completed_review(refreshed_reviews, head, number, refreshed_comments) == review_url,
+            'CodeRabbit review evidence changed during preflight')
     final = gh_query(query_for(), number, deadline)
     require(pr_head(final) == head, 'Pull request head changed during preflight')
     require(final.get('state') == 'OPEN' and final.get('isDraft') is False
