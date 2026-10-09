@@ -50,10 +50,20 @@ independent review.
 Review evidence: <!-- completed review URL and reviewed commit SHA -->
 
 Before merging, run `.venv/bin/python scripts/check_pr_merge.py <number>`.
-The read-only preflight checks submitted final-head CodeRabbit review evidence,
+The read-only preflight checks completed final-head CodeRabbit review evidence,
 required CI, review status, complete conversations and GitHub eligibility, then
 rechecks the head. Use its returned SHA with `gh pr merge --match-head-commit`.
 It performs no merge, comment, resolution or review trigger and grants no
 production authority. GitHub remains authoritative at the actual merge.
-The conservative helper does not accept comment-only legacy reviews or automate
-an operator-approved review-reuse exception; it has no bypass flag.
+Submitted final-head reviews are authoritative. When none exists, the helper can
+accept one authenticated CodeRabbit bot comment containing its machine-readable
+`final_review_risk_coverage` marker: both source and covered commit must equal the
+final head and kind must be `reviewed`. A summary alone, reused/stale coverage,
+malformed or ambiguous evidence, a pending/changes-requested formal review, and
+skipped/rate-limited reviews fail closed. Comments use the same bounded pagination
+and head checks. Comment-based readiness also re-reads reviews and comments at
+the end and refuses changed or deleted evidence and new formal vetoes. These are
+sequential snapshots: evidence can still change after preflight, so inspect any
+new reviewer update before merging. The helper is not atomic merge enforcement.
+There is no review-reuse exception or bypass flag. Roll back this
+evidence-format support with a scoped Git revert; no production action is needed.
