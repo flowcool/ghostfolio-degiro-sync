@@ -132,6 +132,35 @@ Standalone annual exchange fees follow the separately verified
 [FEE/MANUAL contract](fee-contract.md). Brokerage and AutoFX are excluded from
 those fees; ambiguous commission-to-execution reconciliation blocks the account.
 
+## Historical scope extension findings
+
+The full raw-window stable set contains 110 paid dividend rows and 112 withholding
+rows. Exact product/currency/payment/value-date grouping yields 95 unique pairs.
+The remaining groups contain 15 payment-only rows, 13 tax-only singletons and two
+tax-only double groups. Nine payment-only rows have exactly one same-product,
+same-currency, same-calendar-day candidate with equal value date: eight timestamps
+differ by one second and one by four seconds. Each candidate/payment appears
+exactly once with its own financial fields in the retained CSV, at the same local
+minute. This corroborates the recorded rows, not an explicit payment reference.
+Five payments have no same-day withholding candidate and all use HKD; one has two
+candidates. Five isolated withholding rows are positive. The current exact-match,
+missing-tax and reversal guards remain intact; no tax is inferred or summed.
+
+A separate offline per-execution arithmetic diagnostic used placeholder symbols
+and broker currencies, not independently verified Yahoo quotes. Of 70 STOCK
+executions (41 BUY, 29 SELL), 34 passed the existing converter. The other outcomes
+were 18 invalid FX rates, three flagged transfers, five absent/invalid financial
+values, six uncharacterized currency-unit cases and four inconsistent side/sign
+cases. These are refusal outcomes, not diagnosed financial errors or permission
+to synthesize missing values. The source currencies were EUR, USD, JPY and CAD.
+No holding, quote mapping, full-source acceptance or financial write was proved.
+
+The broader stable ledger contains 16 Flatex interest rows, all zero, and one
+positive monetary-fund compensation. Unknown legacy fund events and every existing
+unsupported category still block the whole account. A follow-up policy proposal
+is separate from the approved implementation; it must be reviewed before changing
+these boundaries. See [the proposed contract extension](plans/history-contract-extension.md).
+
 ## Current cash
 
 `account_info.data.baseCurrency` isEUR. `update` returns three named wrappers:
