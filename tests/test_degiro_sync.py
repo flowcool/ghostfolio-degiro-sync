@@ -112,6 +112,25 @@ def test_whole_account_validation_precedes_post(snapshot, mutation):
         run(snapshot, dry_run=False)
 
 
+@pytest.mark.parametrize('category', ['flatex_interest', 'monetary_fund_compensation'])
+@pytest.mark.parametrize('amount', [0, 10, -10])
+def test_accounting_policy_blocks_all_writes_for_unsupported_movement(snapshot, category, amount):
+    evidence = yaml.safe_load((Path(__file__).parent / 'fixtures/degiro_contract.yaml').read_text())
+    movement = deepcopy(evidence['cash_movements'][category])
+    movement['change'] = amount
+    movement.setdefault('valueDate', movement['date'])
+    snapshot['cash_movements'].append(movement)
+    attempted = []
+
+    def forbidden(*args):
+        attempted.append(args)
+        pytest.fail('Unsupported accounting movement reached financial dispatch')
+
+    with pytest.raises(RuntimeError):
+        run(snapshot, dry_run=False, importer=forbidden, writer=forbidden)
+    assert attempted == []
+
+
 def test_dry_run_discloses_unverified_history(snapshot):
     snapshot['history_completeness_verified'] = False
     assert run(snapshot)['history_verified'] is False

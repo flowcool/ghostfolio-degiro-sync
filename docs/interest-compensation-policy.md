@@ -1,7 +1,8 @@
-# Interest and monetary-fund compensation: policy proposal
+# Interest and monetary-fund compensation: conservative policy and future options
 
 This document prepares the accounting decision owned by `infra-8tt.56.14`.
-It does not approve new importer support. The current `cash-rules.yaml` entries
+The conservative blocking policy is adopted; candidate future representations
+below remain unenabled. This does not approve new importer support. The current `cash-rules.yaml` entries
 remain `unsupported_blocking`, including zero interest. The approved delivery
 scope and gates C1-C15 remain unchanged; legacy NAV/fund history has a separate
 future owner. Production writes, cleanup and deployment are not authorized.
@@ -112,7 +113,10 @@ of these movements; native import must not also credit the account balance.
 
 ## Approval, validation and rollback
 
-Recommended decision now: retain both existing blocks. The native experiment
+Adopted decision on 2026-10-09, under Florent's delegated accounting arbitration:
+retain both existing blocks and preserve all source evidence, including zero
+rows. The [README](../README.md#accounting-policy-preserve-evidence-and-stop-on-uncertain-meaning)
+states the rationale. The native experiment
 makes a bounded future zero/positive-interest proposal reviewable; compensation
 still has no proved accounting representation. Florent's current-scope decision
 does not authorize implementing either proposal. Approval is required before
