@@ -21,6 +21,26 @@ def run(arguments, timeout=30):
     return result.stdout
 
 
+def cleanup_owned_resources(cid, image, built, finished):
+    """Always remove the owned image; tolerate only an already removed container."""
+    try:
+        if not finished and cid.exists():
+            identity = cid.read_text().strip()
+            if not re.fullmatch(r'[0-9a-f]{64}', identity):
+                raise RuntimeError('Invalid owned V3 container identity')
+            result = subprocess.run(['docker', 'rm', '-f', identity],
+                                    capture_output=True, timeout=30)
+            missing = {
+                ('Error response from daemon: No such container: ' + identity).encode(),
+                ('Error: No such container: ' + identity).encode(),
+            }
+            if result.returncode and result.stderr.strip() not in missing:
+                raise RuntimeError('Owned V3 container removal failed')
+    finally:
+        if built:
+            run(['docker', 'image', 'rm', image])
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', required=True, help='Existing inspected external converter Git checkout')
@@ -90,13 +110,7 @@ CMD ["./node_modules/.bin/tsx", "src/v3Probe.ts"]
         finally:
             # A killed Docker client need not stop its container. The private
             # cidfile identifies only the container created by this invocation.
-            if not finished and cid.exists():
-                identity = cid.read_text().strip()
-                if not re.fullmatch(r'[0-9a-f]{64}', identity):
-                    raise RuntimeError('Invalid owned V3 container identity')
-                run(['docker', 'rm', '-f', identity])
-            if built:
-                run(['docker', 'image', 'rm', image])
+            cleanup_owned_resources(cid, image, built, finished)
 
 
 if __name__ == '__main__':
