@@ -144,9 +144,17 @@ print("PASS synthetic credential generation {generation}", flush=True)
 
 
 def save_record(path, project, resources):
-    with path.open('w') as stream:
-        path.chmod(0o600)
-        yaml.safe_dump({'project': project, 'containers': resources}, stream)
+    # An interrupted write must preserve the previous usable recovery record.
+    with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, delete=False) as stream:
+        pending = Path(stream.name)
+        try:
+            pending.chmod(0o600)
+            yaml.safe_dump({'project': project, 'containers': resources}, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+            os.replace(pending, path)
+        finally:
+            pending.unlink(missing_ok=True)
 
 
 def terminated(signum, frame):
