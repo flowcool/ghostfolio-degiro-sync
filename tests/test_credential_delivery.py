@@ -19,6 +19,8 @@ def test_only_environment_names_enter_container_arguments(tmp_path):
     assert not any(value in ' '.join(args) for value in delivery.synthetic_values(1).values())
     assert '--network=none' in args and '--restart=no' in args
     assert '--read-only' in args and '--cap-drop=ALL' in args
+    assert '--security-opt=no-new-privileges' in args
+    assert args[args.index('--tmpfs') + 1] == '/tmp:rw,nosuid,nodev,size=16m'
     assert 'readonly' in args[args.index('--mount') + 1]
 
 
@@ -109,6 +111,35 @@ def test_ownership_record_is_private_nonsecret_yaml(tmp_path):
     assert path.stat().st_mode & 0o777 == 0o600
     assert 'containers:' in path.read_text()
     assert all(key not in path.read_text() for key in delivery.SECRET_KEYS)
+
+
+@pytest.mark.parametrize('failure', ['write', 'replace'])
+def test_interrupted_record_update_keeps_prior_private_record(tmp_path, monkeypatch, failure):
+    path = tmp_path / 'ownership.yaml'
+    delivery.save_record(path, 'ours', {'old': 'a' * 64})
+    before = path.read_bytes()
+
+    def fail(*args, **kwargs):
+        raise OSError('synthetic record failure')
+
+    monkeypatch.setattr(delivery.yaml if failure == 'write' else delivery.os,
+                        'safe_dump' if failure == 'write' else 'replace', fail)
+    with pytest.raises(OSError):
+        delivery.save_record(path, 'ours', {'new': 'b' * 64})
+    assert path.read_bytes() == before
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.parametrize('failure', [None, 'missing', 'locked', 'timeout',
+                                    'unreadable', 'empty', 'unexpected-key'])
+def test_pinned_loader_boundaries_are_offline_and_fail_before_child(tmp_path, failure):
+    loader = Path(__file__).parent / 'fixtures/runtime_env_loader.py'
+    result = delivery.loader_fixture(loader, tmp_path, generation=2, failure=failure)
+    if failure:
+        assert result is None
+    else:
+        assert all(result[key] == value for key, value in delivery.synthetic_values(2).items())
 
 
 def test_termination_blocks_both_signals_before_cleanup_transition(monkeypatch):

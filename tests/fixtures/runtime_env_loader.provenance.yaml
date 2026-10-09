@@ -1,0 +1,4 @@
+source: infra/rotation/run-degiro-env.py
+sha256: f605a539aa0348cc82d161861d5630d381c23db52a513cb4bbc65bcebd8ecc51
+purpose: Offline byte-pinned fixture; all store, decrypt and exec boundaries substituted.
+policy: Never execute this fixture directly or against real credentials.

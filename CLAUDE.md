@@ -41,3 +41,17 @@ require separate explicit authorization.
 
 - Epic `infra-8tt.56`, child of `infra-8tt`, with metadata `project=ghostfolio-degiro-sync`.
 - Parent context: the ghostfolio epic `infra-8tt` tracks the IBKR sync and the broader Ghostfolio work.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in the shared Beads database, scoped with `project=ghostfolio-degiro-sync`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The canonical triage roles use the default label vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository. See `docs/agents/domain.md`.
