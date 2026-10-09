@@ -61,7 +61,10 @@ def broker_http(monkeypatch, fail_path=None, failure=None, cash_without_id=False
             query = parse_qs(parts.query)
             assert query["groupTransactionsByOrder"] == ["False"]
             assert query["intAccount"] == ["123"]
-            return response({"data": [{"id": 10, "productId": 20, "quantity": 0.5}]})
+            return response({"data": [{"id": 10, "productId": 20, "quantity": 0.5,
+                "price": 10, "total": -5, "totalInBaseCurrency": -5,
+                "fxRate": 1, "grossFxRate": 1, "feeInBaseCurrency": 0,
+                "autoFxFeeInBaseCurrency": 0, "totalFeesInBaseCurrency": 0}]})
         if path.endswith("/order-history"):
             return response({"data": [{"orderId": "synthetic-order", "productId": 20,
                                         "status": "CONFIRMED"}]})

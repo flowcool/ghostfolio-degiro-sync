@@ -115,6 +115,26 @@ def test_readonly_cli_reports_legacy_format_without_saving_bad_snapshot(
     assert '/logout;' in calls[-1][0].url
 
 
+@pytest.mark.parametrize('field,value,reason', [
+    ('price', 'CREDENTIAL_SENTINEL', 'financial_schema'),
+    ('feeInBaseCurrency', None, 'financial_schema'),
+    ('fxRate', 0, 'fx_schema'),
+])
+def test_readonly_cli_rejects_execution_format_before_saving(
+        snapshot, credentials, monkeypatch, caplog, tmp_path, field, value, reason):
+    snapshot['transactions'][0][field] = value
+    snapshot['transactions'][0]['productId'] = 20
+    calls = broker_http(monkeypatch, '/transactions', response({'data': snapshot['transactions']}))
+    output = tmp_path / 'snapshot.json'
+    assert adapter.main(['--read-only', '--from-date', '2026-01-01',
+                         '--to-date', '2026-01-02', '--output', str(output)]) == 1
+    assert adapter.API_FORMAT_ERRORS[reason] in caplog.text
+    assert 'CREDENTIAL_SENTINEL' not in caplog.text
+    assert_no_secrets(caplog.text)
+    assert not output.exists()
+    assert '/logout;' in calls[-1][0].url
+
+
 @pytest.mark.parametrize('reason', list(adapter.API_FORMAT_ERRORS.values()) + ['CREDENTIAL_SENTINEL'])
 def test_sync_cli_exposes_only_fixed_format_diagnostics(monkeypatch, caplog, reason):
     def failed(*args):

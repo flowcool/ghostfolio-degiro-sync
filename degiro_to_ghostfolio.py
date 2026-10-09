@@ -1391,6 +1391,7 @@ def read_degiro(from_date, to_date, window_days=90, report_locale=None, orders=F
     if failure:
         raise failure from None
     data["fetched_at"] = datetime.now(timezone.utc).isoformat()
+    check_api_import_format(data)
     return data
 
 
