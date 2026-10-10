@@ -216,6 +216,43 @@ def test_exact_final_review_green_checks_and_complete_threads(github):
     assert len(github['calls']) == 5
 
 
+@pytest.mark.parametrize('comment', [False, True])
+@pytest.mark.parametrize('fence', ['```', '~~~~'])
+def test_quoted_policy_is_not_a_review_status_notice(github, comment, fence):
+    policy = '\n' + fence + 'text\nSkipped, pending or rate-limited reviews are not evidence.\n' + fence
+    if comment:
+        github['reviews'][None]['nodes'].clear()
+        row = coverage_comment()
+        row['body'] += policy
+        github['comments'][None]['nodes'] = [row]
+    else:
+        github['reviews'][None]['nodes'][0]['body'] += policy
+    assert preflight.check_merge(24)['ready']
+
+
+@pytest.mark.parametrize('notice', ['Review skipped', 'Review paused',
+    'Review in progress', 'Rate limit exceeded'])
+def test_actual_notice_is_not_hidden_by_context_quotation(github, notice):
+    github['reviews'][None]['nodes'][0]['body'] = (
+        '```text\nrate-limited reviews are not evidence\n```\n' + notice)
+    with pytest.raises(RuntimeError, match='not evidence'):
+        preflight.check_merge(24)
+
+
+@pytest.mark.parametrize('notice', ['Review skipped', 'Review in progress', 'Rate limit exceeded'])
+def test_real_notice_inside_complete_fence_still_refuses(github, notice):
+    github['reviews'][None]['nodes'][0]['body'] = '```text\n' + notice + '\n```'
+    with pytest.raises(RuntimeError, match='not evidence'):
+        preflight.check_merge(24)
+
+
+@pytest.mark.parametrize('closing', ['', '~~~', '``', '```invalid'])
+def test_incomplete_or_mismatched_quote_keeps_status_detection(github, closing):
+    github['reviews'][None]['nodes'][0]['body'] = '```text\nReview skipped\n' + closing
+    with pytest.raises(RuntimeError, match='not evidence'):
+        preflight.check_merge(24)
+
+
 @pytest.mark.parametrize('field,value', [
     ('body', 'Review skipped'), ('body', 'Review in progress'),
     ('body', 'Rate limit exceeded'), ('body', None),

@@ -137,6 +137,28 @@ def unique_coverage_fields(pairs):
     return result
 
 
+def review_notice_text(body):
+    # Bot reviews include repository policy in fenced context quotations.
+    # Exclude only the known quoted policy sentence, never other notices.
+    lines, prose, quoted, fence = body.splitlines(keepends=True), [], [], None
+    for line in lines:
+        marker = re.match(r'^ {0,3}(`{3,}|~{3,})([^\r\n]*)', line)
+        if fence is None:
+            if marker:
+                fence = marker.group(1)
+                quoted = [line]
+            else:
+                prose.append(line)
+        else:
+            quoted.append(line)
+            if (marker and marker.group(1)[0] == fence[0]
+                    and len(marker.group(1)) >= len(fence) and not marker.group(2).strip()):
+                prose.append(re.sub(r'Skipped, pending or\s+rate-limited reviews are not evidence\.',
+                    '', ''.join(quoted)))
+                fence, quoted = None, []
+    return ''.join(prose + quoted)
+
+
 def completed_comment(comments, reviews, head, number):
     # A comment must never override a formal pending/changes-requested review.
     prior = [(review_time(review.get('submittedAt')), review)
@@ -180,7 +202,7 @@ def completed_comment(comments, reviews, head, number):
             and body.index(start) < body.index('<!-- final_review_risk_coverage:')
                 < body.index(end), 'CodeRabbit coverage outside completed risk section')
         require(not re.search(r'reviews?\s+(skipped|paused|in progress)|rate[- ]limit'
-            r'|<!--\s*(?:review_in_progress|review_status)', body, re.I),
+            r'|<!--\s*(?:review_in_progress|review_status)', review_notice_text(body), re.I),
             'Skipped, pending or rate-limited review is not evidence')
         created, updated = review_time(comment.get('createdAt')), review_time(comment.get('updatedAt'))
         require(updated >= created and (not prior or updated >= max(stamp for stamp, _ in prior)),
@@ -212,7 +234,8 @@ def completed_review(reviews, head, number, comments=()):
         and re.fullmatch(r'https://github\.com/' + re.escape(REPOSITORY)
             + '/pull/' + str(number) + r'#pullrequestreview-[0-9]+', url),
         'Invalid CodeRabbit review evidence')
-    require(not re.search(r'reviews?\s+(skipped|paused|in progress)|rate[- ]limit', body, re.I),
+    require(not re.search(r'reviews?\s+(skipped|paused|in progress)|rate[- ]limit',
+        review_notice_text(body), re.I),
         'Skipped, pending or rate-limited review is not evidence')
     return url
 
