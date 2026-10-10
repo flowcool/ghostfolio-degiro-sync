@@ -142,6 +142,13 @@ data, stopping services or terminating DB sessions. Repeated invocations add
 isolated test records; cleanup requires a separately reviewed exact ownership
 manifest and explicit reset authorization.
 
+The host imposes a ten-minute deadline. If it expires, it inspects the unique
+worker name/UUID label and removes only that exact owned disposable worker ID.
+Persistent services and data remain intact. Failed worker-ownership checks leave
+it for explicit recovery and print only its safe generated name. Stopping the
+worker does not prove cancellation of an in-flight Ghostfolio request; preserve
+the uncertain journal and investigate exact readback before further work.
+
 The synthetic scenario reuses opening10/SELL2/dividend/fee evidence, checks
 DRY_RUN zero writes, exact native imports/cash, a lost acknowledgement followed
 by positive readback recovery, preserved opening rows and a repeat with zero

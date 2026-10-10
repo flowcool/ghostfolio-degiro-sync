@@ -4,6 +4,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -192,10 +193,13 @@ def test_compose_reuses_pins_and_separates_runtime_from_lab():
     assert runtime['environment']['DRY_RUN'] == '${DRY_RUN:-1}'
     assert runtime['environment']['SYNC_MODE'] == 'rolling'
     assert runtime['environment']['CRON'] == '${CRON:-}'
+    assert runtime['user'] == '10001:10001' and runtime['read_only'] is True
+    assert runtime['restart'] == 'no' and runtime['cap_drop'] == ['ALL']
+    assert runtime['security_opt'] == ['no-new-privileges:true']
     assert production['networks']['ghostfolio']['external'] is True
 
 
-@pytest.mark.parametrize('change', [None, 'credentials', 'network', 'mount', 'privileged', 'extra_host'])
+@pytest.mark.parametrize('change', [None, 'credentials', 'network', 'mount', 'privileged', 'extra_host', 'timeout'])
 def test_host_runner_arms_only_checked_definition(monkeypatch, change):
     inspected(monkeypatch)
     inspected_command = wrapper.command
@@ -217,19 +221,66 @@ def test_host_runner_arms_only_checked_definition(monkeypatch, change):
             return json.dumps(rendered)
         if 'run' in args:
             launched.append((args, kwargs))
+            if change == 'timeout':
+                raise subprocess.TimeoutExpired(args, 600)
             return 'PASS'
         return inspected_command(args, **kwargs)
     monkeypatch.setattr(wrapper, 'command', command)
+    removed = []
+    monkeypatch.setattr(wrapper, 'remove_owned_worker', lambda name, marker: removed.append((name, marker)))
     args = SimpleNamespace(compose_file='compose.lab.yaml', scenario='synthetic', manifest_sha256='0' * 64)
     if change:
         with pytest.raises(RuntimeError):
             wrapper.invoke(args)
-        assert launched == []
+        if change == 'timeout':
+            assert len(launched) == len(removed) == 1
+            command_args = launched[0][0]
+            assert command_args[command_args.index('--name') + 1] == removed[0][0]
+            assert command_args[command_args.index('--label') + 1].endswith('=' + removed[0][1])
+        else:
+            assert launched == removed == []
     else:
         wrapper.invoke(args)
         assert len(launched) == 1
         assert launched[0][1]['environment']['DEGIRO_PERSISTENT_LAB'] == 'persistent-v1'
         assert launched[0][1]['timeout'] == 600
+
+
+def test_replay_cash_mismatch_refused_before_any_write(tmp_path, monkeypatch, scenario):
+    snapshot, seeds, mapping, quotes = scenario
+    account = {'id': 'lab-account', 'currency': 'EUR', 'balance': 0}
+    body = {'count': 1, 'activities': [activity_row(seeds[0], 'opening')]}
+    config = {'ghost_host': runner.HOST, 'source_account': '123', 'target_account': 'lab-account',
+        'sync_mode': 'rolling', 'dry_run': True, 'state_dir': str(tmp_path)}
+    expected = adapter.synchronize_locked(config, snapshot, account, body, mapping, quotes,
+        None, None, now=adapter.prospective_instant(snapshot['fetched_at']))['proposed']
+    def call(method, path):
+        assert method == 'GET'
+        return deepcopy(body if path == '/api/v1/activities' else account)
+    monkeypatch.setattr(adapter, 'ghost_transport', lambda *args: __import__('contextlib').nullcontext())
+    with pytest.raises(RuntimeError):
+        runner.lifecycle(config, snapshot, mapping, quotes, call, expected, expected_cash=12.31)
+    assert not list(tmp_path.glob('*.yaml'))
+
+
+@pytest.mark.parametrize('owned', [True, False])
+def test_timeout_cleanup_requires_exact_worker_ownership(monkeypatch, owned):
+    calls = []
+    labels = {'com.docker.compose.project': wrapper.PROJECT,
+        'com.docker.compose.service': 'lab-check', 'io.flowcool.degiro-lab-worker': 'marker'}
+    if not owned:
+        labels['com.docker.compose.service'] = 'ghostfolio'
+    def command(args, **kwargs):
+        calls.append(args)
+        return json.dumps('a' * 64) + '\n' + json.dumps(labels) if 'inspect' in args else ''
+    monkeypatch.setattr(wrapper, 'command', command)
+    if owned:
+        wrapper.remove_owned_worker('owned-name', 'marker')
+        assert calls[-1] == ['docker', 'rm', '-f', 'a' * 64]
+    else:
+        with pytest.raises(RuntimeError):
+            wrapper.remove_owned_worker('owned-name', 'marker')
+        assert len(calls) == 1
 
 
 def test_runner_refuses_unarmed_invocation_before_any_network(monkeypatch):

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import uuid
 
 
 PROJECT = 'ghostfolio-degiro-lab'
@@ -18,6 +19,19 @@ def command(args, timeout=30, environment=None):
     if result.returncode or len(result.stdout) > 2_000_000:
         raise RuntimeError('Lab command failed; private details suppressed')
     return result.stdout
+
+
+def remove_owned_worker(name, marker):
+    """Remove only this invocation's disposable worker, never persistent services."""
+    fields = '{{json .Id}}\n{{json .Config.Labels}}'
+    identity, labels = [json.loads(line) for line in
+        command(['docker', 'inspect', '--format', fields, name]).splitlines()]
+    if (labels.get('com.docker.compose.project') != PROJECT
+            or labels.get('com.docker.compose.service') != 'lab-check'
+            or labels.get('io.flowcool.degiro-lab-worker') != marker
+            or len(identity) != 64 or any(letter not in '0123456789abcdef' for letter in identity)):
+        raise RuntimeError('Disposable lab worker ownership differs')
+    command(['docker', 'rm', '-f', identity])
 
 
 def verify_stack(compose):
@@ -82,10 +96,20 @@ def invoke(args):
                 or (mount['target'] != '/runs' and mount.get('read_only') is not True)):
             raise RuntimeError('Lab runner mount permissions differ')
     environment = dict(os.environ, DEGIRO_PERSISTENT_LAB=MARKER)
-    command(compose + ['run', '--rm', '--no-deps', '-T',
-        '-e', 'DEGIRO_PERSISTENT_LAB', 'lab-check', 'python', '/lab/persistent_lab.py',
-        args.scenario, '--manifest-sha256', args.manifest_sha256], timeout=600,
-        environment=environment)
+    marker = uuid.uuid4().hex
+    name = PROJECT + '-check-' + marker
+    try:
+        command(compose + ['run', '--rm', '--no-deps', '-T', '--name', name,
+            '--label', 'io.flowcool.degiro-lab-worker=' + marker,
+            '-e', 'DEGIRO_PERSISTENT_LAB', 'lab-check', 'python', '/lab/persistent_lab.py',
+            args.scenario, '--manifest-sha256', args.manifest_sha256], timeout=600,
+            environment=environment)
+    except subprocess.TimeoutExpired:
+        try:
+            remove_owned_worker(name, marker)
+        except (RuntimeError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+            raise RuntimeError('Timed-out worker needs ownership recovery: ' + name) from None
+        raise RuntimeError('Lab worker timed out and was removed; preserve uncertain run evidence') from None
     print('PASS isolated persistent lab ' + args.scenario + '; private evidence retained in runs directory')
 
 
@@ -97,7 +121,10 @@ def main():
     try:
         invoke(parser.parse_args())
         return 0
-    except (RuntimeError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+    except RuntimeError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         print('Persistent lab run refused; private details suppressed', file=sys.stderr)
         return 1
 

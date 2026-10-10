@@ -93,7 +93,7 @@ def records(body, account):
         if row['accountId'] == account['id']}
 
 
-def lifecycle(config, snapshot, mapping, quotes, call, expected, lose_reply=False):
+def lifecycle(config, snapshot, mapping, quotes, call, expected, lose_reply=False, expected_cash=None):
     """Use unchanged account orchestration/core; only the broker read and clock are frozen."""
     target = call('GET', '/api/v1/account/' + config['target_account'])
     before = call('GET', '/api/v1/activities')
@@ -116,6 +116,7 @@ def lifecycle(config, snapshot, mapping, quotes, call, expected, lose_reply=Fals
     preview = sync(config)
     require(preview['rolling_verified'] and not preview['history_verified']
         and preview['accepted'] == [] and len(preview['proposed']) == len(expected))
+    require(expected_cash is None or preview['cash'] == expected_cash)
     require(Counter(map(adapter.activity_signature, preview['proposed'])) ==
         Counter(map(adapter.activity_signature, expected)))
     require(call('GET', '/api/v1/activities') == before)
@@ -218,7 +219,8 @@ def execute(args):
                 now=adapter.prospective_instant(snapshot['fetched_at']))['proposed']
             require(len(expected) == 3)
         evidence['result'] = lifecycle(config, snapshot, mapping, quotes, call, expected,
-            lose_reply=args.scenario == 'synthetic')
+            lose_reply=args.scenario == 'synthetic',
+            expected_cash=manifest['expected_cash'] if args.scenario == 'replay' else None)
     # Verify mounted evidence after use. Do not alter originals or remove lab resources.
     load_replay(root, args.manifest_sha256)
     evidence['stage'] = 'complete'
