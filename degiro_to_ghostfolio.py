@@ -1325,8 +1325,38 @@ def prospective_opening_context(evidence, config, mapping, quote_currencies):
         raise RuntimeError("Incomplete prospective opening evidence") from None
 
 
+def execution_cash_matches(trade, row, product, statement_amount=None):
+    """Keep exact identity; corroborate cent rounding through signed execution gross."""
+    side = trade.get("buysell")
+    if (side not in ("B", "S") or row.get("type") != "TRANSACTION"
+            or broker_identity(row.get("productId")) != broker_identity(trade["productId"])
+            or broker_instant(row["date"]) != broker_instant(trade["date"])
+            or row["currency"] != product["currency"]
+            or not row["description"].startswith("Achat " if side == "B" else "Vente ")
+            or (trade.get("orderId") is not None and row.get("orderId") != trade["orderId"])):
+        return False
+    amounts = [financial_decimal(trade["total"]), financial_decimal(row["change"])]
+    if statement_amount is not None:
+        amounts.append(financial_decimal(statement_amount))
+    if len(set(amounts)) == 1:
+        return True
+    cent = Decimal("0.01")
+    if (CURRENCY_QUANTA.get(product["currency"]) != cent
+            or product.get("productType") != "STOCK"
+            or financial_decimal(product.get("contractSize")) != 1
+            or any(amount % cent != 0 for amount in amounts[1:])
+            or max(amounts) - min(amounts) > cent):
+        return False
+    quantity, price = financial_decimal(trade["quantity"]), financial_decimal(trade["price"])
+    if (not quantity or price <= 0 or (side == "B" and quantity <= 0)
+            or (side == "S" and quantity >= 0)):
+        return False
+    gross = -quantity * price
+    return all(amount * gross > 0 and abs(amount - gross) <= cent for amount in amounts)
+
+
 def prospective_statement_matches(snapshot):
-    """Exact raw cash multiset corroboration; no inference from CSV minute proximity."""
+    """Preserve the raw cash multiset; corroborate only bounded execution rounding."""
     header = ["Date", "Heure", "Date de", "Produit", "Code ISIN", "Description",
               "FX", "Mouvements", "", "Solde", "", "ID Ordre"]
     try:
@@ -1356,26 +1386,46 @@ def prospective_statement_matches(snapshot):
                 row.get("currency", "") if row.get("change") is not None else "",
                 financial_decimal(row["change"]) if row.get("change") is not None else None,
                 str(row.get("orderId") or "")))
-        if Counter(source) != Counter(statement):
+        unmatched_source = list((Counter(source) - Counter(statement)).elements())
+        unmatched_statement = list((Counter(statement) - Counter(source)).elements())
+        for item in unmatched_source:
+            cash_rows = [row for row, signature in zip(snapshot["cash_movements"], source)
+                if signature == item]
+            candidates = [candidate for candidate in unmatched_statement
+                if item[:6] + item[7:] == candidate[:6] + candidate[7:]
+                and item[6] is not None and candidate[6] is not None]
+            if len(cash_rows) != 1 or len(candidates) != 1:
+                raise RuntimeError("Prospective statement coverage mismatch")
+            row, candidate = cash_rows[0], candidates[0]
+            trades = [trade for trade in snapshot["transactions"]
+                if execution_cash_matches(trade, row,
+                    snapshot["products"][broker_identity(trade["productId"])], candidate[6])]
+            exact = [trade for trade in trades
+                if financial_decimal(trade["total"]) == financial_decimal(row["change"])]
+            trades = exact or trades
+            if len(trades) != 1:
+                raise RuntimeError("Prospective statement coverage mismatch")
+            unmatched_statement.remove(candidate)
+        if unmatched_statement:
             raise RuntimeError("Prospective statement coverage mismatch")
+        if unmatched_source:
+            log.info("Cash statement verified with %d corroborated one-cent execution rounding differences",
+                     len(unmatched_source))
         return len(source)
     except (KeyError, TypeError, ValueError, AttributeError):
         raise RuntimeError("Incomplete prospective statement evidence") from None
 
 
 def prospective_execution_cash(snapshot):
-    """Both feeds must expose each execution once with exact signed trade cash."""
+    """Each execution needs unique signed cash, allowing only corroborated cent rounding."""
     ledger = classify_cash_movements(snapshot["cash_movements"])["executed_trade_cash"]
     remaining = list(ledger)
     for trade in snapshot["transactions"]:
         product = snapshot["products"][broker_identity(trade["productId"])]
-        candidates = [row for row in remaining
-            if broker_identity(row.get("productId")) == broker_identity(trade["productId"])
-            and broker_instant(row["date"]) == broker_instant(trade["date"])
-            and row["currency"] == product["currency"]
-            and financial_decimal(row["change"]) == financial_decimal(trade["total"])
-            and row["description"].startswith("Achat " if trade["buysell"] == "B" else "Vente ")
-            and (trade.get("orderId") is None or row.get("orderId") == trade["orderId"])]
+        candidates = [row for row in remaining if execution_cash_matches(trade, row, product)]
+        exact = [row for row in candidates
+            if financial_decimal(row["change"]) == financial_decimal(trade["total"])]
+        candidates = exact or candidates
         if len(candidates) != 1:
             raise RuntimeError("Unproved prospective execution cash relation")
         remaining.remove(candidates[0])
@@ -1690,7 +1740,7 @@ def raw_rows(envelope, collection=None):
     rows = envelope["data"]
     if collection:
         # Observed accountoverview response for an empty recent interval.
-        # Prospective acceptance still requires exact statement corroboration.
+        # Prospective acceptance still requires independently corroborated statements.
         if collection == "cashMovements" and rows == {}:
             return []
         if not isinstance(rows, dict) or collection not in rows:

@@ -103,13 +103,20 @@ coverage checkpoint to advance after partial work; full replay deliberately trad
 extra bounded reads for simpler continuity. Exceeding the request budget refuses
 processing rather than silently losing an outage interval.
 
-Each run requires exact raw cash-statement multiset agreement, including dates,
-minutes, value dates, ISINs, descriptions, currencies, amounts and order references.
-CSV corroborates the scoped cash feed; it supplies neither event identity nor a
-payment/tax relationship. Stable source identities retain distinct same-minute
+Each run requires raw cash-statement multiset agreement, with exact dates,
+minutes, value dates, ISINs, descriptions, currencies and order references. Amounts
+are exact except for the execution rounding explicitly approved by Florent
+on2026-10-10: a unique STOCK execution with contract size1 and a supported
+cent-valued currency may corroborate an API/CSV difference of at most0.01.
+Both cent-valued cash views and the declared execution total must remain within
+0.01 of one another and of signed unrounded quantity times price; the execution
+total itself may retain subcent precision. Exact matches take priority, and
+missing, duplicated or ambiguous candidates still refuse verification. Other
+categories retain exact amount checks. CSV corroborates the scoped cash feed; it
+supplies neither event identity nor a payment/tax relationship. Stable source identities retain distinct same-minute
 events. Every execution needs exactly one matching signed execution-cash row and
 every execution-cash row needs a source execution. Ambiguous or discrepant totals
-block without new cent tolerances. Existing fee, dividend and yield contracts
+outside that corroborated rounding bound block. Existing fee, dividend and yield contracts
 still classify and validate all relevant prospective events.
 
 Eligible source events are strictly after the cutover. Events at or before it

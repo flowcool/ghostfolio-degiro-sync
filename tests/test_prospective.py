@@ -674,3 +674,113 @@ def test_minute_only_opening_source_event_refused(evidence):
     loaded["captures"]["broker"]["cash_movements"] = [row]
     with pytest.raises(RuntimeError, match="precision"):
         opening_context(loaded)
+
+
+@pytest.mark.parametrize('side,api_amount,csv_amount', [
+    ('S', '20.00', '19.99'), ('S', '19.99', '20.00'),
+    ('B', '-20.00', '-19.99'), ('B', '-19.99', '-20.00'),
+])
+def test_subcent_execution_total_corroborates_cent_views_without_writes(
+        prospective_account, side, api_amount, csv_amount):
+    config, snapshot, destination = prospective_account
+    trade = snapshot['transactions'][0]
+    trade.update(buysell=side, quantity=2 if side == 'B' else -2, price='9.9975',
+        total='-19.995' if side == 'B' else '19.995',
+        totalInBaseCurrency='-18.18' if side == 'B' else '18.18')
+    row = next(row for row in snapshot['cash_movements'] if row['type'] == 'TRANSACTION')
+    row.update(change=api_amount, description='Achat 2 TEST' if side == 'B' else 'Vente 2 TEST')
+    statement = deepcopy(snapshot)
+    next(row for row in statement['cash_movements'] if row['type'] == 'TRANSACTION')['change'] = csv_amount
+    snapshot['account_report_csv'] = cash_statement(statement)
+    snapshot['update']['portfolio']['value'][-1]['value'][-1]['value'] = 12 if side == 'B' else 8
+    original = deepcopy(destination)
+    assert adapter.prospective_statement_matches(snapshot) == 5
+    result = sync_account(prospective_account)
+    assert len(result['proposed']) == 3 and result['accepted'] == []
+    activity = next(row for row in result['proposed'] if row['type'] in ('BUY', 'SELL'))
+    assert activity['type'] == ('BUY' if side == 'B' else 'SELL')
+    assert activity['quantity'] == 2 and activity['unitPrice'] == 9.9975
+    assert result['cash'] == 12.3 and destination == original
+
+
+def test_exact_one_cent_execution_boundary_is_corroborated(prospective_account):
+    config, snapshot, destination = prospective_account
+    next(row for row in snapshot['cash_movements'] if row['type'] == 'TRANSACTION')['change'] = '20.01'
+    assert adapter.prospective_statement_matches(snapshot) == 5
+    assert len(sync_account(prospective_account)['proposed']) == 3
+
+
+@pytest.mark.parametrize('mutation', [
+    'two_cent_csv', 'two_cent_api', 'unproved_gross', 'sign', 'subcent_cash',
+    'currency', 'unit', 'csv_date', 'csv_currency', 'csv_order', 'api_second',
+    'trade_order', 'missing_csv', 'duplicate_csv', 'duplicate_api',
+    'ambiguous_execution', 'missing_execution', 'dividend_cent',
+])
+def test_rounding_never_masks_other_discrepancies_or_calls_writers(prospective_account, mutation):
+    config, snapshot, destination = prospective_account
+    config['dry_run'] = False
+    trade = snapshot['transactions'][0]
+    trade.update(price='9.9975', total='19.995')
+    row = next(row for row in snapshot['cash_movements'] if row['type'] == 'TRANSACTION')
+    statement = deepcopy(snapshot)
+    csv_row = next(row for row in statement['cash_movements'] if row['type'] == 'TRANSACTION')
+    csv_row['change'] = '19.99'
+    if mutation == 'two_cent_csv':
+        csv_row['change'] = '20.02'
+    elif mutation == 'two_cent_api':
+        row['change'] = csv_row['change'] = '20.02'
+    elif mutation == 'unproved_gross':
+        trade['price'] = 5
+    elif mutation == 'sign':
+        row['change'] = '-20.00'
+        csv_row['change'] = '-19.99'
+    elif mutation == 'subcent_cash':
+        row['change'] = '19.999'
+    elif mutation == 'currency':
+        snapshot['products']['20']['currency'] = row['currency'] = csv_row['currency'] = 'JPY'
+    elif mutation == 'unit':
+        snapshot['products']['20']['contractSize'] = 100
+    elif mutation == 'csv_date':
+        csv_row['date'] = '2026-01-02T10:01:00+01:00'
+    elif mutation == 'csv_currency':
+        csv_row['currency'] = 'EUR'
+    elif mutation == 'csv_order':
+        csv_row['orderId'] = 'different-order'
+    elif mutation == 'api_second':
+        row['date'] = '2026-01-02T10:00:01+01:00'
+    elif mutation == 'trade_order':
+        trade['orderId'] = 'different-order'
+    elif mutation == 'missing_csv':
+        statement['cash_movements'].remove(csv_row)
+    elif mutation == 'duplicate_csv':
+        statement['cash_movements'].append(deepcopy(csv_row))
+    elif mutation == 'duplicate_api':
+        extra = deepcopy(row)
+        extra['id'] = 999
+        snapshot['cash_movements'].append(extra)
+    elif mutation == 'ambiguous_execution':
+        extra = deepcopy(trade)
+        extra['id'] = 11
+        snapshot['transactions'].append(extra)
+    elif mutation == 'missing_execution':
+        snapshot['transactions'].clear()
+    else:
+        csv_row['change'] = row['change']
+        statement['cash_movements'][0]['change'] = '10.01'
+    snapshot['account_report_csv'] = cash_statement(statement)
+    calls = []
+    with pytest.raises(RuntimeError):
+        sync_account(prospective_account, lambda rows: calls.append('post'),
+            lambda *args: calls.append('put'))
+    assert calls == []
+
+
+def test_nearby_rounding_candidate_does_not_ambiguate_exact_execution_matches(prospective_account):
+    config, snapshot, destination = prospective_account
+    trade = deepcopy(snapshot['transactions'][0])
+    trade.update(id=11, price='10.005', total='20.01')
+    row = deepcopy(next(row for row in snapshot['cash_movements'] if row['type'] == 'TRANSACTION'))
+    row.update(id=111, change='20.01')
+    snapshot['transactions'].append(trade)
+    snapshot['cash_movements'].append(row)
+    adapter.prospective_execution_cash(snapshot)
