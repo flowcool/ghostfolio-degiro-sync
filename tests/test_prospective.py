@@ -82,7 +82,7 @@ def test_unproved_opening_is_refused(evidence, change):
     if change == "quantity":
         broker["update"]["portfolio"]["value"][-1]["value"][-1]["value"] = 9
     elif change == "cash":
-        destination["account"]["balance"] = 12.31
+        destination["account"]["balance"] = None
     elif change == "source":
         loaded["manifest"]["source_account"] = "456"
     elif change == "target":
@@ -202,6 +202,26 @@ def test_full_prospective_dry_run_has_exact_plan_without_history_claim(prospecti
     assert destination == before
 
 
+def test_stale_destination_cash_does_not_block_verified_dry_run(prospective_account):
+    config, snapshot, destination = prospective_account
+    path = Path(config['cutover_manifest'])
+    manifest = yaml.safe_load(path.read_bytes())
+    capture_path = path.parent / manifest['opening']['destination']['path']
+    capture = json.loads(capture_path.read_bytes())
+    capture['account']['balance'] = 0
+    manifest['opening']['destination']['sha256'] = private_file(capture_path, json.dumps(capture).encode())
+    config['cutover_sha256'] = private_file(path, yaml.safe_dump(manifest).encode())
+    destination['account']['balance'] = 0
+    before = deepcopy(destination)
+    result = sync_account(prospective_account)
+    assert result['prospective_verified'] is True and result['cash'] == 12.3
+    assert result['accepted'] == [] and destination == before
+    # A stale destination never excuses inconsistent broker cash evidence.
+    snapshot['update']['cashFunds']['value'][0]['value'][-1]['value'] = 999
+    with pytest.raises(RuntimeError):
+        sync_account(prospective_account)
+
+
 def test_first_and_repeat_preserve_legacy_and_use_opening_inventory(prospective_account):
     config, snapshot, destination = prospective_account
     config["dry_run"] = False
@@ -312,7 +332,7 @@ def test_actual_dry_run_command_exercises_config_and_orchestration(prospective_a
     assert adapter.main(["--sync", "--from-date", "2025-12-31", "--to-date", "2026-01-04"]) == 1
 
 
-def test_dry_run_command_keeps_acquisition_scope_and_read_only_transports(prospective_account, tmp_path, monkeypatch):
+def test_dry_run_command_keeps_acquisition_scope_and_read_only_transports(prospective_account, tmp_path, monkeypatch, caplog):
     config, snapshot, destination = prospective_account
     now = datetime.now(timezone.utc)
     snapshot["fetch_started_at"] = (now - timedelta(seconds=1)).isoformat()
@@ -342,7 +362,9 @@ def test_dry_run_command_keeps_acquisition_scope_and_read_only_transports(prospe
     monkeypatch.setattr(adapter.core, "ghost_import_activities", lambda *args: pytest.fail("POST"))
     monkeypatch.setattr(adapter.core, "ghost_update_cash_balance", lambda *args: pytest.fail("PUT"))
     # A narrow requested lookback cannot replace the manifest's full replay interval.
-    assert adapter.main(["--sync", "--from-date", now.date().isoformat()]) == 0
+    with caplog.at_level('INFO'):
+        assert adapter.main(["--sync", "--from-date", now.date().isoformat()]) == 0
+    assert 'Proposed Ghostfolio cash balance: EUR 12.30; DRY_RUN, no update sent' in caplog.text
     assert acquired[0][0].isoformat() == "2025-12-31"
     assert acquired[0][3] == {"report_locale": ("fr", "fr"), "holdings": True}
     assert len(requests) == 2 and all(url.startswith(config["ghost_host"]) for url in requests)

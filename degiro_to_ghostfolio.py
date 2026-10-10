@@ -1121,7 +1121,7 @@ def synchronize_locked(config, snapshot, target_account, existing_body, mapping,
 
 
 PROSPECTIVE_FAILURES = frozenset({
-    "Prospective opening holdings mismatch", "Prospective opening cash mismatch",
+    "Prospective opening holdings mismatch",
     "Prospective account or mapping binding mismatch", "Unproved prospective opening capture interval",
     "Concurrent prospective destination opening event", "Concurrent prospective broker opening event",
     "Incomplete prospective opening evidence", "Incomplete prospective interval coverage",
@@ -1296,8 +1296,7 @@ def prospective_opening_context(evidence, config, mapping, quote_currencies):
                 or target["id"] != config["target_account"]):
             raise RuntimeError("Unproved prospective opening capture interval")
         cash = current_cash_balance(opening, target, config["source_account"], now=fetched)
-        if financial_decimal(target["balance"]) != financial_decimal(cash):
-            raise RuntimeError("Prospective opening cash mismatch")
+        financial_decimal(target["balance"])  # Existing cash may be stale; broker cash is authoritative.
         rows, quantities = existing_activity_context(destination["activities"], target)
         protected = {}
         for row in rows:
@@ -1954,6 +1953,8 @@ def main(argv=None):
             result = run_sync(start, end, args.window_days)
             log.info("Sync %s: %d proposed activities, %d accepted", "DRY_RUN" if result["dry_run"] else "live",
                      len(result["proposed"]), len(result["accepted"]))
+            if result["dry_run"] and result.get("prospective_verified") is True:
+                log.info("Proposed Ghostfolio cash balance: EUR %.2f; DRY_RUN, no update sent", result["cash"])
             if result.get("prospective_verified") is True:
                 log.info("Prospective contract verified; historical completeness and basis remain unverified")
                 return 0

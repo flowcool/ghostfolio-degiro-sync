@@ -4,7 +4,7 @@ Prospective mode preserves existing Ghostfolio history and synchronizes eligible
 operations after a verified cutover. It does not certify historical accounting,
 cost basis, fees, performance or tax reporting. Florent approved prospective
 real-account acceptance on2026-10-10: fresh opening captures must agree on
-holdings and cash, followed by a successful actual prospective DRY_RUN with
+holdings, and broker cash must pass independent validation, followed by an actual prospective DRY_RUN with
 zero financial writes. C13 and CSV-transition/recovery preflight evidence remain
 required. This acceptance scope does not authorize production activation.
 
@@ -32,7 +32,11 @@ Opening source holdings must equal quantities derived from destination history
 by verified instrument mapping. Only the existing STOCK/contract-size1/currency
 contract is supported. Missing products, ambiguous mappings, incompatible units,
 short positions and unknown instruments block. Opening broker cash must independently
-pass the existing EUR/zero-pending-settlement checks and equal destination cash.
+pass the existing EUR/zero-pending-settlement checks. Destination cash may be
+stale because the operator does not maintain it manually; an opening cash
+difference does not block validation. DRY_RUN displays the independently verified
+broker balance proposed for Ghostfolio and sends no balance update. Florent
+approved this behavior on2026-10-10. Actual updates retain separate production authority.
 The baseline records existing inventory; it creates no opening BUY or cash flow.
 Only `basis_status: unverified` is currently supported. Accurate historical basis
 requires separate evidence and scope; this mode never reconstructs it.
