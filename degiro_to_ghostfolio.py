@@ -50,6 +50,9 @@ BROKER_PATHS = {
 # Deliberately limited to the characterized major currencies. Minor quotes
 # require separate broker evidence; an IBKR suffix rule is not DEGIRO evidence.
 CURRENCY_QUANTA = {"EUR": Decimal("0.01"), "USD": Decimal("0.01"), "JPY": Decimal("1")}
+# Observed broker currency placeholders; exclusion requires an explicit zero CASH row.
+# This does not authorize nonzero cash or security quote units in additional currencies.
+CASH_CURRENCIES = frozenset({"CAD", "CHF", "DKK", "EUR", "GBP", "HKD", "JPY", "NOK", "SEK", "USD"})
 TRADE_FIELDS = ("accountId", "comment", "currency", "dataSource", "date", "fee",
                 "quantity", "symbol", "type", "unitPrice")
 API_FORMAT_ERRORS = {
@@ -1240,7 +1243,7 @@ def broker_stock_holdings(snapshot, target_account, mapping, quote_currencies):
         size = financial_decimal(fields.get("size"))
         if isinstance(identity, str) and identity.startswith("FLATEX_"):
             continue  # Independently checked by current_cash_balance.
-        if (isinstance(identity, str) and re.fullmatch(r"[A-Z]{3}", identity)
+        if (identity in CASH_CURRENCIES
                 and fields.get("positionType") == "CASH" and size == 0):
             continue  # Empty currency placeholders are not held securities.
         product_id = broker_identity(identity)
@@ -1837,7 +1840,7 @@ def read_degiro(from_date, to_date, window_days=90, report_locale=None, orders=F
                     identities.add(identity)
                     if isinstance(identity, str) and identity.startswith("FLATEX_"):
                         continue
-                    if (isinstance(identity, str) and re.fullmatch(r"[A-Z]{3}", identity)
+                    if (identity in CASH_CURRENCIES
                             and fields.get("positionType") == "CASH"
                             and financial_decimal(fields.get("size")) == 0):
                         continue

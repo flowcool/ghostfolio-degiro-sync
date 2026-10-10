@@ -625,6 +625,8 @@ def test_closed_holding_needs_no_metadata_but_requires_identity(evidence, mismat
 
 @pytest.mark.parametrize('identity, inner, position, size, accepted', [
     ('USD', 'USD', 'CASH', 0, True),
+    ('GBP', 'GBP', 'CASH', 0, True),
+    ('XYZ', 'XYZ', 'CASH', 0, False),
     ('USD', 'EUR', 'CASH', 0, False),
     ('USD', 'USD', 'PRODUCT', 0, False),
     ('unknown', 'unknown', 'CASH', 0, False),
