@@ -1,0 +1,41 @@
+# Existing Ghostfolio network; run once by default, CRON is opt-in.
+services:
+  degiro-sync:
+    image: ${DEGIRO_IMAGE:?Set the reviewed immutable DEGIRO image}
+    restart: "no"
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp:rw,nosuid,nodev,size=32m]
+    environment:
+      DEGIRO_USERNAME:
+      DEGIRO_PASSWORD:
+      DEGIRO_TOTP_SECRET:
+      GHOST_TOKEN:
+      GHOST_HOST: http://ghostfolio:3333
+      DEGIRO_ACCOUNT_ID: ${DEGIRO_ACCOUNT_ID:?Set source account}
+      GHOST_ACCOUNT_ID: ${GHOST_ACCOUNT_ID:?Set target account}
+      MAPPING_FILE: /config/mapping.yaml
+      STATE_DIR: /state
+      SYNC_MODE: rolling
+      LOOKBACK_DAYS: "90"
+      DRY_RUN: ${DRY_RUN:-1}
+      CRON: ${CRON:-}
+      APPRISE_URLS:
+      APPRISE_TIMEOUT: ${APPRISE_TIMEOUT:-10}
+    volumes:
+      - type: bind
+        source: ${DEGIRO_MAPPING_PATH:?Set existing mapping file}
+        target: /config/mapping.yaml
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${DEGIRO_STATE_PATH:?Set existing private state directory}
+        target: /state
+        bind: {create_host_path: false}
+    networks: [ghostfolio]
+networks:
+  ghostfolio:
+    external: true
+    name: ${GHOST_NETWORK:?Set existing Ghostfolio network}

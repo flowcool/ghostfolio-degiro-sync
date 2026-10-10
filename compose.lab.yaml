@@ -1,0 +1,80 @@
+name: ghostfolio-degiro-lab
+services:
+  postgres:
+    image: postgres:15-alpine@sha256:f7d23353e1b15400d22ebe31189f4d314b87a4c129cc400c8c2d8d4ca127bf81
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: degirolab
+      POSTGRES_USER: degirolab
+      POSTGRES_PASSWORD: ${LAB_POSTGRES_PASSWORD:?Inject lab secret from SOPS}
+    volumes: [postgres:/var/lib/postgresql/data]
+    networks: [lab]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U degirolab -d degirolab]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    restart: unless-stopped
+    networks: [lab]
+  ghostfolio:
+    image: ${LAB_GHOST_IMAGE:?Set reviewed lab fixture image}
+    restart: unless-stopped
+    labels:
+      io.flowcool.degiro-lab: persistent-v1
+    environment:
+      DATABASE_URL: ${LAB_DATABASE_URL:?Inject matching lab database URL from SOPS}
+      ACCESS_TOKEN_SALT: ${LAB_ACCESS_TOKEN_SALT:?Inject lab secret from SOPS}
+      JWT_SECRET_KEY: ${LAB_JWT_SECRET_KEY:?Inject lab secret from SOPS}
+      NODE_ENV: production
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_started}
+    ports: ["127.0.0.1:${LAB_UI_PORT:-3334}:3333"]
+    volumes:
+      - type: bind
+        source: ${LAB_PROFILES_PATH:?Set private prepared profiles file}
+        target: /lab/profiles.json
+        read_only: true
+        bind: {create_host_path: false}
+    networks: [lab]
+  lab-check:
+    profiles: [tests]
+    image: ${DEGIRO_IMAGE:?Set reviewed DEGIRO runtime image}
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp:rw,nosuid,nodev,size=32m]
+    environment:
+      DEGIRO_PERSISTENT_LAB: ${DEGIRO_PERSISTENT_LAB:-}
+    command: [python, /lab/persistent_lab.py]
+    volumes:
+      - type: bind
+        source: ./scripts/persistent_lab.py
+        target: /lab/persistent_lab.py
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ./tests/fixtures/degiro_contract.yaml
+        target: /lab/fixture.yaml
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${LAB_CAPTURES_PATH:?Set private prepared captures directory}
+        target: /captures
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${LAB_RUNS_PATH:?Set existing UID10001 private runs directory}
+        target: /runs
+        bind: {create_host_path: false}
+    networks: [lab]
+networks:
+  lab:
+    internal: true
+volumes:
+  postgres:

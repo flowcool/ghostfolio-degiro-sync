@@ -64,6 +64,10 @@ job. This is a harness smoke, not a successful broker synchronization canary.
 
 ## Runtime operation boundary
 
+The versioned [Compose base and persistent Ugreen lab](compose.md) reuse this
+runtime. The importer attaches to an existing Ghostfolio network; the lab has
+its own internal network and database. Infra owns installation and image builds.
+
 Supply the environment and a read-only mapping file using the off-git SOPS
 pointer and [synchronization configuration](synchronization.md). The temporary
 Bitwarden-derived DEGIRO store/loader is described in [read-only.md](read-only.md);

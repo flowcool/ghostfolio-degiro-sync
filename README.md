@@ -117,6 +117,15 @@ Optional Apprise failure notifications reuse IBKR settings and its isolated
 worker. See the [operating contract](docs/prospective-sync.md) for configuration,
 recovery limits and authorization boundaries.
 
+## Docker Compose and reusable lab
+
+Use [compose.yaml](compose.yaml) for the importer on an existing Ghostfolio
+network; run-once DRY_RUN is the default. [compose.lab.yaml](compose.lab.yaml)
+defines a separate persistent Ghostfolio lab installed by infra on Ugreen.
+The [Compose guide](docs/compose.md) covers protected configuration, localhost
+UI, synthetic checks and frozen real-capture replay. The lab commands preserve
+its database and never fetch broker data or alter production.
+
 ## Prospective synchronization
 
 An explicit evidence-bound cutover mode preserves existing history while validating
