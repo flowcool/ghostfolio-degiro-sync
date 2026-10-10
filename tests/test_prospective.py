@@ -594,6 +594,29 @@ def test_closed_holding_needs_no_metadata_but_requires_identity(evidence, mismat
             ("target-a", "TEST"): 10}
 
 
+@pytest.mark.parametrize('identity, inner, position, size, accepted', [
+    ('USD', 'USD', 'CASH', 0, True),
+    ('USD', 'EUR', 'CASH', 0, False),
+    ('USD', 'USD', 'PRODUCT', 0, False),
+    ('unknown', 'unknown', 'CASH', 0, False),
+    ('USD', 'USD', 'CASH', 1, False),
+    ('USD', 'USD', 'CASH', -1, False),
+])
+def test_only_identified_empty_currency_cash_placeholders_are_excluded_from_holdings(
+        evidence, identity, inner, position, size, accepted):
+    loaded, unused_path, unused_digest = evidence
+    snapshot = deepcopy(loaded['captures']['broker'])
+    snapshot['update']['portfolio']['value'].append({'id': identity, 'name': 'positionrow',
+        'value': [{'name': 'id', 'value': inner}, {'name': 'size', 'value': size},
+                  {'name': 'positionType', 'value': position}]})
+    if accepted:
+        assert adapter.broker_stock_holdings(snapshot, {'id': 'target-a'}, MAPPING, QUOTES) == {
+            ('target-a', 'TEST'): 10}
+    else:
+        with pytest.raises(RuntimeError):
+            adapter.broker_stock_holdings(snapshot, {'id': 'target-a'}, MAPPING, QUOTES)
+
+
 def test_minute_only_opening_source_event_refused(evidence):
     loaded, unused_path, unused_digest = evidence
     fixture = yaml.safe_load((Path(__file__).parent / "fixtures/degiro_contract.yaml").read_text())
