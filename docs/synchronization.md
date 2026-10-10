@@ -33,6 +33,7 @@ Required non-secret environment values:
 | `GHOST_ACCOUNT_ID` | Exact existing destination account identity |
 | `MAPPING_FILE` | Explicit mapping file; default `mapping.yaml` |
 | `DRY_RUN` | Defaults to `1`; strict boolean strings, invalid values fail |
+| `SYNC_MODE` | Set `rolling` for normal operation; code default `full_history`; `prospective` retains its verified cutover contract |
 | `LOOKBACK_DAYS` | Default90; rolling mode requires90; other modes bounded2..366 |
 | `STATE_DIR` | Existing private persistent directory owned by the process UID, mode0700; required for live work and prospective/rolling DRY_RUN |
 
@@ -41,18 +42,32 @@ symbol and independently verified quote currency. Broker tickers/currencies are
 not verification and supply no fallback. Only currently characterized major
 currencies and STOCK metadata pass the conversion guards.
 
-Run through the SOPS environment loader described in [read-only.md](read-only.md):
+For normal operation, use the SOPS environment loader described in
+[read-only.md](read-only.md), the private `STATE_DIR` and verified mapping:
 
 ```sh
-DRY_RUN=1 .venv/bin/python degiro_to_ghostfolio.py --sync \
+SYNC_MODE=rolling LOOKBACK_DAYS=90 DRY_RUN=1 \
+  .venv/bin/python degiro_to_ghostfolio.py --sync
+```
+
+Review proposed activities and the cash update before live authorization. A
+stale Ghostfolio cash balance is a proposed update, not a blocking mismatch;
+independent validation of fresh DEGIRO cash remains required. Historical basis
+and completeness remain unverified even when this rolling command succeeds.
+
+The original full-history diagnostic remains available:
+
+```sh
+SYNC_MODE=full_history DRY_RUN=1 .venv/bin/python degiro_to_ghostfolio.py --sync \
   --from-date 2025-10-08 --to-date 2026-10-08
 ```
 
 The dated broker read still reports history completeness as unverified. A safe
-DRY_RUN may propose activities but exits non-zero with that diagnostic. The real
-account additionally contains deliberately unsupported interest/compensation,
-which blocks proposals before any financial write. Setting `DRY_RUN=0` does not
-override these gates: unverified history blocks live writes. CSV transition,
+DRY_RUN may propose activities but exits non-zero with that diagnostic.
+Characterized Flatex interest and monetary-fund compensation follow the
+[yield contract](interest-compensation-policy.md); unknown categories still block.
+Setting `DRY_RUN=0` does not override the full-history gate: unverified history
+blocks live writes. CSV transition,
 isolated end-to-end acceptance and explicit production authorization remain
 separate requirements. No operator completeness override exists in this command.
 
@@ -96,7 +111,10 @@ core to drop that symbol and retry; other HTTP400 errors fail immediately.
 The adapter deliberately treats short acceptance as requiring reconciliation,
 even though native import may return HTTP201 with no created rows. See the KB
 account-ownership trap and [fee-contract.md](fee-contract.md). Run-scoped
-uncertainty is recorded in the config and is never cleared within a run. Live
+uncertainty from a newly dispatched request is recorded in the config and is
+never cleared within that run. On a later rolling invocation, exact complete
+unique positive import readback can confirm the previous intent before planning.
+DRY_RUN preserves the intent; uncertain cash requires explicit recovery. Live
 work additionally records a durable intent before dispatch; see
 [recovery.md](recovery.md). Empty/partial readback cannot clear that fence.
 Isolated and production recovery proofs retain their separate acceptance gates.

@@ -159,10 +159,14 @@ The launcher template is an argument vector, not a shell secret-substitution
 recipe: invoke `python3 HOST_LOADER docker run --rm --restart=no`, followed by
 `--env DEGIRO_USERNAME --env DEGIRO_PASSWORD --env DEGIRO_TOTP_SECRET
 --env GHOST_TOKEN`, explicitly allowlisted nonsecret account/origin settings,
-`DRY_RUN=1`, and the reviewed image digest. Supply `CRON` only for cron mode.
-Use a read-only mapping mount and, for live mode, a persistent private0700
-`STATE_DIR` owned by UID10001. The production network must reach the approved
-broker/Ghostfolio origins; the validation driver's `--network=none` is lab-only.
+`DRY_RUN=1`, `SYNC_MODE=rolling`, `LOOKBACK_DAYS=90`, and the reviewed image
+digest. Supply `CRON` only for cron mode. Use a read-only mapping mount and a
+persistent private0700 `STATE_DIR` owned by UID10001, including for rolling
+DRY_RUN. Optional `APPRISE_URLS` and `APPRISE_TIMEOUT` follow the
+[failure notification contract](prospective-sync.md); pass destination URLs
+through the protected environment, never argv or logs. The production network
+must reach the approved broker/Ghostfolio origins; the validation driver's
+`--network=none` is lab-only.
 No published app port is needed. Preserve existing hardening (read-only root,
 tmpfs, dropped capabilities and no-new-privileges). Do not use a Compose
 plaintext env file or place secret values in Compose interpolation.
@@ -184,16 +188,20 @@ shortcuts and embedded commands/newlines are rejected. Only the fixed sync comma
 is written to the crontab; no environment-provided command is evaluated.
 Supercronic retains its default non-overlapping scheduling for this single job.
 Independent instances targeting the same account still require operator control.
-Live invocations also require one shared private persistent `STATE_DIR` for their
-account lock and durable intent. See [recovery.md](recovery.md); do not use the
-container tmpfs for that state. No production mount is created by this scaffold.
+Live invocations and prospective/rolling DRY_RUN require one shared private
+persistent `STATE_DIR` for their account lock and durable intent. Rolling mode
+also records successful live coverage there. See [recovery.md](recovery.md);
+do not use the container tmpfs for that state. No production mount is created
+by this scaffold.
 
-Default sync dates are today's UTC date and the previous89 days inclusive.
-`LOOKBACK_DAYS` defaults to90 and accepts2..366. This operational window is based
-on observed bounded history requests, not proof of completeness or an all-time
-backfill. The overlapping fetch chunks are still used. A late local-day execution
-can fall into the next UTC-day run; the lookback preserves coverage across runs.
-Explicit `--from-date`/`--to-date` remain available for operator diagnostics.
+Default sync dates use today's Europe/Zurich date and the previous89 days inclusive.
+The approved normal operation requires explicit `SYNC_MODE=rolling`; the code
+default remains `full_history` with its original history-completeness gate.
+`LOOKBACK_DAYS` defaults to90; rolling mode requires90, while other modes accept
+2..366. This window does not certify historical completeness or cost basis.
+Fetch chunks overlap by one day. An explicit earlier `--from-date` supports
+catch-up after a coverage gap; rolling `--to-date` must remain broker-local today.
+Review the first rolling DRY_RUN before separately authorized live activation.
 Read-only snapshot mode still requires both dates and an output path.
 
 Passing a command after the image name executes that command instead of the sync
