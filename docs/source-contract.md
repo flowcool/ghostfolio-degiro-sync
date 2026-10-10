@@ -43,6 +43,10 @@ This is bounded display rounding evidence, not permission to hide arbitrary
 financial discrepancies. Financial event IDs/counts and semantic fields remain
 the completeness check; a new discrepancy fails reconciliation.
 
+See [history reach and request limits](degiro-history-limits.md) for the
+distinction between observed historical access, unpublished broker limits and
+repository policies, including the later 2026 YTD comparison.
+
 ## Extended historical read-only characterization
 
 A direct operator collection requested 2000-01-01..2026-10-08 in overlapping
@@ -55,9 +59,11 @@ responses, headers, session URLs and client-details responses were not archived.
 
 The earliest observed movement was 2019-04-25 and the latest 2026-10-06.
 Nineteen annual pre-activity overview windows returned HTTP 200 with `data: {}`,
-without `cashMovements`. The runtime correctly rejects this missing collection.
-A temporary read-only characterization collector preserved those envelopes and
-continued collection; it did not change the runtime or authorize synchronization.
+without `cashMovements`. At that characterization's revision, the runtime
+rejected this missing collection. A temporary read-only collector preserved those
+envelopes and continued collection; it did not change that runtime or authorize
+synchronization. The current parser accepts only the exact cash-overview
+`data: {}` envelope as an empty collection; other malformed envelopes still fail.
 Empty ancient windows do not establish unlimited look-back or account inception.
 
 Across both widths, all 70 complete executed-transaction bodies agree. The 1,001
