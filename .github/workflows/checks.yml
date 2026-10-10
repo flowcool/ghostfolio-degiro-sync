@@ -76,6 +76,6 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
-          trivyignores: .trivyignore
+          trivyignores: .trivyignore.yaml
       - name: Isolated run-once and real cron smoke
         run: python scripts/smoke_container.py degiro-smoke:ci
