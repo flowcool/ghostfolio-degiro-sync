@@ -355,7 +355,10 @@ def test_prospective_reader_fetches_held_metadata_and_captures_destination_insid
             return response({"portfolio": {"value": [{"id": "21", "name": "positionrow",
                 "value": [{"name": "id", "value": "21"}, {"name": "size", "value": 10}]},
                 {"id": "99", "name": "positionrow", "value": [
-                    {"name": "id", "value": closed_identity}, {"name": "size", "value": 0}]}]},
+                    {"name": "id", "value": closed_identity}, {"name": "size", "value": 0}]},
+                {"id": "USD", "name": "positionrow", "value": [
+                    {"name": "id", "value": "USD"}, {"name": "size", "value": 0},
+                    {"name": "positionType", "value": "CASH"}]}]},
                 "cashFunds": {"value": []}, "totalPortfolio": {"value": []}})
         if path.endswith("/products/info") and json.loads(request.body) == [21]:
             extra_products.append(21)
