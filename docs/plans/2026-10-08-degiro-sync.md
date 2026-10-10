@@ -249,7 +249,7 @@ claims later operational acceptance as implementation evidence.
 | 5 — orchestration | C11 | Mocked end-to-end pytest: duplicate/conflicting IDs, mapping changes, manual/CSV match ambiguity, inactive/redacted context, partial/uncertain outcomes, accepted buys before sells, DRY_RUN blocks every Ghostfolio mutation |
 | 5 — runtime | C12 | Full pinned dependency closure, source/package parity, offline pytest, dependency audit, amd64/arm64 non-root builds and cron/run-once smoke; CI publishing disabled until authorized |
 | 6 — acceptance | C13 | Disposable Ghostfolio seeded synthetic scenario: exact activities and totals/cash, second run zero imports, unresolved-symbol/uncertain-result recovery |
-| 6 | C14 | CSV V3 overlap transition and broker-scoped cleanup/recovery preflight offline/isolated; real read-only DRY_RUN reconciles statement, sends zero Ghostfolio writes |
+| 6 | C14 | CSV V3 overlap transition and broker-scoped cleanup/recovery preflight offline/isolated; approved prospective real-account opening holdings/cash agree, actual read-only DRY_RUN verifies scoped coverage/statement/protected history/current cash and sends zero financial writes; historical completeness and basis remain unverified (Florent2026-10-10) |
 | 7 — optional production | C15 | Separate explicit bounded-write/deployment approval; exact candidate manifest, target backup, tested restore access, first live and repeated scheduled run reconciliation |
 
 Live characterization is a distinct read-only operator procedure, not pytest or a
