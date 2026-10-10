@@ -44,10 +44,15 @@ retained under `tmp/ytd-readonly-20261010/`.
 
 The CSV also has 58 dated rows. An exact comparison matches 57 API rows; the
 single remaining pair, dated **2026-08-05**, differs only by **0.01** in movement
-amount. All other compared fields agree. This is an observed discrepancy, not an
-authorized tolerance: the current strict statement check refuses this YTD
-interval. Successful retrieval therefore does not prove successful YTD financial
-reconciliation or authorize a historical import.
+amount. All other compared fields agree. The initial strict equality check
+refused this interval. Florent subsequently approved the one-cent execution
+rounding on10 October. The retained capture confirms a unique execution and
+signed quantity-times-price gross corroboration: its declared total retains
+subcent precision, while the two cash views differ by0.01. After the bounded
+comparison change, all58statement rows and all3execution/cash relations pass
+without modifying any capture or making a network request. This does not validate
+a different cutover, full prospective YTD account state, historical completeness
+or a historical import policy. The operational period remains to be decided.
 [Statement comparison contract](source-contract.md#history-and-statement-comparison),
 [current strict check](../degiro_to_ghostfolio.py)
 

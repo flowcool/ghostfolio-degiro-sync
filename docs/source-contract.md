@@ -39,9 +39,15 @@ Virement sweep annotations have no amount and blank CSV currency despite an API
 currency value. Degiro Cash Sweep Transfer rows carry signed amounts and CSV
 currency; they are cash-only movements, not nonfinancial notices. One trade differs by exactly one cent in the two cash views;
 unrounded execution price times absolute quantity lies within one cent of both.
-This is bounded display rounding evidence, not permission to hide arbitrary
-financial discrepancies. Financial event IDs/counts and semantic fields remain
-the completeness check; a new discrepancy fails reconciliation.
+Florent explicitly approved this observed rounding on2026-10-10. The current
+prospective checks permit a difference of at most0.01 only for uniquely associated
+STOCK execution cash in a supported cent-valued currency, with contract size1.
+Declared execution total, API cash and CSV amounts must remain within0.01 of each
+other and of signed unrounded quantity times price; API/CSV amounts must be
+cent-valued, while the declared execution total may retain subcent precision.
+All identities, dates, descriptions, currencies, references and row multiplicities
+remain exact. Other categories and ambiguous associations retain strict refusal;
+this approval does not authorize arbitrary financial discrepancies.
 
 See [history reach and request limits](degiro-history-limits.md) for the
 distinction between observed historical access, unpublished broker limits and
@@ -82,8 +88,10 @@ movement currency/amount and order reference matches 1,254 API rows. Another 83
 unique pairs differ by exactly one cent (81 NAV rows, two executed-trade cash rows);
 three pairs agree on those fields except description. The CSV also contains 23
 additional zero-valued NAV rows. These findings are recorded discrepancies, not
-accepted rounding or description-normalization rules. No successful statement
-reconciliation or complete-history flag is claimed.
+accepted NAV rounding or description-normalization rules. The later bounded
+execution-rounding approval does not apply to these unstable fund records. No
+successful full-historical statement reconciliation or complete-history flag is
+claimed.
 
 Annual order history also contains a repeated order identity with changed content;
 order snapshots remain diagnostic, never executed-activity identities. Temporary
