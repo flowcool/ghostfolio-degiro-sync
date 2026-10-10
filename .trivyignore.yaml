@@ -1,0 +1,17 @@
+# Exact exceptions for the pinned supercronic v0.2.49 Go1.26.6 binary.
+# Managed cron only; no command/entrypoint overrides or Go network features.
+# Remove after upstream rebuilds with Go >=1.26.9; latest release checked2026-10-10.
+# Trivy natively stops applying these rules after expired_at (UTC date).
+vulnerabilities:
+  - id: CVE-2026-78667
+    paths: [usr/local/bin/supercronic]
+    expired_at: 2026-11-15
+    statement: Managed cron exposes no HTTP listener; pinned binary HTTP Range DoS path is unused.
+  - id: CVE-2026-97031
+    paths: [usr/local/bin/supercronic]
+    expired_at: 2026-11-15
+    statement: Managed cron clears inherited Sentry configuration; pinned binary has no TLS client activity.
+  - id: CVE-2026-78669
+    paths: [usr/local/bin/supercronic]
+    expired_at: 2026-11-15
+    statement: Managed cron has no HTTP listener and clears inherited Sentry configuration; HTTP2 CPU DoS path is unused.
