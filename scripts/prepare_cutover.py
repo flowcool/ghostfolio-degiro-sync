@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Capture and validate a prospective cutover, or validate existing evidence offline."""
 import argparse
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 import hashlib
@@ -16,9 +16,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import degiro_to_ghostfolio as adapter
 
 
-def capture(output, config):
+def capture(output, config, from_date=None):
     if config["dry_run"] is not True:
         raise RuntimeError("Cutover capture requires DRY_RUN")
+    today = datetime.now(ZoneInfo("Europe/Zurich")).date()
+    start = date.fromisoformat(from_date) if from_date else today - timedelta(days=1)
+    adapter.history_windows(start, today)  # Validate before publication or login.
     # Reject all pre-existing output before login; never replace original evidence.
     root = Path(output).resolve()
     paths = {name: adapter.snapshot_destination(root / (name + ".json"))
@@ -35,8 +38,7 @@ def capture(output, config):
             body = response.json()
         return {"account": account, "activities": body,
             "captured_at": datetime.now(timezone.utc).isoformat()}
-    today = datetime.now(ZoneInfo("Europe/Zurich")).date()
-    broker = adapter.read_degiro(today - timedelta(days=1), today,
+    broker = adapter.read_degiro(start, today,
         report_locale=("fr", "fr"), holdings=True, cutover_target_reader=destination)
     target = broker.pop("opening_destination")
     adapter.save_private_snapshot(broker, paths["broker"])
@@ -75,6 +77,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--capture", action="store_true")
     parser.add_argument("--output-directory")
+    parser.add_argument("--from-date", help="Capture history start; defaults to yesterday (capture only)")
     for name in ("broker", "destination", "mapping"):
         parser.add_argument("--" + name)
         parser.add_argument("--" + name + "-sha256")
@@ -89,7 +92,7 @@ def main(argv=None):
                     "mapping_sha256", "source_account", "target_account", "output"))):
                 raise RuntimeError("Invalid capture options")
             config, unused_mapping, unused_quotes = adapter.load_sync_config()
-            paths = capture(args.output_directory, config)
+            paths = capture(args.output_directory, config, args.from_date)
             mapping_path = Path(os.environ.get("MAPPING_FILE", "mapping.yaml")).absolute()
             args = SimpleNamespace(
                 broker=str(paths["broker"]), destination=str(paths["destination"]),
@@ -98,7 +101,7 @@ def main(argv=None):
                 mapping=str(mapping_path), mapping_sha256=hashlib.sha256(mapping_path.read_bytes()).hexdigest(),
                 source_account=config["source_account"], target_account=config["target_account"],
                 output=str(Path(args.output_directory).absolute() / "manifest.yaml"))
-        elif (args.output_directory or not all(getattr(args, name) for name in (
+        elif (args.output_directory or args.from_date or not all(getattr(args, name) for name in (
                 "broker", "broker_sha256", "destination", "destination_sha256", "mapping",
                 "mapping_sha256", "source_account", "target_account", "output"))):
             raise RuntimeError("Missing offline evidence options")

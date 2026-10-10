@@ -477,11 +477,18 @@ def test_read_only_capture_publishes_private_candidates_without_financial_writes
         "US0378331005": {"symbol": "TEST", "currency": "USD"}}).encode())
     monkeypatch.setenv("MAPPING_FILE", str(mapping_path))
     combined = tmp_path / "combined"
-    assert prepare_cutover.main(["--capture", "--output-directory", str(combined)]) == 0
+    start = (datetime.now(timezone.utc) - timedelta(days=7)).date().isoformat()
+    assert prepare_cutover.main(["--capture", "--from-date", start,
+        "--output-directory", str(combined)]) == 0
     manifest = combined / "manifest.yaml"
     digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
     assert opening_context(adapter.load_prospective_evidence(manifest, digest))["cutover"]
     assert len(calls) == 4
+    loaded_combined = adapter.load_prospective_evidence(manifest, digest)
+    assert loaded_combined['captures']['broker']['from_date'] == start
+    with pytest.raises(RuntimeError):
+        prepare_cutover.capture(tmp_path / 'future-capture', config, '9999-01-01')
+    assert len(calls) == 4 and not (tmp_path / 'future-capture').exists()
     config['dry_run'] = False
     assert prepare_cutover.main(["--capture", "--output-directory",
         str(tmp_path / "live-refusal")]) == 1

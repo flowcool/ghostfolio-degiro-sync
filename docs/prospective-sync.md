@@ -52,6 +52,13 @@ agreement and publishes a private manifest:
   --output-directory tmp/private-cutover
 ```
 
+Capture defaults to yesterday through today. If DEGIRO refuses a statement for
+an empty interval, use `--from-date YYYY-MM-DD` to include a recent known cash
+event. The observed2026-10-09/10 empty period returned HTTP500, while2026-10-03/10
+returned a statement exactly corroborating one cash movement. This selects the
+evidence interval; it does not change the cutover instant. Subsequent DRY_RUNs
+replay the manifest's entire interval, including its protected opening prefix.
+
 The directory must be new. The command uses existing read-only broker operations
 and Ghostfolio account/activities GETs, then logs out. It sends no financial writes
 and does not activate synchronization. On success it prints `CUTOVER_SHA256`;
