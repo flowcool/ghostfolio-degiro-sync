@@ -1219,6 +1219,19 @@ PROSPECTIVE_FAILURES = frozenset({
 })
 
 
+ROLLING_FAILURES = frozenset({
+    "Rolling mode requires 90 days through broker-local today",
+    "Rolling mode requires LOOKBACK_DAYS=90",
+    "Rolling coverage gap requires explicit catch-up start",
+    "Incomplete rolling interval coverage", "Rolling source event outside verified interval",
+    "Future rolling cash value date", "Incomplete rolling account evidence",
+    "Rolling broker holdings do not reconcile", "Unproved rolling destination activity",
+    "Rolling date precision cannot be represented by Ghostfolio",
+    "Invalid rolling coverage state", "Ambiguous nearby manual trade quantity",
+    "Complete exact positive readback required for recovery",
+})
+
+
 def evidence_digest(value):
     """Stable JSON evidence digest; reject non-finite or unrepresentable input."""
     try:
@@ -1717,7 +1730,7 @@ def run_sync_locked(config, mapping, quotes, from_date, to_date, window_days, jo
     elif config.get("sync_mode") == "rolling":
         today = datetime.now(ZoneInfo("Europe/Zurich")).date()
         if to_date != today or from_date > today - timedelta(days=89):
-            raise RuntimeError("Rolling mode requires90days through broker-local today")
+            raise RuntimeError("Rolling mode requires 90 days through broker-local today")
         coverage = journal["document"].get("coverage")
         if coverage and from_date > prospective_instant(coverage["through"]).astimezone(ZoneInfo("Europe/Zurich")).date():
             raise RuntimeError("Rolling coverage gap requires explicit catch-up start")
@@ -2308,7 +2321,7 @@ def main(argv=None):
             if result["dry_run"] and result.get("prospective_verified") is True:
                 log.info("Proposed Ghostfolio cash balance: EUR %.2f; DRY_RUN, no update sent", result["cash"])
             if result.get("rolling_verified") is True:
-                log.info("Rolling90day contract verified; historical completeness and basis remain unverified")
+                log.info("Rolling 90-day contract verified; historical completeness and basis remain unverified")
                 return 0
             if result.get("prospective_verified") is True:
                 log.info("Prospective contract verified; historical completeness and basis remain unverified")
@@ -2330,7 +2343,8 @@ def main(argv=None):
         if args.sync:
             finalize_failure(error)
             message = str(error)
-            log.error("%s", message if message in API_FORMAT_ERRORS.values() or message in PROSPECTIVE_FAILURES else
+            log.error("%s", message if message in API_FORMAT_ERRORS.values() or message in PROSPECTIVE_FAILURES
+                      or message in ROLLING_FAILURES else
                       "DEGIRO sync failed; unknown, incomplete or uncertain account state blocks writes")
             return 1
         stages = ("login", "client_discovery", "transactions", "account_overview", "products",

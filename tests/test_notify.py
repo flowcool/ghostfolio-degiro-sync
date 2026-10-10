@@ -104,12 +104,13 @@ def fake_apprise(add=True, notify=True):
 GOOD = {"urls": URLS, "title": "t", "body": "b"}
 
 
-@pytest.mark.parametrize("add,notify,code", [(True, True, 0), (True, False, 12), (False, True, 13),
-                                             (True, RuntimeError(URL_SECRET), 12)])
-def test_worker_exit_codes(monkeypatch, add, notify, code):
+@pytest.mark.parametrize("add,notify,code,expected", [(True, True, 0, [("t", "b")]),
+    (True, False, 12, [("t", "b")]), (False, True, 13, []),
+    (True, RuntimeError(URL_SECRET), 12, [])])
+def test_worker_exit_codes(monkeypatch, add, notify, code, expected):
     fake = fake_apprise(add, notify)
     assert run_worker(monkeypatch, GOOD, fake) == code
-    assert fake.sent == ([("t", "b")] if code == 0 else fake.sent)
+    assert fake.sent == expected
 
 
 def test_worker_reports_missing_dependency(monkeypatch):
@@ -130,7 +131,7 @@ def test_worker_mode_never_runs_the_sync(tmp_path):
                           input=b"not json", capture_output=True, timeout=30,
                           env={"DEGIRO_PASSWORD": "x"})
     assert proc.returncode == 10
-    assert b"Starting IBKR" not in proc.stdout + proc.stderr
+    assert proc.stdout == b"" and proc.stderr == b""
 
 
 def test_default_worker_argv_is_fixed_and_carries_no_secret():

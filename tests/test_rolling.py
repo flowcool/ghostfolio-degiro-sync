@@ -54,8 +54,11 @@ def test_first_live_repeat_and_success_coverage(rolling):
     assert state(config) == before
 
 
-@pytest.mark.parametrize("change", ["gap", "future", "holdings", "conflict", "statement", "missing_execution"])
-def test_bad_evidence_refuses_before_writes(rolling, change):
+@pytest.mark.parametrize("change,message", [
+    ("gap", "coverage gap"), ("future", "outside verified interval"),
+    ("holdings", "holdings do not reconcile"), ("conflict", "changed financial evidence"),
+    ("statement", "statement header"), ("missing_execution", "missing from trade feed")])
+def test_bad_evidence_refuses_before_writes(rolling, change, message):
     config, snapshot, destination = rolling
     config["dry_run"] = False
     if change == "gap":
@@ -76,7 +79,7 @@ def test_bad_evidence_refuses_before_writes(rolling, change):
         snapshot["account_report_csv"] = "broken"
     else:
         snapshot["transactions"] = []
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match=message):
         sync_account(rolling)
     assert not state(config) or "coverage" not in state(config) or change == "gap"
 
@@ -241,3 +244,13 @@ def test_repeated_source_identity_does_not_consume_manual_entry_twice():
     manual = {**a, 'comment': None}
     assert adapter.pending_activities([a, deepcopy(a)], [manual], {'id': 'target-a'}, '123',
                                       manual_matching=True) == []
+
+
+@pytest.mark.parametrize("message", sorted(adapter.ROLLING_FAILURES))
+def test_rolling_failure_diagnostics_are_visible_in_dry_run(monkeypatch, caplog, message):
+    monkeypatch.setenv("DRY_RUN", "1")
+    def refused(*args):
+        raise RuntimeError(message)
+    monkeypatch.setattr(adapter, "run_sync", refused)
+    assert adapter.main(["--sync"]) == 1
+    assert message in caplog.text
