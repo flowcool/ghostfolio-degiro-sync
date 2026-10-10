@@ -25,7 +25,7 @@ def merge_pr(number):
         'Merge preflight returned malformed evidence')
     # No shell, auto-merge, admin bypass, stored proof or caller-selected SHA.
     try:
-        result = subprocess.run(['gh', 'pr', 'merge', str(number), '--repo', REPOSITORY,
+        result = subprocess.run(['gh', 'pr', 'merge', str(number), '--repo', 'github.com/' + REPOSITORY,
             '--merge', '--match-head-commit', head], capture_output=True, text=True,
             timeout=120, check=False)
     except (OSError, subprocess.SubprocessError, UnicodeError):

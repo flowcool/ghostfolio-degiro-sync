@@ -59,7 +59,7 @@ def test_missing_proof_makes_zero_merge_calls(calls, monkeypatch, proof):
 def test_merge_uses_only_live_proven_head_and_bounded_command(calls):
     assert merge.merge_pr(29) == dict(PROOF, merge_command_succeeded=True)
     command, kwargs = calls[0]
-    assert command == ['gh', 'pr', 'merge', '29', '--repo', merge.REPOSITORY,
+    assert command == ['gh', 'pr', 'merge', '29', '--repo', 'github.com/' + merge.REPOSITORY,
         '--merge', '--match-head-commit', HEAD]
     assert kwargs == {'capture_output': True, 'text': True, 'timeout': 120, 'check': False}
 

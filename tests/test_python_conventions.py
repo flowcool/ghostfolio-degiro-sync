@@ -31,7 +31,7 @@ def test_all_project_python_obeys_functional_unannotated_style():
     files = sorted(set(root.glob('*.py')) | set((root / 'scripts').rglob('*.py'))
         | set((root / 'tests').rglob('*.py')))
     failures = [(str(path.relative_to(root)), line, reason) for path in files
-        for line, reason in convention_violations(path.read_text())]
+        for line, reason in convention_violations(path.read_text(encoding="utf-8"))]
     assert not failures, failures
 
 
