@@ -83,7 +83,7 @@ No shared package, automatic synchronization or IBKR repository modification is 
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
-.venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -q tests
 .venv/bin/python scripts/check_core.py --source ../ghostfolio-ibkr-sync --check-main
 ```
 
@@ -104,6 +104,18 @@ actual destination/V3 output matches and the deliberately retained source gates.
 
 Current work and acceptance evidence live in Beads epic `infra-8tt.56` with
 `project=ghostfolio-degiro-sync`, rather than a repository task-status list.
+
+## Rolling synchronization
+
+The approved normal operating policy is `SYNC_MODE=rolling`: retrieve the last
+90 calendar days through today. Review the first `DRY_RUN=1` proposal before
+any separately authorized live import. Existing canonical rows are checked and
+IBKR manual date/quantity matching avoids recent duplicates. Complete positive
+readback can resume an interrupted import; uncertain/partial results stay blocked.
+A gap beyond saved successful coverage needs an explicit earlier `--from-date`.
+Optional Apprise failure notifications reuse IBKR settings and its isolated
+worker. See the [operating contract](docs/prospective-sync.md) for configuration,
+recovery limits and authorization boundaries.
 
 ## Prospective synchronization
 

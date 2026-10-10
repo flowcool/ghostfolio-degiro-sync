@@ -1,5 +1,18 @@
 # Account synchronization and write gates
 
+## Approved normal operation
+
+Use `SYNC_MODE=rolling` and `LOOKBACK_DAYS=90` for the approved operating
+contract. An initial `DRY_RUN=1 .venv/bin/python degiro_to_ghostfolio.py --sync`
+retrieves the 90 calendar days through broker-local today and checks its plan
+against the complete destination. Existing manual trade/dividend matching uses
+the IBKR date and quantity rules explicitly approved by Florent. Interrupted
+imports resume only after exact complete positive readback. Optional
+`APPRISE_URLS`/`APPRISE_TIMEOUT` follow the IBKR failure-only delivery policy.
+See [bounded synchronization](prospective-sync.md) for catch-up, persistent
+coverage and recovery. The full-history rules below retain their original gate;
+production import/deployment authorization remains separate.
+
 ## Operator configuration
 
 Set `GHOST_HOST` to an exact approved origin: `https://ghost.mylittlemess.fr`,
@@ -20,8 +33,8 @@ Required non-secret environment values:
 | `GHOST_ACCOUNT_ID` | Exact existing destination account identity |
 | `MAPPING_FILE` | Explicit mapping file; default `mapping.yaml` |
 | `DRY_RUN` | Defaults to `1`; strict boolean strings, invalid values fail |
-| `LOOKBACK_DAYS` | Default90, bounded2..366 when explicit dates are omitted |
-| `STATE_DIR` | Existing private persistent directory owned by the process UID, mode0700; required for live work |
+| `LOOKBACK_DAYS` | Default90; rolling mode requires90; other modes bounded2..366 |
+| `STATE_DIR` | Existing private persistent directory owned by the process UID, mode0700; required for live work and prospective/rolling DRY_RUN |
 
 Copy `mapping.yaml.example` to ignored `mapping.yaml`. Each ISIN maps to a Yahoo
 symbol and independently verified quote currency. Broker tickers/currencies are
@@ -63,7 +76,7 @@ before any mutation. Validate fresh current cash before import too; never leave
 an account partly imported because a known balance ambiguity was deferred.
 Canonical row comments compare exact financial evidence. Duplicate/conflicting
 identities, changed mappings or ownership in another target stop. Nearby manual
-or CSV candidates require explicit reconciliation, never automatic adoption.
+or CSV candidates require explicit reconciliation in full-history/prospective modes. Rolling mode uses the explicitly approved IBKR manual matching rules.
 Distinct canonical same-day payments remain separate.
 
 Holdings derive from complete active target BUY/SELL context. Pending trades

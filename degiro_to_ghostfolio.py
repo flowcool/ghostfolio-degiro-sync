@@ -17,6 +17,9 @@ import os
 from pathlib import Path
 import re
 import stat
+import subprocess
+import signal
+import sys
 import tempfile
 import uuid
 from urllib.parse import urlsplit
@@ -25,7 +28,8 @@ from zoneinfo import ZoneInfo
 import requests
 import yaml
 
-import ghostfolio_core as core
+if sys.argv[1:] != ["--notify-worker"]:
+    import ghostfolio_core as core
 
 
 log = logging.getLogger(__name__)
@@ -784,7 +788,34 @@ def validate_cash_yield_identity(activity, namespace):
             raise RuntimeError("Invalid canonical DEGIRO cash yield evidence")
 
 
-def pending_activities(activities, existing, target_account, source_account):
+def match_manual_activity(activity, entries):
+    """IBKR's consumed nearest +/-2-day quantity match and +/-3-day dividend rule."""
+    day = datetime.fromisoformat(broker_instant(activity["date"])).date()
+    nearby = []
+    limit = 3 if activity["type"] == "DIVIDEND" else 2
+    for row in entries:
+        if (row["accountId"], row["type"], row["symbol"]) != (
+                activity["accountId"], activity["type"], activity["symbol"]):
+            continue
+        gap = abs((datetime.fromisoformat(broker_instant(row["date"])).date() - day).days)
+        if gap <= limit:
+            nearby.append((gap, row))
+    if activity["type"] == "DIVIDEND":
+        return bool(nearby)
+    if activity["type"] not in ("BUY", "SELL"):
+        return False
+    matches = [item for item in nearby if abs(financial_decimal(item[1]["quantity"]) -
+        financial_decimal(activity["quantity"])) < Decimal("0.001")]
+    if matches:
+        row = min(matches, key=lambda item: item[0])[1]
+        entries.remove(row)
+        return True
+    if nearby:
+        raise RuntimeError("Ambiguous nearby manual trade quantity")
+    return False
+
+
+def pending_activities(activities, existing, target_account, source_account, manual_matching=False):
     """Canonical identities never fall back to proximity or another account."""
     namespace = f"DEGIRO#{broker_identity(source_account)}:"
     known = {}
@@ -802,7 +833,9 @@ def pending_activities(activities, existing, target_account, source_account):
         known[comment] = row
     result = []
     seen = {}
-    for activity in activities:
+    manual = [row for row in existing if not str(row.get("comment") or "").startswith("DEGIRO#")]
+    ordered = sorted(activities, key=lambda row: (broker_instant(row["date"]), row["comment"])) if manual_matching else activities
+    for activity in ordered:
         if activity.get("accountId") != target_account["id"]:
             raise RuntimeError("Candidate target account mismatch")
         comment = activity["comment"]
@@ -816,6 +849,8 @@ def pending_activities(activities, existing, target_account, source_account):
         if comment in known:
             if signature != activity_signature(known[comment]):
                 raise RuntimeError("Existing DEGIRO identity changed financial evidence")
+            continue
+        if manual_matching and match_manual_activity(activity, manual):
             continue
         for row in existing:
             if row.get("accountId") != target_account["id"] or row.get("type") != activity["type"]:
@@ -923,11 +958,21 @@ def account_journal(config):
                 if os.fstat(source.fileno()).st_size > 1_000_000:
                     raise RuntimeError("Synchronization journal exceeds state budget")
                 document = yaml.safe_load(source.read())
-            if (not isinstance(document, dict) or set(document) != {"version", "owner", "pending", "resolved"}
+            if (not isinstance(document, dict) or not {"version", "owner", "pending", "resolved"} <= set(document)
+                    or set(document) - {"version", "owner", "pending", "resolved", "coverage"}
                     or type(document["version"]) is not int or document["version"] != 1
                     or document["owner"] != owner or not isinstance(document["resolved"], dict)
                     or document["pending"] is not None and not isinstance(document["pending"], dict)):
                 raise RuntimeError("Invalid private synchronization journal")
+            if "coverage" in document:
+                try:
+                    coverage = document["coverage"]
+                    if (not isinstance(coverage, dict) or set(coverage) != {"from_date", "through"}
+                            or date.fromisoformat(coverage["from_date"]) >
+                            prospective_instant(coverage["through"]).astimezone(ZoneInfo("Europe/Zurich")).date()):
+                        raise ValueError
+                except (ValueError, TypeError, KeyError):
+                    raise RuntimeError("Invalid rolling coverage state") from None
         yield {"directory": directory, "path": path, "document": document}
     finally:
         os.close(descriptor)
@@ -1025,11 +1070,13 @@ def readback_import_intent(config, *, expected_intent_id, confirm=False):
 def synchronize_account(config, snapshot, target_account, existing_body, mapping,
                         quote_currencies, import_activities, update_balance, now=None):
     """Serialize live account work and preserve intent before every write."""
-    if config.get("dry_run", True) is not False and config.get("sync_mode") != "prospective":
+    if config.get("dry_run", True) is not False and config.get("sync_mode") not in ("prospective", "rolling"):
         return synchronize_locked(config, snapshot, target_account, existing_body, mapping,
             quote_currencies, import_activities, update_balance, now=now)
     with account_journal(config) as journal:
-        if journal["document"]["pending"] is not None:
+        if config.get("sync_mode") == "rolling":
+            recover_confirmed_import(journal, config, existing_body)
+        elif journal["document"]["pending"] is not None:
             raise RuntimeError("Unresolved durable write intent blocks account writes")
         return synchronize_locked(config, snapshot, target_account, existing_body, mapping,
             quote_currencies, import_activities, update_balance, now=now, journal=journal)
@@ -1041,7 +1088,7 @@ def synchronize_locked(config, snapshot, target_account, existing_body, mapping,
     dry_run = config.get("dry_run", True)
     if type(dry_run) is not bool:
         raise RuntimeError("Invalid DRY_RUN flag")
-    if config.get("sync_mode", "full_history") not in ("full_history", "prospective"):
+    if config.get("sync_mode", "full_history") not in ("full_history", "prospective", "rolling"):
         raise RuntimeError("Invalid synchronization mode")
     check_api_import_format(snapshot)
     source = broker_identity(config.get("source_account"))
@@ -1052,12 +1099,15 @@ def synchronize_locked(config, snapshot, target_account, existing_body, mapping,
     if not core.activity_is_active({"account": target_account}) or target_account.get("balance") is None:
         raise RuntimeError("Ghostfolio target account excluded or redacted")
     prospective = config.get("sync_mode", "full_history") == "prospective"
+    rolling = config.get("sync_mode") == "rolling"
     context = None
     if prospective:
         snapshot, existing, quantities, context = prospective_snapshot(
             config, snapshot, target_account, existing_body, mapping, quote_currencies)
     else:
         existing, quantities = existing_activity_context(existing_body, target_account)
+    if rolling:
+        snapshot = rolling_snapshot(snapshot, journal)
     balance = current_cash_balance(snapshot, target_account, source, now)
     if prospective:
         activities = context["activities"]
@@ -1068,10 +1118,29 @@ def synchronize_locked(config, snapshot, target_account, existing_body, mapping,
         activities += normalize_cash_yield(snapshot, target_account["id"])
     if any(not core.activity_date_is_current(activity) for activity in activities):
         raise RuntimeError("Future DEGIRO candidate blocks synchronization")
-    pending = pending_activities(activities, existing, target_account, source)
+    if rolling and any(datetime.fromisoformat(a["date"]).microsecond % 1000 for a in activities):
+        raise RuntimeError("Rolling date precision cannot be represented by Ghostfolio")
+    pending = pending_activities(activities, existing, target_account, source, manual_matching=rolling)
     trades = [activity for activity in pending if activity["type"] in ("BUY", "SELL")]
-    reconcile_trade_holdings(trades, existing, quantities)
-    if not dry_run and not prospective and snapshot.get("history_completeness_verified") is not True:
+    reconcile_trade_holdings(trades, [row for row in existing if str(row.get("comment") or "").startswith("DEGIRO#")]
+                             if rolling else existing, quantities)
+    if rolling:
+        expected = dict(quantities)
+        for activity in trades:
+            key = (target_account["id"], activity["symbol"])
+            expected[key] = expected.get(key, Decimal(0)) + financial_decimal(activity["quantity"]) * (
+                1 if activity["type"] == "BUY" else -1)
+        if nonzero_holdings(expected) != broker_stock_holdings(snapshot, target_account, mapping, quote_currencies):
+            raise RuntimeError("Rolling broker holdings do not reconcile")
+        known = {a["comment"]: activity_signature(a) for a in activities}
+        start = date.fromisoformat(snapshot["from_date"])
+        namespace = f"DEGIRO#{source}:"
+        for row in existing:
+            if (row["accountId"] == target_account["id"] and str(row.get("comment") or "").startswith(namespace)
+                    and prospective_instant(row["date"]).astimezone(ZoneInfo("Europe/Zurich")).date() >= start
+                    and known.get(row["comment"]) != activity_signature(row)):
+                raise RuntimeError("Unproved rolling destination activity")
+    if not dry_run and not prospective and not rolling and snapshot.get("history_completeness_verified") is not True:
         raise RuntimeError("Unverified DEGIRO history completeness blocks live writes")
     if target_account["id"] in config.get("_uncertain_import_accounts", set()):
         raise RuntimeError("Uncertain prior import blocks account writes")
@@ -1079,6 +1148,7 @@ def synchronize_locked(config, snapshot, target_account, existing_body, mapping,
         return {"proposed": pending, "accepted": [], "cash": balance, "dry_run": True,
                 "history_verified": snapshot.get("history_completeness_verified") is True,
                 "prospective_verified": prospective,
+                "rolling_verified": rolling,
                 "cutover": context["cutover"].isoformat() if context else None,
                 "basis_status": context["basis_status"] if context else None}
     accepted = []
@@ -1117,8 +1187,12 @@ def synchronize_locked(config, snapshot, target_account, existing_body, mapping,
 
     apply_cash_balance(snapshot, target_account, source, guarded_balance, dry_run=False,
         import_ok=True, uncertain=target_account["id"] in config.get("_uncertain_import_accounts", set()), now=now)
+    if rolling:
+        journal["document"]["coverage"] = {"from_date": snapshot["from_date"], "through": snapshot["fetched_at"]}
+        write_journal(journal)
     return {"proposed": pending, "accepted": accepted, "cash": balance, "dry_run": False,
-            "history_verified": not prospective, "prospective_verified": prospective,
+            "history_verified": not prospective and not rolling, "prospective_verified": prospective,
+            "rolling_verified": rolling,
             "cutover": context["cutover"].isoformat() if context else None,
             "basis_status": context["basis_status"] if context else None}
 
@@ -1142,6 +1216,19 @@ PROSPECTIVE_FAILURES = frozenset({
     "Unverified prospective holding mapping", "Conflicting prospective holding identity",
     "Incomplete prospective account evidence", "Unresolved durable write intent blocks account writes",
     "Ambiguous prospective timestamp precision",
+})
+
+
+ROLLING_FAILURES = frozenset({
+    "Rolling mode requires 90 days through broker-local today",
+    "Rolling mode requires LOOKBACK_DAYS=90",
+    "Rolling coverage gap requires explicit catch-up start",
+    "Incomplete rolling interval coverage", "Rolling source event outside verified interval",
+    "Future rolling cash value date", "Incomplete rolling account evidence",
+    "Rolling broker holdings do not reconcile", "Unproved rolling destination activity",
+    "Rolling date precision cannot be represented by Ghostfolio",
+    "Invalid rolling coverage state", "Ambiguous nearby manual trade quantity",
+    "Complete exact positive readback required for recovery",
 })
 
 
@@ -1433,6 +1520,56 @@ def prospective_execution_cash(snapshot):
         raise RuntimeError("Prospective cash execution missing from trade feed")
 
 
+def recover_confirmed_import(journal, config, existing_body):
+    """Never infer non-delivery: clear only complete exact positive readback."""
+    if type(config.get("dry_run", True)) is not bool:
+        raise RuntimeError("Invalid DRY_RUN flag")
+    pending = journal["document"]["pending"]
+    if pending is None:
+        return
+    if pending.get("kind") != "import":
+        raise RuntimeError("Unresolved durable write intent blocks account writes")
+    verify_import_intent(journal, config, existing_body, pending["id"])
+    if not config.get("dry_run", True):
+        confirm_intent(journal, pending["id"])
+        config.get("_uncertain_import_accounts", set()).discard(config["target_account"])
+    log.info("Interrupted import confirmed by complete exact readback%s",
+             "; DRY_RUN preserves journal" if config.get("dry_run", True) else "")
+
+
+def rolling_snapshot(snapshot, journal):
+    """Validate bounded rolling/catch-up coverage without historical claims."""
+    try:
+        result = dict(snapshot)
+        fetched = prospective_instant(snapshot["fetched_at"])
+        today = fetched.astimezone(ZoneInfo("Europe/Zurich")).date()
+        start, end = date.fromisoformat(snapshot["from_date"]), date.fromisoformat(snapshot["to_date"])
+        if start > today - timedelta(days=89) or end != today:
+            raise RuntimeError("Incomplete rolling interval coverage")
+        coverage = journal["document"].get("coverage") if journal else None
+        if coverage:
+            last = prospective_instant(coverage["through"])
+            if last > fetched or start > last.astimezone(ZoneInfo("Europe/Zurich")).date():
+                raise RuntimeError("Rolling coverage gap requires explicit catch-up start")
+        for collection in ("transactions", "cash_movements"):
+            rows = []
+            merge_history(rows, snapshot[collection], cash=collection == "cash_movements")
+            for row in rows:
+                instant = prospective_instant(row["date"])
+                if instant > fetched or instant.astimezone(ZoneInfo("Europe/Zurich")).date() < start:
+                    raise RuntimeError("Rolling source event outside verified interval")
+                if collection == "cash_movements" and row.get("change") is not None:
+                    if prospective_instant(row["valueDate"]) > fetched:
+                        raise RuntimeError("Future rolling cash value date")
+            result[collection] = rows
+        prospective_statement_matches(result)
+        prospective_execution_cash(result)
+        result["history_completeness_verified"] = False
+        return result
+    except (KeyError, TypeError, ValueError, AttributeError):
+        raise RuntimeError("Incomplete rolling account evidence") from None
+
+
 def prospective_snapshot(config, snapshot, target, existing_body, mapping, quotes):
     """Reconcile a full interval from a fixed cutover; never relabel full history."""
     try:
@@ -1547,7 +1684,7 @@ def verified_mapping_document(document):
 def load_sync_config():
     """Operator configuration only; credentials are read verbatim from environment."""
     sync_mode = os.environ.get("SYNC_MODE", "full_history")
-    if sync_mode not in ("full_history", "prospective"):
+    if sync_mode not in ("full_history", "prospective", "rolling"):
         raise RuntimeError("Invalid synchronization mode")
     host = validate_ghost_host(os.environ.get("GHOST_HOST"))
     token = os.environ.get("GHOST_TOKEN")
@@ -1573,10 +1710,10 @@ def load_sync_config():
 def run_sync(from_date, to_date, window_days=90):
     """One broker read and complete target read; no completeness assertion invented."""
     config, mapping, quotes = load_sync_config()
-    if config["dry_run"] and config.get("sync_mode") != "prospective":
+    if config["dry_run"] and config.get("sync_mode") not in ("prospective", "rolling"):
         return run_sync_locked(config, mapping, quotes, from_date, to_date, window_days)
     with account_journal(config) as journal:
-        if journal["document"]["pending"] is not None:
+        if journal["document"]["pending"] is not None and config.get("sync_mode") != "rolling":
             raise RuntimeError("Unresolved durable write intent blocks account writes")
         return run_sync_locked(config, mapping, quotes, from_date, to_date, window_days, journal)
 
@@ -1590,6 +1727,14 @@ def run_sync_locked(config, mapping, quotes, from_date, to_date, window_days, jo
         to_date = max(to_date, datetime.now(ZoneInfo("Europe/Zurich")).date())
         snapshot = read_degiro(from_date, to_date, window_days,
             report_locale=("fr", "fr"), holdings=True)
+    elif config.get("sync_mode") == "rolling":
+        today = datetime.now(ZoneInfo("Europe/Zurich")).date()
+        if to_date != today or from_date > today - timedelta(days=89):
+            raise RuntimeError("Rolling mode requires 90 days through broker-local today")
+        coverage = journal["document"].get("coverage")
+        if coverage and from_date > prospective_instant(coverage["through"]).astimezone(ZoneInfo("Europe/Zurich")).date():
+            raise RuntimeError("Rolling coverage gap requires explicit catch-up start")
+        snapshot = read_degiro(from_date, to_date, window_days, report_locale=("fr", "fr"), holdings=True)
     else:
         snapshot = read_degiro(from_date, to_date, window_days)
     expected_target = {"id": config["target_account"], "currency": snapshot["account_info"]["baseCurrency"]}
@@ -1600,6 +1745,8 @@ def run_sync_locked(config, mapping, quotes, from_date, to_date, window_days, jo
         response = session.get(f"{config['ghost_host']}/api/v1/activities")
         response.raise_for_status()
         existing = response.json()
+        if config.get("sync_mode") == "rolling":
+            recover_confirmed_import(journal, config, existing)
         return synchronize_locked(config, snapshot, target, existing, mapping, quotes,
             lambda activities: core.ghost_import_activities(config, activities),
             lambda account, balance: core.ghost_update_cash_balance(config, account, balance), journal=journal)
@@ -1978,6 +2125,168 @@ def save_private_snapshot(data, destination, compact=False):
         stream.write(encoded)
 
 
+
+NOTIFY_WORKER_FLAG = "--notify-worker"
+NOTIFY_PAYLOAD_MAX = 32 * 1024
+APPRISE_URLS_MAX = 10
+APPRISE_URL_MAX_LEN = 2048
+APPRISE_TIMEOUT_DEFAULT = 10
+APPRISE_TIMEOUT_MAX = 30
+# The worker inherits only what Apprise needs to reach a destination: never the
+# DEGIRO or Ghostfolio credentials.
+NOTIFY_ENV_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR",
+                        "REQUESTS_CA_BUNDLE", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+                        "http_proxy", "https_proxy", "no_proxy")
+# Worker exit code -> delivery status reported by send_notification.  Kept clear
+# of the interpreter's own codes (1 uncaught error, 2 cannot open the script).
+NOTIFY_EXIT_STATUS = {0: "sent", 10: "invalid_payload", 11: "unavailable", 12: "failed",
+                      13: "invalid_destination"}
+
+
+def load_notification_config():
+    """Parse APPRISE_URLS and APPRISE_TIMEOUT; None means notifications are off.
+
+    APPRISE_URLS is a JSON list of Apprise URL strings (blank or [] = off);
+    APPRISE_TIMEOUT an integer number of seconds, 1..30 (default 10).  Never
+    raises: invalid settings only disable delivery, with a fixed warning since
+    the values carry destination credentials.
+    """
+    raw = os.environ.get("APPRISE_URLS", "")
+    if not raw.strip():
+        return None
+    try:
+        urls = json.loads(raw) if len(raw) <= NOTIFY_PAYLOAD_MAX else None
+    except ValueError:
+        urls = None
+    raw_timeout = os.environ.get("APPRISE_TIMEOUT", "").strip()
+    timeout = APPRISE_TIMEOUT_DEFAULT
+    if raw_timeout:
+        timeout = int(raw_timeout) if re.fullmatch(r"[0-9]{1,2}", raw_timeout) else 0
+    if (not isinstance(urls, list) or len(urls) > APPRISE_URLS_MAX
+            or not all(isinstance(u, str) and u.strip() and len(u) <= APPRISE_URL_MAX_LEN
+                       for u in urls)
+            or not 1 <= timeout <= APPRISE_TIMEOUT_MAX):
+        log.warning("APPRISE_URLS or APPRISE_TIMEOUT is invalid: failure notifications disabled")
+        return None
+    if not urls:
+        return None
+    return {"urls": urls, "timeout": timeout}
+
+
+def notify_worker():
+    """Worker process entry: deliver one notification read from stdin.
+
+    Never runs the sync.  Apprise is imported here only, so the sync never
+    loads it.  Exit codes: see NOTIFY_EXIT_STATUS.
+    """
+    logging.disable(logging.CRITICAL)
+    raw = sys.stdin.buffer.read(NOTIFY_PAYLOAD_MAX + 1)
+    try:
+        payload = json.loads(raw) if len(raw) <= NOTIFY_PAYLOAD_MAX else None
+    except ValueError:
+        payload = None
+    if (not isinstance(payload, dict)
+            or not isinstance(payload.get("urls"), list) or not payload["urls"]
+            or not all(isinstance(u, str) for u in payload["urls"])
+            or not isinstance(payload.get("title"), str)
+            or not isinstance(payload.get("body"), str)):
+        return 10
+    try:
+        import apprise
+    except ImportError:
+        return 11
+    notifier = apprise.Apprise()
+    # One entry may hold several space- or comma-separated URLs: bound the
+    # destinations Apprise actually expanded, not the list entries
+    if (not all(notifier.add(url) for url in payload["urls"])
+            or len(notifier) > APPRISE_URLS_MAX):
+        return 13
+    try:
+        sent = notifier.notify(title=payload["title"], body=payload["body"])
+    except Exception:
+        return 12
+    return 0 if sent else 12
+
+
+def _notify_worker_argv():
+    # -I: ignore PYTHON* variables, user site-packages and the current directory
+    return [sys.executable, "-I", os.path.abspath(__file__), NOTIFY_WORKER_FLAG]
+
+
+def _stop_worker(proc):
+    """Kill the worker (and anything it started) if still running, then reap it."""
+    if proc.poll() is None:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            proc.kill()
+    proc.wait()
+
+
+def send_notification(settings, title, body):
+    """Deliver one notification through an isolated Apprise worker.
+
+    Apprise plugins can block past any library timeout and can print their
+    destination URL.  So the URLs travel on stdin, the worker gets an
+    allowlisted environment and no output channel, and one deadline covers its
+    whole life (import, setup, send, exit); on expiry it is killed and reaped.
+    No retry: a timed-out send may still have been delivered.  Returns a fixed
+    status string; SystemExit/KeyboardInterrupt propagate after the kill.
+    """
+    payload = json.dumps({"urls": settings["urls"], "title": title, "body": body}).encode()
+    if len(payload) > NOTIFY_PAYLOAD_MAX:
+        return "payload_too_large"
+    # The worker re-runs this file: impossible when the script came from stdin
+    if not os.path.isfile(os.path.abspath(__file__)):
+        return "spawn_failed"
+    env = {k: os.environ[k] for k in NOTIFY_ENV_ALLOWLIST if k in os.environ}
+    try:
+        proc = subprocess.Popen(_notify_worker_argv(), stdin=subprocess.PIPE,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                env=env, close_fds=True, start_new_session=True)
+    except (OSError, ValueError):
+        return "spawn_failed"
+    try:
+        proc.communicate(payload, timeout=settings["timeout"])
+    except subprocess.TimeoutExpired:
+        return "timeout"
+    except Exception:
+        return "failed"
+    finally:
+        _stop_worker(proc)
+    return NOTIFY_EXIT_STATUS.get(proc.returncode, "failed")
+
+
+NOTIFY_TITLE = "ghostfolio-degiro-sync: run failed"
+NOTIFY_REASONS = {
+    "Rolling coverage gap requires explicit catch-up start": "coverage_gap: rerun with an explicit earlier --from-date",
+    "Complete exact positive readback required for recovery": "import_uncertain: inspect persisted import intent",
+    "Unresolved durable write intent blocks account writes": "write_uncertain: inspect persisted write intent",
+    "Existing DEGIRO identity changed financial evidence": "activity_conflict: compare source and destination",
+    "Rolling broker holdings do not reconcile": "holdings_mismatch: compare source and destination",
+    "Ambiguous nearby manual trade quantity": "manual_trade_ambiguous: compare quantities",
+}
+
+
+def finalize_failure(error):
+    """IBKR delivery policy: one sanitized failed-run alert, never for DRY_RUN."""
+    if os.environ.get("DRY_RUN", "1").strip().lower() not in ("0", "false", "no", "off"):
+        return
+    try:
+        settings = load_notification_config()
+        if settings is None:
+            return
+        reason = NOTIFY_REASONS.get(str(error), "sync_failed: inspect container log")
+        body = ("Run failed at " + datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC.")
+                + "\n" + reason + "\nDetails are in the container log.")
+        status = send_notification(settings, NOTIFY_TITLE, body)
+        if status == "sent":
+            log.info("Failure notification sent")
+        else:
+            log.warning("Failure notification not delivered: %s", status)
+    except Exception:
+        log.warning("Failure notification could not be sent: internal error")
+
 def main(argv=None):
     """Explicit operator modes; normal sync defaults to DRY_RUN and fails closed."""
     if not argv:
@@ -1999,16 +2308,21 @@ def main(argv=None):
         if args.sync:
             if args.output or args.report_country or args.report_language or args.orders:
                 raise RuntimeError("Read-only options cannot be used for synchronization")
-            end = date.fromisoformat(args.to_date or datetime.now(timezone.utc).date().isoformat())
+            end = date.fromisoformat(args.to_date or datetime.now(ZoneInfo("Europe/Zurich")).date().isoformat())
             lookback = int(os.environ.get("LOOKBACK_DAYS", "90"))
             if not 2 <= lookback <= 366:
                 raise RuntimeError("Invalid bounded history lookback")
+            if os.environ.get("SYNC_MODE") == "rolling" and lookback != 90:
+                raise RuntimeError("Rolling mode requires LOOKBACK_DAYS=90")
             start = date.fromisoformat(args.from_date) if args.from_date else end - timedelta(days=lookback - 1)
             result = run_sync(start, end, args.window_days)
             log.info("Sync %s: %d proposed activities, %d accepted", "DRY_RUN" if result["dry_run"] else "live",
                      len(result["proposed"]), len(result["accepted"]))
             if result["dry_run"] and result.get("prospective_verified") is True:
                 log.info("Proposed Ghostfolio cash balance: EUR %.2f; DRY_RUN, no update sent", result["cash"])
+            if result.get("rolling_verified") is True:
+                log.info("Rolling 90-day contract verified; historical completeness and basis remain unverified")
+                return 0
             if result.get("prospective_verified") is True:
                 log.info("Prospective contract verified; historical completeness and basis remain unverified")
                 return 0
@@ -2027,8 +2341,10 @@ def main(argv=None):
         save_private_snapshot(data, output)
     except Exception as error:
         if args.sync:
+            finalize_failure(error)
             message = str(error)
-            log.error("%s", message if message in API_FORMAT_ERRORS.values() or message in PROSPECTIVE_FAILURES else
+            log.error("%s", message if message in API_FORMAT_ERRORS.values() or message in PROSPECTIVE_FAILURES
+                      or message in ROLLING_FAILURES else
                       "DEGIRO sync failed; unknown, incomplete or uncertain account state blocks writes")
             return 1
         stages = ("login", "client_discovery", "transactions", "account_overview", "products",
@@ -2047,6 +2363,7 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    import sys
+    if sys.argv[1:] == [NOTIFY_WORKER_FLAG]:
+        raise SystemExit(notify_worker())
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     raise SystemExit(main(sys.argv[1:]))

@@ -3,7 +3,7 @@
 Live synchronization requires `STATE_DIR`: an existing persistent directory owned
 by the process UID and mode0700. For a future container deployment this must be a
 private writable persistent mount for UID10001, separate from its read-only app
-and mapping. DRY_RUN needs no state mount. Missing/unsafe state stops live work
+and mapping. Full-history DRY_RUN needs no state mount; prospective and rolling DRY_RUN require the private state directory. Missing/unsafe state stops live work
 before broker login. Deleting state, replacing it with tmpfs or changing the
 configured origin can discard recovery evidence; none is a recovery procedure.
 Keep origin/source/target stable and retain the directory in backups.
@@ -17,7 +17,7 @@ All independent instances targeting that account must share this state; a local
 file lock is not a distributed lock across different volumes or machines.
 
 The keyed YAML journal contains ownership, one pending intent and resolved-request
-metadata. Import payloads are keyed by canonical broker comment and contain exact
+metadata. Rolling mode additionally stores successful coverage only after full live success, never after DRY_RUN or partial work; see [the rolling contract](prospective-sync.md). Import payloads are keyed by canonical broker comment and contain exact
 activity financial fields; cash payloads contain target and amount. These are
 private financial records, not credentials. Tokens, login data and OTP never enter
 state. Lock/journal files are mode0600; symlinks, shared permissions and malformed
@@ -27,8 +27,7 @@ including a crash before HTTP actually starts.
 
 Only exact complete synchronous acceptance confirms an import intent. Partial,
 degraded, failed or lost responses retain it. A cash response failure also remains
-pending. A later process refuses all writes while any intent is unresolved;
-there is no automatic replay or clear-on-empty behavior. Confirmation retains the
+pending. A later process refuses all writes while any intent is unresolved. Rolling mode may automatically confirm an import only after complete exact unique positive readback; its DRY_RUN verifies without clearing state. There is no automatic replay or clear-on-empty behavior, and uncertain cash remains fenced. Confirmation retains the
 1,000 most recent resolved-request metadata entries, ordered by their UTC
 confirmation timestamps (request ID breaks ties). Older confirmed audit metadata
 ages out; pending financial intent is never pruned. Journals over1MB still fail
