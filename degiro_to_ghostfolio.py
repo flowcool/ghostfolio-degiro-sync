@@ -1056,10 +1056,13 @@ def synchronize_locked(config, snapshot, target_account, existing_body, mapping,
     else:
         existing, quantities = existing_activity_context(existing_body, target_account)
     balance = current_cash_balance(snapshot, target_account, source, now)
-    activities = normalize_trades(snapshot, target_account["id"], mapping, quote_currencies)
-    activities += normalize_dividends(snapshot, target_account["id"], mapping, quote_currencies)
-    activities += normalize_fees(snapshot, target_account["id"])
-    activities += normalize_cash_yield(snapshot, target_account["id"])
+    if prospective:
+        activities = context["activities"]
+    else:
+        activities = normalize_trades(snapshot, target_account["id"], mapping, quote_currencies)
+        activities += normalize_dividends(snapshot, target_account["id"], mapping, quote_currencies)
+        activities += normalize_fees(snapshot, target_account["id"])
+        activities += normalize_cash_yield(snapshot, target_account["id"])
     if any(not core.activity_date_is_current(activity) for activity in activities):
         raise RuntimeError("Future DEGIRO candidate blocks synchronization")
     pending = pending_activities(activities, existing, target_account, source)
@@ -1135,6 +1138,7 @@ PROSPECTIVE_FAILURES = frozenset({
     "Unverified prospective destination holding currency", "Unverified prospective security holding",
     "Unverified prospective holding mapping", "Conflicting prospective holding identity",
     "Incomplete prospective account evidence", "Unresolved durable write intent blocks account writes",
+    "Ambiguous prospective timestamp precision",
 })
 
 
@@ -1237,6 +1241,8 @@ def broker_stock_holdings(snapshot, target_account, mapping, quote_currencies):
         if isinstance(identity, str) and identity.startswith("FLATEX_"):
             continue  # Independently checked by current_cash_balance.
         product_id = broker_identity(identity)
+        if size == 0:
+            continue
         product = snapshot["products"].get(product_id)
         if (not isinstance(product, dict) or broker_identity(product.get("id")) != product_id
                 or product.get("productType") != "STOCK"
@@ -1256,6 +1262,15 @@ def nonzero_holdings(quantities):
     return {key: value for key, value in quantities.items() if value != 0}
 
 
+def prospective_instant(value):
+    """Require explicit seconds and offset; never manufacture missing precision."""
+    if (not isinstance(value, str) or not re.fullmatch(
+            r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+            r"(?:\.[0-9]{1,6})?(?:Z|[+-][0-9]{2}:[0-9]{2})", value)):
+        raise RuntimeError("Ambiguous prospective timestamp precision")
+    return datetime.fromisoformat(broker_instant(value))
+
+
 def prospective_opening_context(evidence, config, mapping, quote_currencies):
     """Verify unchanged opening inventory without manufacturing destination rows."""
     try:
@@ -1269,10 +1284,10 @@ def prospective_opening_context(evidence, config, mapping, quote_currencies):
         opening = captures["broker"]
         destination = captures["destination"]
         target = destination["account"]
-        cutover = datetime.fromisoformat(broker_instant(manifest["cutover"]))
-        started = datetime.fromisoformat(broker_instant(opening["fetch_started_at"]))
-        fetched = datetime.fromisoformat(broker_instant(opening["fetched_at"]))
-        captured = datetime.fromisoformat(broker_instant(destination["captured_at"]))
+        cutover = prospective_instant(manifest["cutover"])
+        started = prospective_instant(opening["fetch_started_at"])
+        fetched = prospective_instant(opening["fetched_at"])
+        captured = prospective_instant(destination["captured_at"])
         if (cutover != fetched or not started <= captured <= fetched
                 or fetched - started > timedelta(minutes=5)
                 or target["id"] != config["target_account"]):
@@ -1294,7 +1309,7 @@ def prospective_opening_context(evidence, config, mapping, quote_currencies):
                 "signature": [str(value) for value in activity_signature(row)],
                 "id": row["id"]})
         for row in opening["transactions"] + opening["cash_movements"]:
-            if datetime.fromisoformat(broker_instant(row["date"])) > started:
+            if prospective_instant(row["date"]) > started:
                 raise RuntimeError("Concurrent prospective broker opening event")
         if nonzero_holdings(quantities) != broker_stock_holdings(
                 opening, target, mapping, quote_currencies):
@@ -1372,7 +1387,7 @@ def prospective_snapshot(config, snapshot, target, existing_body, mapping, quote
         if (broker_identity(snapshot["source_account"]) != broker_identity(config["source_account"])
                 or target["id"] != config["target_account"]):
             raise RuntimeError("Prospective source or target mismatch")
-        fetched = datetime.fromisoformat(broker_instant(snapshot["fetched_at"]))
+        fetched = prospective_instant(snapshot["fetched_at"])
         # Full replay since cutover deliberately avoids a mutable coverage checkpoint.
         boundary = cutover.astimezone(ZoneInfo("Europe/Zurich")).date()
         if (snapshot["from_date"] != opening["from_date"]
@@ -1407,20 +1422,20 @@ def prospective_snapshot(config, snapshot, target, existing_body, mapping, quote
         for collection in ("transactions", "cash_movements"):
             before = opening[collection]
             actual = [row for row in snapshot[collection]
-                if datetime.fromisoformat(broker_instant(row["date"])) <= cutover]
+                if prospective_instant(row["date"]) <= cutover]
             def signatures(items):
                 return Counter(evidence_digest({key: value for key, value in row.items()
                     if collection != "cash_movements" or key != "balance"}) for row in items)
             if signatures(before) != signatures(actual):
                 raise RuntimeError("Late or changed pre-cutover source event")
             result[collection] = [row for row in snapshot[collection]
-                if datetime.fromisoformat(broker_instant(row["date"])) > cutover]
+                if prospective_instant(row["date"]) > cutover]
             for row in result[collection]:
-                instant = datetime.fromisoformat(broker_instant(row["date"]))
+                instant = prospective_instant(row["date"])
                 if instant > fetched:
                     raise RuntimeError("Future prospective source event")
                 if collection == "cash_movements" and row.get("change") is not None:
-                    value = datetime.fromisoformat(broker_instant(row["valueDate"]))
+                    value = prospective_instant(row["valueDate"])
                     if value <= cutover or value > fetched:
                         raise RuntimeError("Ambiguous prospective value-date boundary")
         prospective_execution_cash(result)
@@ -1445,6 +1460,7 @@ def prospective_snapshot(config, snapshot, target, existing_body, mapping, quote
                     1 if activity["type"] == "BUY" else -1)
         if nonzero_holdings(expected) != broker_stock_holdings(snapshot, target, mapping, quotes):
             raise RuntimeError("Prospective broker holdings do not reconcile")
+        context["activities"] = activities
         result["prospective_verified"] = True
         return result, prospective_existing, destination_quantities, context
     except (KeyError, TypeError, ValueError, AttributeError):
@@ -1806,12 +1822,19 @@ def read_degiro(from_date, to_date, window_days=90, report_locale=None, orders=F
                 raise RuntimeError("Invalid DEGIRO update response")
             data["update"] = update
             if holdings:
-                held = []
+                held, identities = [], set()
                 for row in cash_wrapper_rows(update, "portfolio"):
                     identity = row.get("id")
+                    fields = named_values(row["value"])
+                    if identity in identities or fields.get("id") != identity:
+                        raise RuntimeError("Conflicting prospective holding identity")
+                    identities.add(identity)
                     if isinstance(identity, str) and identity.startswith("FLATEX_"):
                         continue
-                    held.append(int(broker_identity(identity)))
+                    product_id = broker_identity(identity)
+                    if financial_decimal(fields.get("size")) == 0:
+                        continue
+                    held.append(int(product_id))
                 missing = sorted(set(held) - {int(identity) for identity in data["products"]})
                 stage = "products"
                 for offset in range(0, len(missing), 100):

@@ -334,8 +334,9 @@ def test_order_history_failure_logs_out(credentials, monkeypatch):
     assert "/logout;" in calls[-1][0].url
 
 
+@pytest.mark.parametrize("closed_identity", ["99", "98"])
 def test_prospective_reader_fetches_held_metadata_and_captures_destination_inside_interval(
-        credentials, monkeypatch, caplog):
+        credentials, monkeypatch, caplog, closed_identity):
     calls = broker_http(monkeypatch)
     original = requests.Session.send
     extra_products = []
@@ -343,7 +344,9 @@ def test_prospective_reader_fetches_held_metadata_and_captures_destination_insid
         path = urlsplit(request.url).path
         if "/update/" in path:
             return response({"portfolio": {"value": [{"id": "21", "name": "positionrow",
-                "value": [{"name": "id", "value": "21"}, {"name": "size", "value": 10}]}]},
+                "value": [{"name": "id", "value": "21"}, {"name": "size", "value": 10}]},
+                {"id": "99", "name": "positionrow", "value": [
+                    {"name": "id", "value": closed_identity}, {"name": "size", "value": 0}]}]},
                 "cashFunds": {"value": []}, "totalPortfolio": {"value": []}})
         if path.endswith("/products/info") and json.loads(request.body) == [21]:
             extra_products.append(21)
@@ -354,6 +357,13 @@ def test_prospective_reader_fetches_held_metadata_and_captures_destination_insid
     def destination():
         observed.append("read-only target")
         return {"captured_at": datetime.now(timezone.utc).isoformat(), "account": {"id": "synthetic"}}
+    if closed_identity != "99":
+        with pytest.raises(RuntimeError, match="products|update"):
+            adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2), holdings=True,
+                cutover_target_reader=destination)
+        assert extra_products == [] and observed == []
+        assert "/logout;" in calls[-1][0].url
+        return
     data = adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2), holdings=True,
         cutover_target_reader=destination)
     assert extra_products == [21] and data['products']['21']['isin'] == 'TESTHELD'

@@ -394,7 +394,10 @@ def test_prepare_rejects_input_output_alias_and_missing_evidence(evidence, tmp_p
     assert mapping.read_bytes() == original
     broker_path = manifest_path.parent / loaded["manifest"]["opening"]["broker"]["path"]
     broker_path.chmod(0o644)
+    fresh_output = tmp_path / "refused.yaml"
+    args[args.index("--output") + 1] = str(fresh_output)
     assert prepare_cutover.main(args) == 1
+    assert not fresh_output.exists()
     assert mapping.read_bytes() == original
 
 
@@ -411,7 +414,7 @@ def test_submillisecond_source_time_refused_before_native_dispatch(prospective_a
 
 def test_read_only_capture_publishes_private_candidates_without_financial_writes(
         evidence, tmp_path, monkeypatch):
-    from scripts import capture_cutover
+    from scripts import prepare_cutover
     loaded, unused_path, unused_digest = evidence
     config = {'dry_run': True, 'ghost_host': 'http://localhost:3333', 'source_account': '123',
         'target_account': 'target-a'}
@@ -428,23 +431,40 @@ def test_read_only_capture_publishes_private_candidates_without_financial_writes
     def read(start, end, **kwargs):
         assert kwargs['holdings'] and kwargs['report_locale'] == ('fr', 'fr')
         result = deepcopy(loaded['captures']['broker'])
+        result['fetch_started_at'] = datetime.now(timezone.utc).isoformat()
         result['opening_destination'] = kwargs['cutover_target_reader']()
+        result['fetched_at'] = datetime.now(timezone.utc).isoformat()
+        result['from_date'], result['to_date'] = start.isoformat(), end.isoformat()
         return result
     monkeypatch.setattr(adapter, 'ghost_transport', transport)
     monkeypatch.setattr(adapter, 'read_degiro', read)
     monkeypatch.setattr(adapter.core, 'ghost_import_activities', lambda *args: pytest.fail('POST'))
     monkeypatch.setattr(adapter.core, 'ghost_update_cash_balance', lambda *args: pytest.fail('PUT'))
     output = tmp_path / 'capture'
-    assert capture_cutover.main(['--output-directory', str(output)]) == 0
+    prepare_cutover.capture(output, config)
     assert len(calls) == 2
     for name in ('broker', 'destination'):
         path = output / (name + '.json')
         assert path.is_file() and path.stat().st_mode & 0o777 == 0o600
     before = (output / 'broker.json').read_bytes()
-    assert capture_cutover.main(['--output-directory', str(output)]) == 1
+    with pytest.raises(FileExistsError):
+        prepare_cutover.capture(output, config)
     assert len(calls) == 2 and (output / 'broker.json').read_bytes() == before
+    mapping_path = tmp_path / "mapping.yaml"
+    private_file(mapping_path, yaml.safe_dump({
+        "US0378331005": {"symbol": "TEST", "currency": "USD"}}).encode())
+    monkeypatch.setenv("MAPPING_FILE", str(mapping_path))
+    combined = tmp_path / "combined"
+    assert prepare_cutover.main(["--capture", "--output-directory", str(combined)]) == 0
+    manifest = combined / "manifest.yaml"
+    digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    assert opening_context(adapter.load_prospective_evidence(manifest, digest))["cutover"]
+    assert len(calls) == 4
     config['dry_run'] = False
-    assert capture_cutover.main(['--output-directory', str(tmp_path / 'live-refusal')]) == 1
+    assert prepare_cutover.main(["--capture", "--output-directory",
+        str(tmp_path / "live-refusal")]) == 1
+    with pytest.raises(RuntimeError):
+        prepare_cutover.capture(tmp_path / 'live-refusal', config)
     assert not (tmp_path / 'live-refusal').exists()
 
 
@@ -508,3 +528,53 @@ def test_missing_protected_legacy_and_new_pre_cutover_rows_refuse(prospective_ac
     destination['activities'] = {'count': 2, 'activities': [row, {**row, 'id': 'unexpected'}]}
     with pytest.raises(RuntimeError, match='Protected'):
         sync_account(prospective_account)
+
+
+@pytest.mark.parametrize('stamp', ['2026-01-02T10:00+01:00', '2026-01-02T10:00:00',
+    '2026-01-02', '2026-01-02 10:00:00+01:00'])
+def test_ambiguous_timestamp_precision_refused(prospective_account, stamp):
+    config, snapshot, destination = prospective_account
+    config['dry_run'] = False
+    snapshot['cash_movements'][3]['date'] = stamp
+    parsed = datetime.fromisoformat(stamp)
+    if parsed.utcoffset() is not None:
+        snapshot["account_report_csv"] = cash_statement(snapshot)
+        with pytest.raises(RuntimeError, match="precision"):
+            sync_account(prospective_account)
+    else:
+        with pytest.raises(RuntimeError, match="offset"):
+            sync_account(prospective_account)
+
+
+def test_minute_only_cutover_and_capture_clocks_refused(evidence):
+    loaded, unused_path, unused_digest = evidence
+    loaded['manifest']['cutover'] = '2025-12-31T12:00+00:00'
+    loaded['captures']['broker']['fetched_at'] = '2025-12-31T12:00+00:00'
+    with pytest.raises(RuntimeError, match='precision'):
+        opening_context(loaded)
+
+
+@pytest.mark.parametrize("mismatch", [False, True])
+def test_closed_holding_needs_no_metadata_but_requires_identity(evidence, mismatch):
+    loaded, unused_path, unused_digest = evidence
+    snapshot = deepcopy(loaded["captures"]["broker"])
+    snapshot["update"]["portfolio"]["value"].append({"id": "99", "name": "positionrow",
+        "value": [{"name": "id", "value": "98" if mismatch else "99"},
+                  {"name": "size", "value": 0}]})
+    if mismatch:
+        with pytest.raises(RuntimeError, match="identity"):
+            adapter.broker_stock_holdings(snapshot, {"id": "target-a"}, MAPPING, QUOTES)
+    else:
+        assert adapter.broker_stock_holdings(snapshot, {"id": "target-a"}, MAPPING, QUOTES) == {
+            ("target-a", "TEST"): 10}
+
+
+def test_minute_only_opening_source_event_refused(evidence):
+    loaded, unused_path, unused_digest = evidence
+    fixture = yaml.safe_load((Path(__file__).parent / "fixtures/degiro_contract.yaml").read_text())
+    row = deepcopy(fixture["cash_movements"]["exchange_connection_fee"])
+    row["valueDate"] = "2025-12-31T11:59:00+00:00"
+    row["date"] = "2025-12-31T11:59+00:00"
+    loaded["captures"]["broker"]["cash_movements"] = [row]
+    with pytest.raises(RuntimeError, match="precision"):
+        opening_context(loaded)

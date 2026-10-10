@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
-"""Prepare an evidence-bound prospective manifest offline; no activation or HTTP."""
+"""Capture and validate a prospective cutover, or validate existing evidence offline."""
 import argparse
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 import hashlib
 import json
 import os
@@ -11,6 +14,34 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import degiro_to_ghostfolio as adapter
+
+
+def capture(output, config):
+    if config["dry_run"] is not True:
+        raise RuntimeError("Cutover capture requires DRY_RUN")
+    # Reject all pre-existing output before login; never replace original evidence.
+    root = Path(output).resolve()
+    paths = {name: adapter.snapshot_destination(root / (name + ".json"))
+        for name in ("broker", "destination")}
+    root.mkdir(mode=0o700, parents=True, exist_ok=False)
+    def destination():
+        target = {"id": config["target_account"], "currency": "EUR"}
+        with adapter.ghost_transport(config, target) as session:
+            response = session.get(config["ghost_host"] + "/api/v1/account/" + config["target_account"])
+            response.raise_for_status()
+            account = response.json()
+            response = session.get(config["ghost_host"] + "/api/v1/activities")
+            response.raise_for_status()
+            body = response.json()
+        return {"account": account, "activities": body,
+            "captured_at": datetime.now(timezone.utc).isoformat()}
+    today = datetime.now(ZoneInfo("Europe/Zurich")).date()
+    broker = adapter.read_degiro(today - timedelta(days=1), today,
+        report_locale=("fr", "fr"), holdings=True, cutover_target_reader=destination)
+    target = broker.pop("opening_destination")
+    adapter.save_private_snapshot(broker, paths["broker"])
+    adapter.save_private_snapshot(target, paths["destination"])
+    return paths
 
 
 def prepare(args):
@@ -42,17 +73,38 @@ def prepare(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--capture", action="store_true")
+    parser.add_argument("--output-directory")
     for name in ("broker", "destination", "mapping"):
-        parser.add_argument("--" + name, required=True)
-        parser.add_argument("--" + name + "-sha256", required=True)
-    parser.add_argument("--source-account", required=True)
-    parser.add_argument("--target-account", required=True)
-    parser.add_argument("--output", required=True)
+        parser.add_argument("--" + name)
+        parser.add_argument("--" + name + "-sha256")
+    parser.add_argument("--source-account")
+    parser.add_argument("--target-account")
+    parser.add_argument("--output")
     args = parser.parse_args(argv)
     try:
+        if args.capture:
+            if (not args.output_directory or any(getattr(args, name) is not None for name in (
+                    "broker", "broker_sha256", "destination", "destination_sha256", "mapping",
+                    "mapping_sha256", "source_account", "target_account", "output"))):
+                raise RuntimeError("Invalid capture options")
+            config, unused_mapping, unused_quotes = adapter.load_sync_config()
+            paths = capture(args.output_directory, config)
+            mapping_path = Path(os.environ.get("MAPPING_FILE", "mapping.yaml")).absolute()
+            args = SimpleNamespace(
+                broker=str(paths["broker"]), destination=str(paths["destination"]),
+                broker_sha256=hashlib.sha256(paths["broker"].read_bytes()).hexdigest(),
+                destination_sha256=hashlib.sha256(paths["destination"].read_bytes()).hexdigest(),
+                mapping=str(mapping_path), mapping_sha256=hashlib.sha256(mapping_path.read_bytes()).hexdigest(),
+                source_account=config["source_account"], target_account=config["target_account"],
+                output=str(Path(args.output_directory).absolute() / "manifest.yaml"))
+        elif (args.output_directory or not all(getattr(args, name) for name in (
+                "broker", "broker_sha256", "destination", "destination_sha256", "mapping",
+                "mapping_sha256", "source_account", "target_account", "output"))):
+            raise RuntimeError("Missing offline evidence options")
         digest = prepare(args)
-    except (RuntimeError, OSError, ValueError, KeyError, TypeError, yaml.YAMLError):
-        print("Cutover preparation refused; opening evidence remains unchanged", file=sys.stderr)
+    except Exception:
+        print("Cutover preparation refused; retained evidence is not approval", file=sys.stderr)
         return 1
     print("CUTOVER_SHA256=" + digest)
     print("Opening contract verified; historical basis unverified; no activation or financial writes")

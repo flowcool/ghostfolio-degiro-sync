@@ -18,7 +18,9 @@ The broker capture contains the normal raw snapshot, including every held stock'
 product metadata. The destination capture contains `account`, the complete
 `activities` response and `captured_at`. Destination capture occurs inside the
 broker fetch interval; the cutover equals that broker capture's `fetched_at`.
-The interval must last at most five minutes and contain no source executions,
+Capture/cutover clocks and eligible source events must include explicit seconds
+and a timezone offset; minute-only timestamps are refused. The interval must
+last at most five minutes and contain no source executions,
 cash events or target activities dated after its start. The operator must avoid
 trading or editing the target during baseline establishment. A concurrent event,
 missing bridge or mismatch is a refusal, not a repair suggestion.
@@ -34,39 +36,26 @@ requires separate evidence and scope; this mode never reconstructs it.
 
 ## Capture and preparation
 
-The host-side read-only capture utility uses existing credential environment and
-URL/transport policies. It requires `DRY_RUN=1`, reads the previous and current
-broker-local dates, retrieves all held product metadata, obtains account/activities
-GETs within the broker read interval, and logs out. It sends no financial POST,
-PUT or DELETE to Ghostfolio. DEGIRO authentication/logout retain their existing
-bounded protocol. Do not inspect credentials or raw HTTP errors.
+Use the normal verified mapping, credentials and target configuration with
+`DRY_RUN=1`. One host-side command captures both accounts, checks their opening
+agreement and publishes a private manifest:
 
 ```sh
-.venv/bin/python scripts/capture_cutover.py \
+.venv/bin/python scripts/prepare_cutover.py --capture \
   --output-directory tmp/private-cutover
 ```
 
-The output directory must be new; partial captures after a failure remain
-unapproved evidence. The command prints attachment digests only. Capture alone
-neither verifies opening agreement nor activates synchronization. Pin the verified
-mapping file's digest using `sha256sum`, then prepare the manifest offline:
+The directory must be new. The command uses existing read-only broker operations
+and Ghostfolio account/activities GETs, then logs out. It sends no financial writes
+and does not activate synchronization. On success it prints `CUTOVER_SHA256`;
+on failure, retained files remain unapproved evidence. Keep the directory at the
+same path. The mapping input must be mode0600, like the private captures.
 
-```sh
-.venv/bin/python scripts/prepare_cutover.py \
-  --broker tmp/private-cutover/broker.json \
-  --broker-sha256 "$BROKER_SHA256" \
-  --destination tmp/private-cutover/destination.json \
-  --destination-sha256 "$DESTINATION_SHA256" \
-  --mapping "$MAPPING_FILE" --mapping-sha256 "$MAPPING_SHA256" \
-  --source-account "$DEGIRO_ACCOUNT_ID" --target-account "$GHOST_ACCOUNT_ID" \
-  --output tmp/private-cutover/manifest.yaml
-```
-
-Preparation validates opening agreement before exclusive mode0600 publication.
-It refuses overwrites, existing input/output aliases and invalid evidence; it
-prints `CUTOVER_SHA256`. Keep the private directory and attachments available at
-the same bound paths. Utilities run from the host development environment; the
-runtime image continues shipping only runtime/recovery code.
+Existing captures can also be validated offline with `prepare_cutover.py`:
+provide `--broker`, `--destination`, `--mapping` and each corresponding
+`--NAME-sha256`, plus `--source-account`, `--target-account` and `--output`.
+Preparation refuses overwrites and input/output aliases. The utility runs from
+the host development environment and is not included in the runtime image.
 
 ## Explicit DRY_RUN
 
