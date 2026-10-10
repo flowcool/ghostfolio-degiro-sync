@@ -79,9 +79,10 @@ def test_bad_evidence_refuses_before_writes(rolling, change, message):
         snapshot["account_report_csv"] = "broken"
     else:
         snapshot["transactions"] = []
+    before = deepcopy(state(config))
     with pytest.raises(RuntimeError, match=message):
         sync_account(rolling)
-    assert not state(config) or "coverage" not in state(config) or change == "gap"
+    assert state(config) == before
 
 
 def test_explicit_catchup_covers_gap(rolling):
