@@ -1,6 +1,6 @@
 """Exercise real connector actions through synthetic HTTP, without broker access."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 import json
 import logging
 import os
@@ -332,3 +332,52 @@ def test_order_history_failure_logs_out(credentials, monkeypatch):
     with pytest.raises(RuntimeError, match="order_history"):
         adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2), orders=True)
     assert "/logout;" in calls[-1][0].url
+
+
+@pytest.mark.parametrize("closed_identity", ["99", "98"])
+def test_prospective_reader_fetches_held_metadata_and_captures_destination_inside_interval(
+        credentials, monkeypatch, caplog, closed_identity):
+    calls = broker_http(monkeypatch)
+    original = requests.Session.send
+    extra_products = []
+    def send(session, request, **kwargs):
+        path = urlsplit(request.url).path
+        if "/update/" in path:
+            return response({"portfolio": {"value": [{"id": "21", "name": "positionrow",
+                "value": [{"name": "id", "value": "21"}, {"name": "size", "value": 10}]},
+                {"id": "99", "name": "positionrow", "value": [
+                    {"name": "id", "value": closed_identity}, {"name": "size", "value": 0}]}]},
+                "cashFunds": {"value": []}, "totalPortfolio": {"value": []}})
+        if path.endswith("/products/info") and json.loads(request.body) == [21]:
+            extra_products.append(21)
+            return response({"data": {"21": {"id": "21", "isin": "TESTHELD"}}})
+        return original(session, request, **kwargs)
+    monkeypatch.setattr(requests.Session, "send", send)
+    observed = []
+    def destination():
+        observed.append("read-only target")
+        return {"captured_at": datetime.now(timezone.utc).isoformat(), "account": {"id": "synthetic"}}
+    if closed_identity != "99":
+        with pytest.raises(RuntimeError, match="products|update"):
+            adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2), holdings=True,
+                cutover_target_reader=destination)
+        assert extra_products == [] and observed == []
+        assert "/logout;" in calls[-1][0].url
+        return
+    data = adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2), holdings=True,
+        cutover_target_reader=destination)
+    assert extra_products == [21] and data['products']['21']['isin'] == 'TESTHELD'
+    assert observed == ['read-only target']
+    assert data['fetch_started_at'] <= data['opening_destination']['captured_at'] <= data['fetched_at']
+    assert '/logout;' in calls[-1][0].url
+    assert_no_secrets(caplog.text)
+
+
+def test_cutover_destination_failure_is_private_and_still_logs_out(credentials, monkeypatch, caplog):
+    calls = broker_http(monkeypatch)
+    def destination():
+        raise RuntimeError(PASSWORD + SESSION)
+    with pytest.raises(RuntimeError, match='cutover_destination') as error:
+        adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2), cutover_target_reader=destination)
+    assert '/logout;' in calls[-1][0].url
+    assert_no_secrets(str(error.value) + caplog.text)

@@ -104,3 +104,13 @@ actual destination/V3 output matches and the deliberately retained source gates.
 
 Current work and acceptance evidence live in Beads epic `infra-8tt.56` with
 `project=ghostfolio-degiro-sync`, rather than a repository task-status list.
+
+## Prospective synchronization
+
+An explicit evidence-bound cutover mode preserves existing history while validating
+new operations. See [prospective synchronization](docs/prospective-sync.md) for
+opening prerequisites and configuration. Prepare and validate the baseline once
+with `scripts/prepare_cutover.py --capture`, then use the existing `--sync`
+command in `DRY_RUN=1` with the pinned manifest.
+Historical completeness and cost basis remain unverified. This mode does not
+authorize production activation or replace the real-account acceptance gate.

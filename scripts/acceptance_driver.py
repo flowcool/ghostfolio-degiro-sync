@@ -3,6 +3,9 @@
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import json
+import csv
+import io
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -42,6 +45,144 @@ print('FENCED')
     result = subprocess.run([sys.executable, '-c', program], input=json.dumps([safe, kind]),
         text=True, capture_output=True, timeout=10)
     assert result.returncode == 0 and result.stdout.strip() == 'FENCED'
+
+
+def prospective_native_acceptance(call, mapping, quotes):
+    """Native prospective lifecycle over a closed synthetic broker baseline."""
+    fixture = yaml.safe_load(Path('/lab/fixture.yaml').read_text())
+    now = datetime.now(timezone.utc)
+    cutover = (now - timedelta(days=2)).replace(microsecond=0)
+    account = call('POST', '/api/v1/account', {'name': 'Synthetic prospective',
+        'currency': 'EUR', 'balance': 12.3, 'platformId': None}, 201)
+    opening_activity = {'accountId': account['id'], 'comment': 'Protected prospective legacy',
+        'currency': 'USD', 'dataSource': 'YAHOO', 'date': '2020-01-01T00:00:00Z',
+        'fee': 0, 'quantity': 10, 'symbol': 'TEST', 'type': 'BUY', 'unitPrice': 1}
+    call('POST', '/api/v1/import', {'activities': [opening_activity]}, 201)
+    directory = Path(tempfile.mkdtemp(prefix='prospective-'))
+    state = directory / 'state'
+    state.mkdir(mode=0o700)
+    baseline = {'source_account': '905', 'account_info': {'baseCurrency': 'EUR'},
+        'transactions': [], 'cash_movements': [], 'products': fixture['products'],
+        'update': deepcopy(fixture['current_cash']),
+        'from_date': cutover.astimezone(adapter.ZoneInfo('Europe/Zurich')).date().isoformat(),
+        'to_date': cutover.astimezone(adapter.ZoneInfo('Europe/Zurich')).date().isoformat(),
+        'fetch_started_at': (cutover - timedelta(seconds=2)).isoformat(),
+        'fetched_at': cutover.isoformat(), 'history_completeness_verified': False}
+    baseline['update']['portfolio']['value'].append({'id': '20', 'name': 'positionrow',
+        'value': [{'name': 'id', 'value': '20'}, {'name': 'size', 'value': 10}]})
+    destination = {'account': call('GET', '/api/v1/account/' + account['id']),
+        'activities': call('GET', '/api/v1/activities'),
+        'captured_at': (cutover - timedelta(seconds=1)).isoformat()}
+    # Times describe the closed synthetic baseline, never a real historical capture.
+    manifest = {'version': 1, 'source_account': '905', 'target_account': account['id'],
+        'cutover': cutover.isoformat(), 'basis_status': 'unverified',
+        'mapping_sha256': adapter.evidence_digest({'mapping': mapping, 'quote_currencies': quotes}),
+        'opening': {}}
+    for name, value in (('broker', baseline), ('destination', destination)):
+        raw = json.dumps(value).encode()
+        path = directory / (name + '.json')
+        path.write_bytes(raw)
+        path.chmod(0o600)
+        manifest['opening'][name] = {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest()}
+    manifest_path = directory / 'manifest.yaml'
+    raw = yaml.safe_dump(manifest).encode()
+    manifest_path.write_bytes(raw)
+    manifest_path.chmod(0o600)
+    config = {'ghost_host': HOST, 'ghost_token': os.environ['GHOST_TOKEN'],
+        'source_account': '905', 'target_account': account['id'], 'dry_run': True,
+        'sync_mode': 'prospective', 'cutover_manifest': str(manifest_path),
+        'cutover_sha256': hashlib.sha256(raw).hexdigest(), 'state_dir': str(state)}
+    data = deepcopy(baseline)
+    data['transactions'] = deepcopy(fixture['transactions'])
+    trade_time = (cutover + timedelta(minutes=20)).isoformat()
+    data['transactions'][0]['date'] = trade_time
+    data['cash_movements'] = [deepcopy(fixture['cash_movements'][name]) for name in (
+        'paid_dividend', 'dividend_withholding', 'trade_commission', 'exchange_connection_fee')]
+    for row in data['cash_movements']:
+        row['date'] = trade_time if row['id'] == 103 else (cutover + timedelta(minutes=30)).isoformat()
+        row['valueDate'] = row['date']
+    data['cash_movements'].append({'id': 110, 'type': 'TRANSACTION', 'productId': 20,
+        'description': 'Vente 2 TEST', 'change': 20, 'currency': 'USD',
+        'date': trade_time, 'valueDate': trade_time})
+    data['update']['portfolio']['value'][-1]['value'][-1]['value'] = 8
+    def statement():
+        stream = io.StringIO()
+        writer = csv.writer(stream)
+        writer.writerow(['Date', 'Heure', 'Date de', 'Produit', 'Code ISIN', 'Description',
+            'FX', 'Mouvements', '', 'Solde', '', 'ID Ordre'])
+        for row in data['cash_movements']:
+            instant = datetime.fromisoformat(row['date'])
+            value = datetime.fromisoformat(row['valueDate'])
+            product = data['products'].get(str(row.get('productId')), {})
+            writer.writerow([instant.strftime('%d-%m-%Y'), instant.strftime('%H:%M'),
+                value.strftime('%d-%m-%Y'), 'Synthetic', product.get('isin', ''), row['description'],
+                '', row['currency'], str(row['change']).replace('.', ','), 'EUR', '0,00', row.get('orderId', '')])
+        return stream.getvalue()
+    def sync(importer=None):
+        now = datetime.now(timezone.utc)
+        data['fetch_started_at'] = (now - timedelta(seconds=1)).isoformat()
+        data['fetched_at'] = now.isoformat()
+        data['to_date'] = now.astimezone(adapter.ZoneInfo('Europe/Zurich')).date().isoformat()
+        data['account_report_csv'] = statement()
+        target = call('GET', '/api/v1/account/' + account['id'])
+        body = call('GET', '/api/v1/activities')
+        with adapter.ghost_transport(config, target):
+            return adapter.synchronize_account(config, data, target, body, mapping, quotes,
+                importer or (lambda batch: core.ghost_import_activities(config, batch)),
+                lambda identity, amount: core.ghost_update_cash_balance(config, identity, amount))
+    before = deepcopy(destination['activities'])
+    preview = sync()
+    assert preview['prospective_verified'] and not preview['history_verified']
+    assert len(preview['proposed']) == 3 and preview['accepted'] == []
+    assert call('GET', '/api/v1/activities') == before
+    config['dry_run'] = False
+    first = sync()
+    assert len(first['accepted']) == 3
+    body = call('GET', '/api/v1/activities')
+    normalized, quantities = adapter.existing_activity_context(body, account)
+    assert quantities[(account['id'], 'TEST')] == 8
+    actual = {row['comment']: adapter.activity_signature(row) for row in normalized
+        if row['accountId'] == account['id'] and (row['comment'] or '').startswith('DEGIRO#')}
+    assert actual == {row['comment']: adapter.activity_signature(row) for row in first['accepted']}
+    preserved = [row for row in body['activities'] if row['id'] in {
+        row['id'] for row in before['activities'] if row['accountId'] == account['id']}]
+    def financial_records(body):
+        normalized, unused = adapter.existing_activity_context(body, account)
+        return {row['id']: adapter.activity_signature(row) for row in normalized
+            if row['accountId'] == account['id']}
+    protected_ids = {row['id'] for row in preserved}
+    assert {key: value for key, value in financial_records(body).items() if key in protected_ids} == financial_records(before)
+    assert sync()['accepted'] == []
+    assert financial_records(call('GET', '/api/v1/activities')) == financial_records(body)
+    assert call('GET', '/api/v1/account/' + account['id'])['balance'] == 12.3
+    # Exercise native uncertain-result recovery, keeping the complete replay interval.
+    extra = deepcopy(data['cash_movements'][3])
+    extra['id'] = 1701
+    extra['date'] = extra['valueDate'] = (cutover + timedelta(minutes=40)).isoformat()
+    data['cash_movements'].append(extra)
+    def lost_response(batch):
+        accepted, ok = core.ghost_import_activities(config, batch)
+        assert ok and len(accepted) == 1
+        raise requests.Timeout('Synthetic prospective lost reply after commit')
+    try:
+        sync(lost_response)
+    except RuntimeError as error:
+        assert 'cash blocked' in str(error)
+    else:
+        raise AssertionError('Prospective uncertain response accepted')
+    assert_restart_fenced(config, 'import')
+    with adapter.account_journal(config) as journal:
+        intent = journal['document']['pending']['id']
+    assert adapter.resolve_import_intent(config, call('GET', '/api/v1/activities'),
+        expected_intent_id=intent) == 1
+    config.pop('_uncertain_import_accounts', None)
+    assert sync()['accepted'] == []
+    final = call('GET', '/api/v1/activities')
+    assert final['count'] == body['count'] + 1
+    assert {key: value for key, value in financial_records(final).items() if key in protected_ids} == financial_records(before)
+    print('PASS prospective:verified opening10;SELL2/native holding8;3 exact activities;'
+        'DRY_RUN zero writes;legacy unchanged;repeat zero;history/basis unverified;'
+        'lost reply durable restart fence and exact recovery without replay', flush=True)
 
 
 def main():
@@ -459,6 +600,7 @@ def main():
     print('PASS cash yield:zero interest retained;distinct same-second compensation;exact native readback;'
         'repeat zero;credit totals5/7.5 EUR;cash12.30 independently set;negative/nonzero-interest blocked;'
         'lost response restart fenced and exact recovery without replay;cleanup ownership verified', flush=True)
+    prospective_native_acceptance(call, mapping, quotes)
     session.close()
 
 
