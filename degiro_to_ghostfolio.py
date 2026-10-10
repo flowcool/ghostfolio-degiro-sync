@@ -1684,6 +1684,10 @@ def raw_rows(envelope, collection=None):
         raise RuntimeError(API_FORMAT_ERRORS["unknown"])
     rows = envelope["data"]
     if collection:
+        # Observed accountoverview response for an empty recent interval.
+        # Prospective acceptance still requires exact statement corroboration.
+        if collection == "cashMovements" and rows == {}:
+            return []
         if not isinstance(rows, dict) or collection not in rows:
             raise RuntimeError(API_FORMAT_ERRORS["unknown"])
         rows = rows[collection]
