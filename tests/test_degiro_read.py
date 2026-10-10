@@ -344,8 +344,9 @@ def test_order_history_failure_logs_out(credentials, monkeypatch):
 
 
 @pytest.mark.parametrize("closed_identity", ["99", "98"])
+@pytest.mark.parametrize("cash_identity", ["USD", "GBP", "XYZ"])
 def test_prospective_reader_fetches_held_metadata_and_captures_destination_inside_interval(
-        credentials, monkeypatch, caplog, closed_identity):
+        credentials, monkeypatch, caplog, closed_identity, cash_identity):
     calls = broker_http(monkeypatch)
     original = requests.Session.send
     extra_products = []
@@ -355,7 +356,10 @@ def test_prospective_reader_fetches_held_metadata_and_captures_destination_insid
             return response({"portfolio": {"value": [{"id": "21", "name": "positionrow",
                 "value": [{"name": "id", "value": "21"}, {"name": "size", "value": 10}]},
                 {"id": "99", "name": "positionrow", "value": [
-                    {"name": "id", "value": closed_identity}, {"name": "size", "value": 0}]}]},
+                    {"name": "id", "value": closed_identity}, {"name": "size", "value": 0}]},
+                {"id": cash_identity, "name": "positionrow", "value": [
+                    {"name": "id", "value": cash_identity}, {"name": "size", "value": 0},
+                    {"name": "positionType", "value": "CASH"}]}]},
                 "cashFunds": {"value": []}, "totalPortfolio": {"value": []}})
         if path.endswith("/products/info") and json.loads(request.body) == [21]:
             extra_products.append(21)
@@ -366,7 +370,7 @@ def test_prospective_reader_fetches_held_metadata_and_captures_destination_insid
     def destination():
         observed.append("read-only target")
         return {"captured_at": datetime.now(timezone.utc).isoformat(), "account": {"id": "synthetic"}}
-    if closed_identity != "99":
+    if closed_identity != "99" or cash_identity == "XYZ":
         with pytest.raises(RuntimeError, match="products|update"):
             adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2), holdings=True,
                 cutover_target_reader=destination)

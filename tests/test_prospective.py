@@ -74,7 +74,7 @@ def test_verified_opening_preserves_history_and_separates_basis(evidence):
 
 
 @pytest.mark.parametrize("change", ["quantity", "cash", "source", "target", "mapping",
-    "unit", "missing_product", "capture_gap", "concurrent_source", "concurrent_target", "target_currency"])
+    "unit", "missing_product", "capture_gap", "concurrent_source", "concurrent_target"])
 def test_unproved_opening_is_refused(evidence, change):
     loaded, unused_path, unused_digest = evidence
     broker = loaded["captures"]["broker"]
@@ -82,7 +82,7 @@ def test_unproved_opening_is_refused(evidence, change):
     if change == "quantity":
         broker["update"]["portfolio"]["value"][-1]["value"][-1]["value"] = 9
     elif change == "cash":
-        destination["account"]["balance"] = 12.31
+        destination["account"]["balance"] = None
     elif change == "source":
         loaded["manifest"]["source_account"] = "456"
     elif change == "target":
@@ -95,14 +95,24 @@ def test_unproved_opening_is_refused(evidence, change):
         broker["products"].clear()
     elif change == "capture_gap":
         destination["captured_at"] = "2025-12-31T12:00:01Z"
-    elif change == "target_currency":
-        destination["activities"]["activities"][0]["currency"] = "EUR"
     elif change == "concurrent_source":
         broker["transactions"] = [{"date": "2025-12-31T11:59:59Z"}]
     else:
         destination["activities"]["activities"][0]["date"] = "2025-12-31T11:59:59Z"
     with pytest.raises(RuntimeError):
         opening_context(loaded)
+
+
+@pytest.mark.parametrize('currency', [None, 'EUR'])
+def test_legacy_currency_does_not_certify_or_block_exact_opening_inventory(evidence, currency):
+    loaded, unused_path, unused_digest = evidence
+    row = loaded['captures']['destination']['activities']['activities'][0]
+    row['currency'] = currency
+    before = deepcopy(row)
+    context = opening_context(loaded)
+    assert context['quantities'] == {('target-a', 'TEST'): 10}
+    assert context['basis_status'] == 'unverified'
+    assert row == before and set(context['protected']) == {'opening'}
 
 
 def test_changed_public_or_symlink_evidence_refused(evidence, tmp_path):
@@ -200,6 +210,26 @@ def test_full_prospective_dry_run_has_exact_plan_without_history_claim(prospecti
     assert result["accepted"] == [] and result["prospective_verified"] is True
     assert result["history_verified"] is False and result["basis_status"] == "unverified"
     assert destination == before
+
+
+def test_stale_destination_cash_does_not_block_verified_dry_run(prospective_account):
+    config, snapshot, destination = prospective_account
+    path = Path(config['cutover_manifest'])
+    manifest = yaml.safe_load(path.read_bytes())
+    capture_path = path.parent / manifest['opening']['destination']['path']
+    capture = json.loads(capture_path.read_bytes())
+    capture['account']['balance'] = 0
+    manifest['opening']['destination']['sha256'] = private_file(capture_path, json.dumps(capture).encode())
+    config['cutover_sha256'] = private_file(path, yaml.safe_dump(manifest).encode())
+    destination['account']['balance'] = 0
+    before = deepcopy(destination)
+    result = sync_account(prospective_account)
+    assert result['prospective_verified'] is True and result['cash'] == 12.3
+    assert result['accepted'] == [] and destination == before
+    # A stale destination never excuses inconsistent broker cash evidence.
+    snapshot['update']['cashFunds']['value'][0]['value'][-1]['value'] = 999
+    with pytest.raises(RuntimeError):
+        sync_account(prospective_account)
 
 
 def test_first_and_repeat_preserve_legacy_and_use_opening_inventory(prospective_account):
@@ -312,7 +342,7 @@ def test_actual_dry_run_command_exercises_config_and_orchestration(prospective_a
     assert adapter.main(["--sync", "--from-date", "2025-12-31", "--to-date", "2026-01-04"]) == 1
 
 
-def test_dry_run_command_keeps_acquisition_scope_and_read_only_transports(prospective_account, tmp_path, monkeypatch):
+def test_dry_run_command_keeps_acquisition_scope_and_read_only_transports(prospective_account, tmp_path, monkeypatch, caplog):
     config, snapshot, destination = prospective_account
     now = datetime.now(timezone.utc)
     snapshot["fetch_started_at"] = (now - timedelta(seconds=1)).isoformat()
@@ -342,7 +372,9 @@ def test_dry_run_command_keeps_acquisition_scope_and_read_only_transports(prospe
     monkeypatch.setattr(adapter.core, "ghost_import_activities", lambda *args: pytest.fail("POST"))
     monkeypatch.setattr(adapter.core, "ghost_update_cash_balance", lambda *args: pytest.fail("PUT"))
     # A narrow requested lookback cannot replace the manifest's full replay interval.
-    assert adapter.main(["--sync", "--from-date", now.date().isoformat()]) == 0
+    with caplog.at_level('INFO'):
+        assert adapter.main(["--sync", "--from-date", now.date().isoformat()]) == 0
+    assert 'Proposed Ghostfolio cash balance: EUR 12.30; DRY_RUN, no update sent' in caplog.text
     assert acquired[0][0].isoformat() == "2025-12-31"
     assert acquired[0][3] == {"report_locale": ("fr", "fr"), "holdings": True}
     assert len(requests) == 2 and all(url.startswith(config["ghost_host"]) for url in requests)
@@ -365,6 +397,8 @@ def test_prepare_command_publishes_only_after_validating_and_refuses_overwrite(e
         path = manifest_path.parent / binding["path"]
         before[path] = path.read_bytes()
         args += ["--" + name, str(path), "--" + name + "-sha256", binding["sha256"]]
+    assert prepare_cutover.main(args + ['--from-date', '']) == 1
+    assert not output.exists()
     assert prepare_cutover.main(args) == 0
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
     assert "CUTOVER_SHA256=" + digest in capsys.readouterr().out
@@ -447,6 +481,8 @@ def test_read_only_capture_publishes_private_candidates_without_financial_writes
         path = output / (name + '.json')
         assert path.is_file() and path.stat().st_mode & 0o777 == 0o600
     before = (output / 'broker.json').read_bytes()
+    raw_target = (output / 'destination.json').read_bytes()
+    assert raw_target == json.dumps(json.loads(raw_target), separators=(',', ':')).encode()
     with pytest.raises(FileExistsError):
         prepare_cutover.capture(output, config)
     assert len(calls) == 2 and (output / 'broker.json').read_bytes() == before
@@ -455,11 +491,21 @@ def test_read_only_capture_publishes_private_candidates_without_financial_writes
         "US0378331005": {"symbol": "TEST", "currency": "USD"}}).encode())
     monkeypatch.setenv("MAPPING_FILE", str(mapping_path))
     combined = tmp_path / "combined"
-    assert prepare_cutover.main(["--capture", "--output-directory", str(combined)]) == 0
+    start = (datetime.now(timezone.utc) - timedelta(days=7)).date().isoformat()
+    assert prepare_cutover.main(["--capture", "--from-date", start,
+        "--output-directory", str(combined)]) == 0
     manifest = combined / "manifest.yaml"
     digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
     assert opening_context(adapter.load_prospective_evidence(manifest, digest))["cutover"]
     assert len(calls) == 4
+    loaded_combined = adapter.load_prospective_evidence(manifest, digest)
+    assert loaded_combined['captures']['broker']['from_date'] == start
+    with pytest.raises(RuntimeError):
+        prepare_cutover.capture(tmp_path / 'future-capture', config, '9999-01-01')
+    assert len(calls) == 4 and not (tmp_path / 'future-capture').exists()
+    with pytest.raises(ValueError):
+        prepare_cutover.capture(tmp_path / 'empty-date', config, '')
+    assert len(calls) == 4 and not (tmp_path / 'empty-date').exists()
     config['dry_run'] = False
     assert prepare_cutover.main(["--capture", "--output-directory",
         str(tmp_path / "live-refusal")]) == 1
@@ -592,6 +638,31 @@ def test_closed_holding_needs_no_metadata_but_requires_identity(evidence, mismat
     else:
         assert adapter.broker_stock_holdings(snapshot, {"id": "target-a"}, MAPPING, QUOTES) == {
             ("target-a", "TEST"): 10}
+
+
+@pytest.mark.parametrize('identity, inner, position, size, accepted', [
+    ('USD', 'USD', 'CASH', 0, True),
+    ('GBP', 'GBP', 'CASH', 0, True),
+    ('XYZ', 'XYZ', 'CASH', 0, False),
+    ('USD', 'EUR', 'CASH', 0, False),
+    ('USD', 'USD', 'PRODUCT', 0, False),
+    ('unknown', 'unknown', 'CASH', 0, False),
+    ('USD', 'USD', 'CASH', 1, False),
+    ('USD', 'USD', 'CASH', -1, False),
+])
+def test_only_identified_empty_currency_cash_placeholders_are_excluded_from_holdings(
+        evidence, identity, inner, position, size, accepted):
+    loaded, unused_path, unused_digest = evidence
+    snapshot = deepcopy(loaded['captures']['broker'])
+    snapshot['update']['portfolio']['value'].append({'id': identity, 'name': 'positionrow',
+        'value': [{'name': 'id', 'value': inner}, {'name': 'size', 'value': size},
+                  {'name': 'positionType', 'value': position}]})
+    if accepted:
+        assert adapter.broker_stock_holdings(snapshot, {'id': 'target-a'}, MAPPING, QUOTES) == {
+            ('target-a', 'TEST'): 10}
+    else:
+        with pytest.raises(RuntimeError):
+            adapter.broker_stock_holdings(snapshot, {'id': 'target-a'}, MAPPING, QUOTES)
 
 
 def test_minute_only_opening_source_event_refused(evidence):

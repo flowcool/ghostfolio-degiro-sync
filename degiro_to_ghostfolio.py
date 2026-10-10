@@ -50,6 +50,9 @@ BROKER_PATHS = {
 # Deliberately limited to the characterized major currencies. Minor quotes
 # require separate broker evidence; an IBKR suffix rule is not DEGIRO evidence.
 CURRENCY_QUANTA = {"EUR": Decimal("0.01"), "USD": Decimal("0.01"), "JPY": Decimal("1")}
+# Observed broker currency placeholders; exclusion requires an explicit zero CASH row.
+# This does not authorize nonzero cash or security quote units in additional currencies.
+CASH_CURRENCIES = frozenset({"CAD", "CHF", "DKK", "EUR", "GBP", "HKD", "JPY", "NOK", "SEK", "USD"})
 TRADE_FIELDS = ("accountId", "comment", "currency", "dataSource", "date", "fee",
                 "quantity", "symbol", "type", "unitPrice")
 API_FORMAT_ERRORS = {
@@ -1121,7 +1124,7 @@ def synchronize_locked(config, snapshot, target_account, existing_body, mapping,
 
 
 PROSPECTIVE_FAILURES = frozenset({
-    "Prospective opening holdings mismatch", "Prospective opening cash mismatch",
+    "Prospective opening holdings mismatch",
     "Prospective account or mapping binding mismatch", "Unproved prospective opening capture interval",
     "Concurrent prospective destination opening event", "Concurrent prospective broker opening event",
     "Incomplete prospective opening evidence", "Incomplete prospective interval coverage",
@@ -1240,6 +1243,9 @@ def broker_stock_holdings(snapshot, target_account, mapping, quote_currencies):
         size = financial_decimal(fields.get("size"))
         if isinstance(identity, str) and identity.startswith("FLATEX_"):
             continue  # Independently checked by current_cash_balance.
+        if (identity in CASH_CURRENCIES
+                and fields.get("positionType") == "CASH" and size == 0):
+            continue  # Empty currency placeholders are not held securities.
         product_id = broker_identity(identity)
         if size == 0:
             continue
@@ -1293,8 +1299,7 @@ def prospective_opening_context(evidence, config, mapping, quote_currencies):
                 or target["id"] != config["target_account"]):
             raise RuntimeError("Unproved prospective opening capture interval")
         cash = current_cash_balance(opening, target, config["source_account"], now=fetched)
-        if financial_decimal(target["balance"]) != financial_decimal(cash):
-            raise RuntimeError("Prospective opening cash mismatch")
+        financial_decimal(target["balance"])  # Existing cash may be stale; broker cash is authoritative.
         rows, quantities = existing_activity_context(destination["activities"], target)
         protected = {}
         for row in rows:
@@ -1303,8 +1308,8 @@ def prospective_opening_context(evidence, config, mapping, quote_currencies):
             instant = datetime.fromisoformat(broker_instant(row["date"]))
             if instant > started:
                 raise RuntimeError("Concurrent prospective destination opening event")
-            if row["type"] in ("BUY", "SELL") and row["currency"] != quote_currencies.get(row["symbol"]):
-                raise RuntimeError("Unverified prospective destination holding currency")
+            # Legacy monetary fields are protected, not certified. Opening
+            # inventory is proved below through exact current broker quantities.
             protected[row["id"]] = evidence_digest({
                 "signature": [str(value) for value in activity_signature(row)],
                 "id": row["id"]})
@@ -1835,6 +1840,10 @@ def read_degiro(from_date, to_date, window_days=90, report_locale=None, orders=F
                     identities.add(identity)
                     if isinstance(identity, str) and identity.startswith("FLATEX_"):
                         continue
+                    if (identity in CASH_CURRENCIES
+                            and fields.get("positionType") == "CASH"
+                            and financial_decimal(fields.get("size")) == 0):
+                        continue
                     product_id = broker_identity(identity)
                     if financial_decimal(fields.get("size")) == 0:
                         continue
@@ -1909,10 +1918,11 @@ def snapshot_destination(destination):
     return destination
 
 
-def save_private_snapshot(data, destination):
+def save_private_snapshot(data, destination, compact=False):
     destination = snapshot_destination(destination)
     destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    encoded = json.dumps(redact_auth_fields(data), indent=2, allow_nan=False).encode()
+    encoded = json.dumps(redact_auth_fields(data), indent=None if compact else 2,
+        separators=(",", ":") if compact else None, allow_nan=False).encode()
     descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "wb") as stream:
         stream.write(encoded)
@@ -1947,6 +1957,8 @@ def main(argv=None):
             result = run_sync(start, end, args.window_days)
             log.info("Sync %s: %d proposed activities, %d accepted", "DRY_RUN" if result["dry_run"] else "live",
                      len(result["proposed"]), len(result["accepted"]))
+            if result["dry_run"] and result.get("prospective_verified") is True:
+                log.info("Proposed Ghostfolio cash balance: EUR %.2f; DRY_RUN, no update sent", result["cash"])
             if result.get("prospective_verified") is True:
                 log.info("Prospective contract verified; historical completeness and basis remain unverified")
                 return 0
