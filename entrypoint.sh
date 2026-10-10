@@ -13,6 +13,8 @@ if [ -n "${CRON:-}" ]; then
         exit 1
     fi
     crontab_path="$(mktemp)"
+    # Managed cron is local only: inherited Sentry must not enable Go HTTP.
+    unset SENTRY_DSN SENTRY_ENVIRONMENT SENTRY_RELEASE
     printf '%s python /app/degiro_to_ghostfolio.py --sync\n' "$CRON" > "$crontab_path"
     supercronic -test "$crontab_path"
     echo 'Running with validated cron schedule'
