@@ -74,7 +74,7 @@ def test_verified_opening_preserves_history_and_separates_basis(evidence):
 
 
 @pytest.mark.parametrize("change", ["quantity", "cash", "source", "target", "mapping",
-    "unit", "missing_product", "capture_gap", "concurrent_source", "concurrent_target", "target_currency"])
+    "unit", "missing_product", "capture_gap", "concurrent_source", "concurrent_target"])
 def test_unproved_opening_is_refused(evidence, change):
     loaded, unused_path, unused_digest = evidence
     broker = loaded["captures"]["broker"]
@@ -95,14 +95,24 @@ def test_unproved_opening_is_refused(evidence, change):
         broker["products"].clear()
     elif change == "capture_gap":
         destination["captured_at"] = "2025-12-31T12:00:01Z"
-    elif change == "target_currency":
-        destination["activities"]["activities"][0]["currency"] = "EUR"
     elif change == "concurrent_source":
         broker["transactions"] = [{"date": "2025-12-31T11:59:59Z"}]
     else:
         destination["activities"]["activities"][0]["date"] = "2025-12-31T11:59:59Z"
     with pytest.raises(RuntimeError):
         opening_context(loaded)
+
+
+@pytest.mark.parametrize('currency', [None, 'EUR'])
+def test_legacy_currency_does_not_certify_or_block_exact_opening_inventory(evidence, currency):
+    loaded, unused_path, unused_digest = evidence
+    row = loaded['captures']['destination']['activities']['activities'][0]
+    row['currency'] = currency
+    before = deepcopy(row)
+    context = opening_context(loaded)
+    assert context['quantities'] == {('target-a', 'TEST'): 10}
+    assert context['basis_status'] == 'unverified'
+    assert row == before and set(context['protected']) == {'opening'}
 
 
 def test_changed_public_or_symlink_evidence_refused(evidence, tmp_path):
@@ -469,6 +479,8 @@ def test_read_only_capture_publishes_private_candidates_without_financial_writes
         path = output / (name + '.json')
         assert path.is_file() and path.stat().st_mode & 0o777 == 0o600
     before = (output / 'broker.json').read_bytes()
+    raw_target = (output / 'destination.json').read_bytes()
+    assert raw_target == json.dumps(json.loads(raw_target), separators=(',', ':')).encode()
     with pytest.raises(FileExistsError):
         prepare_cutover.capture(output, config)
     assert len(calls) == 2 and (output / 'broker.json').read_bytes() == before

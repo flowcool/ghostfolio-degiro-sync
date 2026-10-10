@@ -40,6 +40,10 @@ approved this behavior on2026-10-10. Actual updates retain separate production a
 The baseline records existing inventory; it creates no opening BUY or cash flow.
 Only `basis_status: unverified` is currently supported. Accurate historical basis
 requires separate evidence and scope; this mode never reconstructs it.
+Legacy trade currencies and prices are preserved through protected signatures,
+not certified against current quote metadata. They do not establish opening
+inventory: exact current broker quantities and verified mapping do. New
+prospective activities still require verified quote currencies and units.
 
 ## Capture and preparation
 

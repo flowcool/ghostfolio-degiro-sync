@@ -1308,8 +1308,8 @@ def prospective_opening_context(evidence, config, mapping, quote_currencies):
             instant = datetime.fromisoformat(broker_instant(row["date"]))
             if instant > started:
                 raise RuntimeError("Concurrent prospective destination opening event")
-            if row["type"] in ("BUY", "SELL") and row["currency"] != quote_currencies.get(row["symbol"]):
-                raise RuntimeError("Unverified prospective destination holding currency")
+            # Legacy monetary fields are protected, not certified. Opening
+            # inventory is proved below through exact current broker quantities.
             protected[row["id"]] = evidence_digest({
                 "signature": [str(value) for value in activity_signature(row)],
                 "id": row["id"]})
@@ -1918,10 +1918,11 @@ def snapshot_destination(destination):
     return destination
 
 
-def save_private_snapshot(data, destination):
+def save_private_snapshot(data, destination, compact=False):
     destination = snapshot_destination(destination)
     destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    encoded = json.dumps(redact_auth_fields(data), indent=2, allow_nan=False).encode()
+    encoded = json.dumps(redact_auth_fields(data), indent=None if compact else 2,
+        separators=(",", ":") if compact else None, allow_nan=False).encode()
     descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "wb") as stream:
         stream.write(encoded)

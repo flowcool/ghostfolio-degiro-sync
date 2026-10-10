@@ -42,7 +42,7 @@ def capture(output, config, from_date=None):
         report_locale=("fr", "fr"), holdings=True, cutover_target_reader=destination)
     target = broker.pop("opening_destination")
     adapter.save_private_snapshot(broker, paths["broker"])
-    adapter.save_private_snapshot(target, paths["destination"])
+    adapter.save_private_snapshot(target, paths["destination"], compact=True)
     return paths
 
 
