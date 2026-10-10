@@ -82,7 +82,7 @@ def test_unknown_history_is_not_called_legacy(bad):
     assert str(caught.value) == adapter.API_FORMAT_ERRORS['unknown']
 
 
-@pytest.mark.parametrize('body', [{}, {'data': {}}, {'data': {'cashMovements': None}},
+@pytest.mark.parametrize('body', [{}, {'data': {'unexpected': []}}, {'data': {'cashMovements': None}},
                                    {'data': {'cashMovements': ['CREDENTIAL_SENTINEL']}}])
 def test_unknown_cash_envelope_is_not_invented_as_empty_or_legacy(body):
     with pytest.raises(RuntimeError) as caught:

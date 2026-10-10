@@ -103,7 +103,17 @@ def main(argv=None):
                 "mapping_sha256", "source_account", "target_account", "output"))):
             raise RuntimeError("Missing offline evidence options")
         digest = prepare(args)
-    except Exception:
+    except Exception as error:
+        # Only fixed adapter diagnostics may cross the private capture boundary.
+        stages = ("login", "client_discovery", "transactions", "account_overview", "products",
+                  "account_info", "account_update", "account_report", "order_history", "cutover_destination")
+        messages = {f"DEGIRO read failed at {stage}; no financial writes attempted" for stage in stages}
+        messages.add("DEGIRO logout failed")
+        messages.update(adapter.API_FORMAT_ERRORS.values())
+        messages.update(f"DEGIRO login failed: {reason}" for reason in adapter.AUTH_FAILURE_REASONS)
+        message = str(error)
+        if message in messages:
+            print(message, file=sys.stderr)
         print("Cutover preparation refused; retained evidence is not approval", file=sys.stderr)
         return 1
     print("CUTOVER_SHA256=" + digest)

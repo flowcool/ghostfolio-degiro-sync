@@ -2,8 +2,11 @@
 
 Prospective mode preserves existing Ghostfolio history and synchronizes eligible
 operations after a verified cutover. It does not certify historical accounting,
-cost basis, fees, performance or tax reporting. Publishing this mode does not
-amend real-account acceptance or authorize production activation.
+cost basis, fees, performance or tax reporting. Florent approved prospective
+real-account acceptance on2026-10-10: fresh opening captures must agree on
+holdings and cash, followed by a successful actual prospective DRY_RUN with
+zero financial writes. C13 and CSV-transition/recovery preflight evidence remain
+required. This acceptance scope does not authorize production activation.
 
 ## Opening evidence
 

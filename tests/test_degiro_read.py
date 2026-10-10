@@ -136,6 +136,15 @@ def test_real_actions_preserve_raw_fields_and_fractional_quantity(credentials, m
     assert_no_secrets(caplog.text)
 
 
+def test_observed_empty_account_overview_is_acquired_without_history_claim(credentials, monkeypatch):
+    calls = broker_http(monkeypatch, '/accountoverview', response({'data': {}}))
+    data = adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2))
+    assert data['cash_movements'] == []
+    assert data['transactions']  # Acquisition is not evidence of complete reconciliation.
+    assert data['history_completeness_verified'] is False
+    assert '/logout;' in calls[-1][0].url
+
+
 @pytest.mark.parametrize("path", ["/client", "/transactions", "/accountoverview",
                                   "/products/info", "/account/info/", "/update/", "/logout;"])
 @pytest.mark.parametrize("failure", [

@@ -468,6 +468,31 @@ def test_read_only_capture_publishes_private_candidates_without_financial_writes
     assert not (tmp_path / 'live-refusal').exists()
 
 
+@pytest.mark.parametrize('failure, expected', [
+    ('DEGIRO login failed: captcha_required', 'DEGIRO login failed: captcha_required'),
+    ('DEGIRO read failed at cutover_destination; no financial writes attempted',
+     'DEGIRO read failed at cutover_destination; no financial writes attempted'),
+    ('private bearer=secret and account payload', None),
+    ('DEGIRO login failed: captcha_required private bearer=secret', None),
+])
+def test_capture_failure_reports_safe_stage_without_private_details(monkeypatch, capsys, tmp_path,
+                                                                   failure, expected):
+    from scripts import prepare_cutover
+    monkeypatch.setattr(adapter, 'load_sync_config', lambda: ({'dry_run': True}, {}, {}))
+    def refuse(*args):
+        raise RuntimeError(failure)
+    monkeypatch.setattr(prepare_cutover, 'capture', refuse)
+    assert prepare_cutover.main(['--capture', '--output-directory', str(tmp_path / 'capture')]) == 1
+    output = capsys.readouterr()
+    assert not output.out
+    assert 'Cutover preparation refused; retained evidence is not approval' in output.err
+    assert 'secret' not in output.err and 'payload' not in output.err
+    if expected:
+        assert expected in output.err
+    else:
+        assert output.err == 'Cutover preparation refused; retained evidence is not approval\n'
+
+
 def test_distinct_same_minute_source_rows_preserve_multiset(prospective_account):
     config, snapshot, destination = prospective_account
     extra = deepcopy(snapshot['cash_movements'][3])
