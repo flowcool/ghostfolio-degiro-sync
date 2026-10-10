@@ -1,4 +1,77 @@
-# Prospective synchronization from a verified cutover
+# Bounded synchronization and prospective acceptance
+
+## Approved rolling operating contract
+
+Florent confirmed this contract on 2026-10-10. Set `SYNC_MODE=rolling` for
+normal operation: retrieve the 90 calendar days ending on the current
+Europe/Zurich date (`today - 89 days` through today, inclusive). `LOOKBACK_DAYS`
+remains 90. An explicit earlier `--from-date` supports catch-up; `--to-date`
+must still be today. Internal request windows overlap by one day and retain
+identity, conflict and budget checks. This policy replaces full cutover replay
+for normal operation; the original prospective mode below remains available
+for its independently verified acceptance evidence.
+
+The first rolling run also proposes missing operations before service began.
+Run `DRY_RUN=1` first and review proposals. It imports nothing and changes
+neither cash nor coverage. Production financial writes and deployment still
+require separate explicit authorization. No opening BUY, invented cash flow,
+or historical-basis certification is introduced.
+
+Existing exact canonical identities are skipped; changed financial content
+is refused. Florent explicitly approved the existing IBKR manual-entry rules:
+BUY/SELL entries of the same account, symbol and side may match within two
+calendar days when quantity differs by less than 0.001; the closest match is
+consumed once. Nearby entries with different quantities refuse processing.
+Existing dividends of the same account and symbol within three days are
+considered already represented, as in IBKR. These are duplicate-avoidance
+heuristics, not proof of historical prices, fees or taxes. Other categories
+retain their existing explicit reconciliation requirements. Existing rows are
+never updated automatically.
+
+The complete destination inventory plus pending trade quantities must equal
+fresh broker holdings. Every existing canonical DEGIRO row within the requested
+window must also exist with the same financial signature in the source plan.
+Statement coverage, source execution/cash associations, independent current
+broker cash, units and mapping remain mandatory. History completeness and
+basis remain unverified; a successful rolling command reports that distinction.
+
+The account-owned private YAML journal records coverage only after a complete
+successful live run, including cash confirmation. A requested interval starting
+after the last successful coverage date is refused before writes: use an
+explicit earlier `--from-date` to cover the gap. First use without saved coverage
+requires the initial DRY_RUN review; it cannot infer older missing history.
+Partial failures and DRY_RUN never advance coverage. Persist `STATE_DIR` across
+container replacement; losing it also loses the outage reference.
+
+On restart, read Ghostfolio under the account lock. An interrupted import is
+cleared automatically only after every intended activity is present exactly
+once with matching canonical financial values. DRY_RUN may verify this but
+preserves the pending journal. Missing, partial, changed, foreign or duplicated
+results remain blocked because a delayed insertion may still arrive. An
+uncertain cash write remains blocked and needs explicit recovery. No blind
+resubmission, deletion or financial correction is performed.
+
+Failure notifications reuse the IBKR isolated Apprise worker implementation
+from sibling commit `2404fbd030ed4570da9b8e287205f06316399ec1`, outside the immutable core.
+`APPRISE_URLS` is a JSON list (at most 10 destinations); `APPRISE_TIMEOUT` is
+1–30 seconds, default 10. Empty configuration disables delivery. One alert is
+attempted for each completed failed live synchronization. Success, warnings,
+DRY_RUN, read-only capture and interrupted processes remain silent. Messages
+contain fixed reason/action codes and UTC time, never account identifiers,
+financial amounts, arbitrary exceptions or destination secrets. The worker
+receives destination URLs on stdin, excludes broker/Ghostfolio credentials,
+discards output and has one process-wide deadline. It never retries; delivery
+failure does not change the sync result. Apprise configuration/deployment uses
+the existing infrastructure handoff; no live notification is sent by tests.
+
+Rollback: revert the exact rolling implementation commit and restore the prior
+configuration. Preserve journals and captures; code rollback neither cancels
+in-flight requests nor reverses already imported activities or cash updates.
+Older binaries reject the extended journal containing `coverage`; preserve it
+and use a forward fix or explicitly reviewed state migration rather than deleting
+`STATE_DIR` to make an older version run.
+
+## Prospective synchronization from a verified cutover
 
 Prospective mode preserves existing Ghostfolio history and synchronizes eligible
 operations after a verified cutover. It does not certify historical accounting,

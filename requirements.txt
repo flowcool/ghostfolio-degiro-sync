@@ -23,3 +23,10 @@ pyotp==2.10.0
 typing-extensions==4.16.0
 typing-inspection==0.4.4
 wrapt==2.5.0
+
+# Reused IBKR isolated Apprise worker dependency closure.
+apprise==2.0.1
+click==8.5.0
+markdown==3.10.3
+oauthlib==4.0.0
+requests-oauthlib==2.0.0

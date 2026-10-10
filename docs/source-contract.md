@@ -273,7 +273,13 @@ Only the same target account and Yahoo symbol contribute to the holding baseline
 Pending executions are applied chronologically with no quantity epsilon; any
 negative position blocks the batch. A nearby manual trade of the same account,
 symbol and side blocks explicit reconciliation, regardless of quantity. Date
-proximity never creates a broker identity or silently suppresses an execution.
+proximity never creates a broker identity in full-history/prospective modes.
+For rolling mode, Florent explicitly adopted the IBKR manual matching rules on
+2026-10-10: closest same-account/symbol/side trade within2days and quantity
+difference below0.001 is consumed once; same-account/symbol dividend within3days
+is treated as represented. Canonical identities still require exact financial
+content. See [the rolling contract](prospective-sync.md) for limits; these
+heuristics are not historical accounting certification.
 The guard is conservative: missing opening holdings and buys already represented
 in a later current baseline can require operator reconciliation.
 
