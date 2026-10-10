@@ -397,6 +397,8 @@ def test_prepare_command_publishes_only_after_validating_and_refuses_overwrite(e
         path = manifest_path.parent / binding["path"]
         before[path] = path.read_bytes()
         args += ["--" + name, str(path), "--" + name + "-sha256", binding["sha256"]]
+    assert prepare_cutover.main(args + ['--from-date', '']) == 1
+    assert not output.exists()
     assert prepare_cutover.main(args) == 0
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
     assert "CUTOVER_SHA256=" + digest in capsys.readouterr().out
@@ -501,6 +503,9 @@ def test_read_only_capture_publishes_private_candidates_without_financial_writes
     with pytest.raises(RuntimeError):
         prepare_cutover.capture(tmp_path / 'future-capture', config, '9999-01-01')
     assert len(calls) == 4 and not (tmp_path / 'future-capture').exists()
+    with pytest.raises(ValueError):
+        prepare_cutover.capture(tmp_path / 'empty-date', config, '')
+    assert len(calls) == 4 and not (tmp_path / 'empty-date').exists()
     config['dry_run'] = False
     assert prepare_cutover.main(["--capture", "--output-directory",
         str(tmp_path / "live-refusal")]) == 1

@@ -20,7 +20,7 @@ def capture(output, config, from_date=None):
     if config["dry_run"] is not True:
         raise RuntimeError("Cutover capture requires DRY_RUN")
     today = datetime.now(ZoneInfo("Europe/Zurich")).date()
-    start = date.fromisoformat(from_date) if from_date else today - timedelta(days=1)
+    start = date.fromisoformat(from_date) if from_date is not None else today - timedelta(days=1)
     adapter.history_windows(start, today)  # Validate before publication or login.
     # Reject all pre-existing output before login; never replace original evidence.
     root = Path(output).resolve()
@@ -101,7 +101,7 @@ def main(argv=None):
                 mapping=str(mapping_path), mapping_sha256=hashlib.sha256(mapping_path.read_bytes()).hexdigest(),
                 source_account=config["source_account"], target_account=config["target_account"],
                 output=str(Path(args.output_directory).absolute() / "manifest.yaml"))
-        elif (args.output_directory or args.from_date or not all(getattr(args, name) for name in (
+        elif (args.output_directory or args.from_date is not None or not all(getattr(args, name) for name in (
                 "broker", "broker_sha256", "destination", "destination_sha256", "mapping",
                 "mapping_sha256", "source_account", "target_account", "output"))):
             raise RuntimeError("Missing offline evidence options")
