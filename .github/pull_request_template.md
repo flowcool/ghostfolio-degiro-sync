@@ -49,10 +49,14 @@ independent review.
 
 Review evidence: <!-- completed review URL and reviewed commit SHA -->
 
-Before merging, run `.venv/bin/python scripts/check_pr_merge.py <number>`.
+Before merging, run `.venv/bin/python scripts/merge_pr.py <number>`.
+This is the execution entry point: it runs the live preflight and invokes
+`gh pr merge --match-head-commit` only after validated readiness. A preflight
+exception or malformed proof makes zero merge calls. There is no auto/admin mode.
+Use `.venv/bin/python scripts/check_pr_merge.py <number>` for read-only inspection.
 The read-only preflight checks completed final-head CodeRabbit review evidence,
 required CI, review status, complete conversations and GitHub eligibility, then
-rechecks the head. Use its returned SHA with `gh pr merge --match-head-commit`.
+rechecks the head. The execution entry point pins its returned SHA for the merge.
 It performs no merge, comment, resolution or review trigger and grants no
 production authority. GitHub remains authoritative at the actual merge.
 Submitted final-head reviews are authoritative. When none exists, the helper can
@@ -64,6 +68,9 @@ skipped/rate-limited reviews fail closed. Comments use the same bounded paginati
 and head checks. Comment-based readiness also re-reads reviews and comments at
 the end and refuses changed or deleted evidence and new formal vetoes. These are
 sequential snapshots: evidence can still change after preflight, so inspect any
-new reviewer update before merging. The helper is not atomic merge enforcement.
+new reviewer update before merging. GitHub pins the head at merge, but the
+review/check snapshots and merge are separate operations. If the merge command
+fails or times out, inspect the actual GitHub state before retrying; the helper
+reports command success, not independently verified merged state.
 There is no review-reuse exception or bypass flag. Roll back this
 evidence-format support with a scoped Git revert; no production action is needed.

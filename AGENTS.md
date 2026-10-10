@@ -34,7 +34,7 @@ for the exact propagation and rollback procedure.
 Functional Python, no custom classes or type hints. The explicit Option C
 core/adapter split replaces the inherited mono-file convention. Follow
 `.claude/rules/python-conventions.md`, `.claude/rules/security.md` and
-`.claude/rules/delegation.md` (fleet delegation, model right-sizing, infra handoff).
+`.claude/rules/delegation.md` (Codex ownership, explicit delegation, infra handoff).
 Runtime dependencies remain pinned; dev-only pytest never ships in the image.
 Every logic change has an offline regression. Pytest forbids network access;
 real read-only characterization is a separate operator procedure.
@@ -58,8 +58,16 @@ externally; do not schedule or repeat them here. Production financial mutations,
 cleanup and deployment retain their separate explicit authorization gates.
 
 For PR bodies, including skill-generated bodies, use the compatible sections in
-[the PR template](.github/pull_request_template.md); it also owns the read-only
-merge-preflight command and exact-head handoff procedure.
+[the PR template](.github/pull_request_template.md); it also owns the
+guarded merge command and exact-head handoff procedure.
+Use `scripts/merge_pr.py` for merge execution; keep preflight and mutation in that
+single entry point. Existing pytest CI checks Python classes and annotations.
+
+At task start, fetch and inspect current main in an isolated worktree if this
+checkout is on an obsolete branch; preserve unrelated local state. For metadata,
+request selected JSON fields and relevant comments. Save large responses to
+ignored `tmp/` and summarize selected findings instead of printing whole histories
+or HTML error bodies.
 
 ## Execution continuity
 
@@ -71,6 +79,11 @@ when the authorized scope is complete, indispensable information is unavailable,
 or the next action requires an explicit authorization that has not been granted.
 An explicit pause request wins: finish only the current task when Florent permits
 that completion, reconcile durable state, then pause without selecting more work.
+Before stopping an autonomous run, record completion evidence, Florent's explicit
+pause, or the exact missing input/authorization, recovery attempts and why no
+independent authorized work remains. Unresolved financial semantics still permit
+research, offline characterization and contract proposals. Arm and reconcile the
+shared `autonomous-run` guard as described in global guidance.
 Keep the review-before-merge and production authorization gates above.
 
 ## Agent skills
