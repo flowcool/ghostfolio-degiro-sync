@@ -7,6 +7,16 @@ with the complete direct/transitive dependency closure. Dev pytest/pip-audit,
 optional connector QR/quotecast packages, Git state and private snapshots do not
 ship. `.dockerignore` allowlists the build inputs and COPY lists runtime files.
 
+Managed cron enables neither a Go HTTP listener nor supercronic Sentry reporting:
+the entrypoint clears inherited `SENTRY_DSN`, `SENTRY_ENVIRONMENT` and
+`SENTRY_RELEASE` before validation and execution. Broker HTTP stays in Python.
+The expiring exact-CVE exceptions in `.trivyignore.yaml` rely on that boundary and the
+pinned upstream binary. Their native `expired_at: 2026-11-15` fields stop
+applying at that UTC date; the pinned Action explicitly selects the YAML file.
+See the [Trivy filtering contract](https://github.com/aquasecurity/trivy/blob/v0.70.0/docs/guide/configuration/filtering.md#trivyignoreyaml).
+Reassess before command/entrypoint overrides or enabling
+Go network features; exceptions do not establish safety for those configurations.
+
 The app runs as UID/GID10001. Its files remain owned by root, and the crontab is
 created in the container's writable temporary directory. Read-only root filesystem
 operation with a `/tmp` tmpfs is supported. `DRY_RUN=1` is the image default;
