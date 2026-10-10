@@ -175,3 +175,25 @@ do not authorize excluding those rows, asserting an independent statement proof,
 clearing cash/partial uncertainty or running live imports. Full real read-only
 reconciliation and operator CSV transition remain separate evidence requirements;
 production mutations/deployment retain Florent's explicit approval gate.
+
+## Prospective cutover acceptance
+
+The same owned controller also runs a prospective lifecycle using separately
+pinned private captures of a closed synthetic baseline. It seeds ten existing
+TEST shares, verifies opening quantities/cash, previews without writes, imports
+three exact post-cutover activities, verifies native holding8 and unchanged legacy
+IDs/financial signatures, and repeats with zero new activities. A subsequent fee
+commits while its reply is lost; a fresh interpreter remains fenced, exact selected
+readback resolves the import intent, and full replay creates no duplicate. No
+mutable coverage checkpoint exists to advance after incomplete work. Historical
+completeness and basis remain unverified throughout prospective acceptance.
+
+The initial rehearsal refused accepted-date evidence for microsecond fixture
+instants. The adapter now refuses prospective activity timestamps finer than
+milliseconds before dispatch; broker timestamps are never rounded. The next
+rehearsal reached native import and quantity reconciliation, then rejected a
+lab assertion comparing mutable nested account metadata. The lab now checks exact
+created IDs and financial signatures, as the production protection contract does.
+Both failed rehearsals removed all UUID-owned lab resources and count as no
+prospective acceptance. The final successful rehearsal is recorded in Beads with
+its exact tested implementation/image evidence.

@@ -2,6 +2,9 @@
 """Read-only DEGIRO adapter; activity writes require the remaining validation gates."""
 
 import argparse
+from collections import Counter
+import csv
+import io
 import fcntl
 import hashlib
 from contextlib import contextmanager
@@ -17,6 +20,7 @@ import stat
 import tempfile
 import uuid
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 import requests
 import yaml
@@ -1018,7 +1022,7 @@ def readback_import_intent(config, *, expected_intent_id, confirm=False):
 def synchronize_account(config, snapshot, target_account, existing_body, mapping,
                         quote_currencies, import_activities, update_balance, now=None):
     """Serialize live account work and preserve intent before every write."""
-    if config.get("dry_run", True) is not False:
+    if config.get("dry_run", True) is not False and config.get("sync_mode") != "prospective":
         return synchronize_locked(config, snapshot, target_account, existing_body, mapping,
             quote_currencies, import_activities, update_balance, now=now)
     with account_journal(config) as journal:
@@ -1034,6 +1038,8 @@ def synchronize_locked(config, snapshot, target_account, existing_body, mapping,
     dry_run = config.get("dry_run", True)
     if type(dry_run) is not bool:
         raise RuntimeError("Invalid DRY_RUN flag")
+    if config.get("sync_mode", "full_history") not in ("full_history", "prospective"):
+        raise RuntimeError("Invalid synchronization mode")
     check_api_import_format(snapshot)
     source = broker_identity(config.get("source_account"))
     if broker_identity(snapshot.get("source_account")) != source:
@@ -1042,8 +1048,14 @@ def synchronize_locked(config, snapshot, target_account, existing_body, mapping,
         raise RuntimeError("Ghostfolio configured target account mismatch")
     if not core.activity_is_active({"account": target_account}) or target_account.get("balance") is None:
         raise RuntimeError("Ghostfolio target account excluded or redacted")
+    prospective = config.get("sync_mode", "full_history") == "prospective"
+    context = None
+    if prospective:
+        snapshot, existing, quantities, context = prospective_snapshot(
+            config, snapshot, target_account, existing_body, mapping, quote_currencies)
+    else:
+        existing, quantities = existing_activity_context(existing_body, target_account)
     balance = current_cash_balance(snapshot, target_account, source, now)
-    existing, quantities = existing_activity_context(existing_body, target_account)
     activities = normalize_trades(snapshot, target_account["id"], mapping, quote_currencies)
     activities += normalize_dividends(snapshot, target_account["id"], mapping, quote_currencies)
     activities += normalize_fees(snapshot, target_account["id"])
@@ -1053,13 +1065,16 @@ def synchronize_locked(config, snapshot, target_account, existing_body, mapping,
     pending = pending_activities(activities, existing, target_account, source)
     trades = [activity for activity in pending if activity["type"] in ("BUY", "SELL")]
     reconcile_trade_holdings(trades, existing, quantities)
-    if not dry_run and snapshot.get("history_completeness_verified") is not True:
+    if not dry_run and not prospective and snapshot.get("history_completeness_verified") is not True:
         raise RuntimeError("Unverified DEGIRO history completeness blocks live writes")
     if target_account["id"] in config.get("_uncertain_import_accounts", set()):
         raise RuntimeError("Uncertain prior import blocks account writes")
     if dry_run:
         return {"proposed": pending, "accepted": [], "cash": balance, "dry_run": True,
-                "history_verified": snapshot.get("history_completeness_verified") is True}
+                "history_verified": snapshot.get("history_completeness_verified") is True,
+                "prospective_verified": prospective,
+                "cutover": context["cutover"].isoformat() if context else None,
+                "basis_status": context["basis_status"] if context else None}
     accepted = []
     for sells in (False, True):
         batch = [activity for activity in pending if (activity["type"] == "SELL") == sells]
@@ -1097,22 +1112,348 @@ def synchronize_locked(config, snapshot, target_account, existing_body, mapping,
     apply_cash_balance(snapshot, target_account, source, guarded_balance, dry_run=False,
         import_ok=True, uncertain=target_account["id"] in config.get("_uncertain_import_accounts", set()), now=now)
     return {"proposed": pending, "accepted": accepted, "cash": balance, "dry_run": False,
-            "history_verified": True}
+            "history_verified": not prospective, "prospective_verified": prospective,
+            "cutover": context["cutover"].isoformat() if context else None,
+            "basis_status": context["basis_status"] if context else None}
 
 
-def load_sync_config():
-    """Operator configuration only; credentials are read verbatim from environment."""
-    host = validate_ghost_host(os.environ.get("GHOST_HOST"))
-    token = os.environ.get("GHOST_TOKEN")
-    target = os.environ.get("GHOST_ACCOUNT_ID")
-    source = broker_identity(os.environ.get("DEGIRO_ACCOUNT_ID"))
-    mode = os.environ.get("DRY_RUN", "1").strip().lower()
-    if (not isinstance(token, str) or not token.strip() or "\r" in token or "\n" in token
-            or not isinstance(target, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", target)
-            or mode not in ("1", "true", "yes", "on", "0", "false", "no", "off")):
-        raise RuntimeError("Invalid Ghostfolio sync environment")
+PROSPECTIVE_FAILURES = frozenset({
+    "Prospective opening holdings mismatch", "Prospective opening cash mismatch",
+    "Prospective account or mapping binding mismatch", "Unproved prospective opening capture interval",
+    "Concurrent prospective destination opening event", "Concurrent prospective broker opening event",
+    "Incomplete prospective opening evidence", "Incomplete prospective interval coverage",
+    "Prospective statement coverage mismatch", "Incomplete prospective statement evidence",
+    "Unverified prospective statement header", "Unverified prospective statement row",
+    "Protected prospective legacy history changed", "Late or changed pre-cutover source event",
+    "Future prospective source event", "Ambiguous prospective value-date boundary",
+    "Unproved prospective execution cash relation", "Prospective cash execution missing from trade feed",
+    "Unproved post-cutover destination activity", "Prospective broker holdings do not reconcile",
+    "Prospective date precision cannot be represented by Ghostfolio",
+    "Missing prospective evidence digest", "Unsafe prospective evidence file",
+    "Changed prospective evidence file", "Unavailable prospective evidence file",
+    "Invalid prospective manifest schema", "Malformed prospective evidence",
+    "Unverified prospective destination holding currency", "Unverified prospective security holding",
+    "Unverified prospective holding mapping", "Conflicting prospective holding identity",
+    "Incomplete prospective account evidence", "Unresolved durable write intent blocks account writes",
+})
+
+
+def evidence_digest(value):
+    """Stable JSON evidence digest; reject non-finite or unrepresentable input."""
     try:
-        document = yaml.safe_load(Path(os.environ.get("MAPPING_FILE", "mapping.yaml")).read_text())
+        return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+            allow_nan=False).encode()).hexdigest()
+    except (ValueError, TypeError):
+        raise RuntimeError("Invalid prospective evidence content") from None
+
+
+def read_private_evidence(path, expected_digest):
+    """Read bounded, owned regular evidence without following a final symlink."""
+    if not isinstance(expected_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_digest):
+        raise RuntimeError("Missing prospective evidence digest")
+    descriptor = None
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_mode & 0o077 or info.st_nlink != 1 or info.st_size > 2_000_000):
+            raise RuntimeError("Unsafe prospective evidence file")
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = None
+            content = stream.read(2_000_001)
+        if len(content) > 2_000_000 or hashlib.sha256(content).hexdigest() != expected_digest:
+            raise RuntimeError("Changed prospective evidence file")
+        return content
+    except (OSError, TypeError):
+        raise RuntimeError("Unavailable prospective evidence file") from None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def unique_evidence_pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise RuntimeError("Duplicate prospective evidence key")
+        result[key] = value
+    return result
+
+
+def load_prospective_evidence(path, expected_digest):
+    """An operator-pinned YAML manifest binds two unchanged private JSON captures."""
+    try:
+        content = read_private_evidence(path, expected_digest)
+        # Inspect mapping nodes before safe_load: duplicate keys are never last-wins.
+        root = yaml.compose(content)
+        pending, visited = [root], set()
+        while pending:
+            node = pending.pop()
+            if node is None or id(node) in visited:
+                raise RuntimeError("Aliased prospective manifest is unsupported")
+            visited.add(id(node))
+            if isinstance(node, yaml.MappingNode):
+                keys = [key.value for key, unused in node.value]
+                if len(keys) != len(set(keys)):
+                    raise RuntimeError("Duplicate prospective evidence key")
+                pending.extend(item for pair in node.value for item in pair)
+            elif isinstance(node, yaml.SequenceNode):
+                pending.extend(node.value)
+        manifest = yaml.safe_load(content)
+        if (not isinstance(manifest, dict) or set(manifest) != {
+                "version", "source_account", "target_account", "cutover",
+                "mapping_sha256", "opening", "basis_status"}
+                or type(manifest["version"]) is not int or manifest["version"] != 1
+                or manifest["basis_status"] != "unverified"
+                or set(manifest["opening"]) != {"broker", "destination"}):
+            raise RuntimeError("Invalid prospective manifest schema")
+        captures = {}
+        for name, binding in manifest["opening"].items():
+            if not isinstance(binding, dict) or set(binding) != {"path", "sha256"}:
+                raise RuntimeError("Invalid prospective capture binding")
+            location = Path(binding["path"])
+            if not location.is_absolute():
+                location = Path(path).parent / location
+            captures[name] = json.loads(read_private_evidence(location, binding["sha256"]),
+                object_pairs_hook=unique_evidence_pairs,
+                parse_constant=lambda unused: (_ for _ in ()).throw(
+                    RuntimeError("Non-finite prospective evidence")))
+        return {"manifest": manifest, "captures": captures,
+                "manifest_sha256": expected_digest}
+    except (KeyError, ValueError, TypeError, AttributeError, RecursionError, yaml.YAMLError):
+        raise RuntimeError("Malformed prospective evidence") from None
+
+
+def broker_stock_holdings(snapshot, target_account, mapping, quote_currencies):
+    """Decode every held security; missing metadata, units or instruments block."""
+    quantities, identities = {}, set()
+    for row in cash_wrapper_rows(snapshot["update"], "portfolio"):
+        fields = named_values(row["value"])
+        identity = row.get("id")
+        if identity in identities or fields.get("id") != identity:
+            raise RuntimeError("Conflicting prospective holding identity")
+        identities.add(identity)
+        size = financial_decimal(fields.get("size"))
+        if isinstance(identity, str) and identity.startswith("FLATEX_"):
+            continue  # Independently checked by current_cash_balance.
+        product_id = broker_identity(identity)
+        product = snapshot["products"].get(product_id)
+        if (not isinstance(product, dict) or broker_identity(product.get("id")) != product_id
+                or product.get("productType") != "STOCK"
+                or financial_decimal(product.get("contractSize")) != 1 or size < 0
+                or not valid_isin(product.get("isin"))):
+            raise RuntimeError("Unverified prospective security holding")
+        symbol = mapping.get(product["isin"])
+        if (not isinstance(symbol, str) or not symbol.strip()
+                or quote_currencies.get(symbol) != product.get("currency")):
+            raise RuntimeError("Unverified prospective holding mapping")
+        key = (target_account["id"], symbol)
+        quantities[key] = quantities.get(key, Decimal(0)) + size
+    return {key: value for key, value in quantities.items() if value != 0}
+
+
+def nonzero_holdings(quantities):
+    return {key: value for key, value in quantities.items() if value != 0}
+
+
+def prospective_opening_context(evidence, config, mapping, quote_currencies):
+    """Verify unchanged opening inventory without manufacturing destination rows."""
+    try:
+        manifest, captures = evidence["manifest"], evidence["captures"]
+        if (manifest["source_account"] != broker_identity(config["source_account"])
+                or manifest["target_account"] != config["target_account"]
+                or manifest["mapping_sha256"] != evidence_digest({
+                    "mapping": mapping, "quote_currencies": quote_currencies})
+                or len(set(mapping.values())) != len(mapping)):
+            raise RuntimeError("Prospective account or mapping binding mismatch")
+        opening = captures["broker"]
+        destination = captures["destination"]
+        target = destination["account"]
+        cutover = datetime.fromisoformat(broker_instant(manifest["cutover"]))
+        started = datetime.fromisoformat(broker_instant(opening["fetch_started_at"]))
+        fetched = datetime.fromisoformat(broker_instant(opening["fetched_at"]))
+        captured = datetime.fromisoformat(broker_instant(destination["captured_at"]))
+        if (cutover != fetched or not started <= captured <= fetched
+                or fetched - started > timedelta(minutes=5)
+                or target["id"] != config["target_account"]):
+            raise RuntimeError("Unproved prospective opening capture interval")
+        cash = current_cash_balance(opening, target, config["source_account"], now=fetched)
+        if financial_decimal(target["balance"]) != financial_decimal(cash):
+            raise RuntimeError("Prospective opening cash mismatch")
+        rows, quantities = existing_activity_context(destination["activities"], target)
+        protected = {}
+        for row in rows:
+            if row["accountId"] != target["id"]:
+                continue
+            instant = datetime.fromisoformat(broker_instant(row["date"]))
+            if instant > started:
+                raise RuntimeError("Concurrent prospective destination opening event")
+            if row["type"] in ("BUY", "SELL") and row["currency"] != quote_currencies.get(row["symbol"]):
+                raise RuntimeError("Unverified prospective destination holding currency")
+            protected[row["id"]] = evidence_digest({
+                "signature": [str(value) for value in activity_signature(row)],
+                "id": row["id"]})
+        for row in opening["transactions"] + opening["cash_movements"]:
+            if datetime.fromisoformat(broker_instant(row["date"])) > started:
+                raise RuntimeError("Concurrent prospective broker opening event")
+        if nonzero_holdings(quantities) != broker_stock_holdings(
+                opening, target, mapping, quote_currencies):
+            raise RuntimeError("Prospective opening holdings mismatch")
+        return {"cutover": cutover, "opening": opening, "protected": protected,
+                "quantities": quantities, "cash": cash, "basis_status": "unverified"}
+    except (KeyError, TypeError, AttributeError, ValueError):
+        raise RuntimeError("Incomplete prospective opening evidence") from None
+
+
+def prospective_statement_matches(snapshot):
+    """Exact raw cash multiset corroboration; no inference from CSV minute proximity."""
+    header = ["Date", "Heure", "Date de", "Produit", "Code ISIN", "Description",
+              "FX", "Mouvements", "", "Solde", "", "ID Ordre"]
+    try:
+        text = snapshot["account_report_csv"]
+        rows = list(csv.reader(io.StringIO(text)))
+        if not rows or rows[0] != header:
+            raise RuntimeError("Unverified prospective statement header")
+        statement = []
+        for row in rows[1:]:
+            if len(row) != 12:
+                raise RuntimeError("Unverified prospective statement row")
+            datetime.strptime(row[0], "%d-%m-%Y")
+            datetime.strptime(row[1], "%H:%M")
+            datetime.strptime(row[2], "%d-%m-%Y")
+            statement.append((row[0], row[1], row[2], row[4], row[5], row[7],
+                financial_decimal(row[8].replace(",", ".")) if row[8] else None, row[11]))
+        source = []
+        for row in snapshot["cash_movements"]:
+            instant = datetime.fromisoformat(broker_instant(row["date"]))
+            # Preserve the broker offset for the separately corroborated statement clock.
+            local = datetime.fromisoformat(row["date"])
+            value = datetime.fromisoformat(broker_instant(row["valueDate"]))
+            local_value = datetime.fromisoformat(row["valueDate"])
+            product = snapshot["products"].get(str(row.get("productId")), {})
+            source.append((local.strftime("%d-%m-%Y"), local.strftime("%H:%M"),
+                local_value.strftime("%d-%m-%Y"), product.get("isin", ""), row["description"],
+                row.get("currency", "") if row.get("change") is not None else "",
+                financial_decimal(row["change"]) if row.get("change") is not None else None,
+                str(row.get("orderId") or "")))
+        if Counter(source) != Counter(statement):
+            raise RuntimeError("Prospective statement coverage mismatch")
+        return len(source)
+    except (KeyError, TypeError, ValueError, AttributeError):
+        raise RuntimeError("Incomplete prospective statement evidence") from None
+
+
+def prospective_execution_cash(snapshot):
+    """Both feeds must expose each execution once with exact signed trade cash."""
+    ledger = classify_cash_movements(snapshot["cash_movements"])["executed_trade_cash"]
+    remaining = list(ledger)
+    for trade in snapshot["transactions"]:
+        product = snapshot["products"][broker_identity(trade["productId"])]
+        candidates = [row for row in remaining
+            if broker_identity(row.get("productId")) == broker_identity(trade["productId"])
+            and broker_instant(row["date"]) == broker_instant(trade["date"])
+            and row["currency"] == product["currency"]
+            and financial_decimal(row["change"]) == financial_decimal(trade["total"])
+            and row["description"].startswith("Achat " if trade["buysell"] == "B" else "Vente ")
+            and (trade.get("orderId") is None or row.get("orderId") == trade["orderId"])]
+        if len(candidates) != 1:
+            raise RuntimeError("Unproved prospective execution cash relation")
+        remaining.remove(candidates[0])
+    if remaining:
+        raise RuntimeError("Prospective cash execution missing from trade feed")
+
+
+def prospective_snapshot(config, snapshot, target, existing_body, mapping, quotes):
+    """Reconcile a full interval from a fixed cutover; never relabel full history."""
+    try:
+        evidence = load_prospective_evidence(config["cutover_manifest"], config["cutover_sha256"])
+        context = prospective_opening_context(evidence, config, mapping, quotes)
+        cutover, opening = context["cutover"], context["opening"]
+        if (broker_identity(snapshot["source_account"]) != broker_identity(config["source_account"])
+                or target["id"] != config["target_account"]):
+            raise RuntimeError("Prospective source or target mismatch")
+        fetched = datetime.fromisoformat(broker_instant(snapshot["fetched_at"]))
+        # Full replay since cutover deliberately avoids a mutable coverage checkpoint.
+        boundary = cutover.astimezone(ZoneInfo("Europe/Zurich")).date()
+        if (snapshot["from_date"] != opening["from_date"]
+                or date.fromisoformat(snapshot["to_date"]) < fetched.astimezone(ZoneInfo("Europe/Zurich")).date()
+                or date.fromisoformat(opening["from_date"]) > boundary
+                or date.fromisoformat(opening["to_date"]) < boundary or fetched < cutover):
+            raise RuntimeError("Incomplete prospective interval coverage")
+        check_api_import_format(snapshot)
+        snapshot = dict(snapshot)
+        for collection in ("transactions", "cash_movements"):
+            unique = []
+            merge_history(unique, snapshot[collection], cash=collection == "cash_movements")
+            snapshot[collection] = unique
+        prospective_statement_matches(snapshot)
+        rows, destination_quantities = existing_activity_context(existing_body, target)
+        protected = context["protected"]
+        present = {}
+        prospective_existing = []
+        for row in rows:
+            if row["accountId"] != target["id"]:
+                prospective_existing.append(row)
+                continue
+            if datetime.fromisoformat(broker_instant(row["date"])) <= cutover:
+                present[row["id"]] = evidence_digest({
+                    "signature": [str(value) for value in activity_signature(row)], "id": row["id"]})
+            else:
+                prospective_existing.append(row)
+        if present != protected:
+            raise RuntimeError("Protected prospective legacy history changed")
+        result = dict(snapshot)
+        result["history_completeness_verified"] = False
+        for collection in ("transactions", "cash_movements"):
+            before = opening[collection]
+            actual = [row for row in snapshot[collection]
+                if datetime.fromisoformat(broker_instant(row["date"])) <= cutover]
+            def signatures(items):
+                return Counter(evidence_digest({key: value for key, value in row.items()
+                    if collection != "cash_movements" or key != "balance"}) for row in items)
+            if signatures(before) != signatures(actual):
+                raise RuntimeError("Late or changed pre-cutover source event")
+            result[collection] = [row for row in snapshot[collection]
+                if datetime.fromisoformat(broker_instant(row["date"])) > cutover]
+            for row in result[collection]:
+                instant = datetime.fromisoformat(broker_instant(row["date"]))
+                if instant > fetched:
+                    raise RuntimeError("Future prospective source event")
+                if collection == "cash_movements" and row.get("change") is not None:
+                    value = datetime.fromisoformat(broker_instant(row["valueDate"]))
+                    if value <= cutover or value > fetched:
+                        raise RuntimeError("Ambiguous prospective value-date boundary")
+        prospective_execution_cash(result)
+        activities = normalize_trades(result, target["id"], mapping, quotes)
+        activities += normalize_dividends(result, target["id"], mapping, quotes)
+        activities += normalize_fees(result, target["id"])
+        activities += normalize_cash_yield(result, target["id"])
+        if any(datetime.fromisoformat(activity["date"]).microsecond % 1000 for activity in activities):
+            raise RuntimeError("Prospective date precision cannot be represented by Ghostfolio")
+        # Every existing post-cutover target row must be evidenced by this full replay.
+        pending_activities(activities, prospective_existing, target, config["source_account"])
+        known = {row["comment"]: activity_signature(row) for row in activities}
+        for row in prospective_existing:
+            if row["accountId"] == target["id"] and (
+                    row.get("comment") not in known or known[row["comment"]] != activity_signature(row)):
+                raise RuntimeError("Unproved post-cutover destination activity")
+        expected = dict(context["quantities"])
+        for activity in activities:
+            if activity["type"] in ("BUY", "SELL"):
+                key = (target["id"], activity["symbol"])
+                expected[key] = expected.get(key, Decimal(0)) + financial_decimal(activity["quantity"]) * (
+                    1 if activity["type"] == "BUY" else -1)
+        if nonzero_holdings(expected) != broker_stock_holdings(snapshot, target, mapping, quotes):
+            raise RuntimeError("Prospective broker holdings do not reconcile")
+        result["prospective_verified"] = True
+        return result, prospective_existing, destination_quantities, context
+    except (KeyError, TypeError, ValueError, AttributeError):
+        raise RuntimeError("Incomplete prospective account evidence") from None
+
+
+def verified_mapping_document(document):
+    """One mapping contract shared by runtime and offline cutover preparation."""
+    try:
         if not isinstance(document, dict) or not document:
             raise ValueError
         mapping, quotes = {}, {}
@@ -1127,17 +1468,41 @@ def load_sync_config():
             if symbol in quotes and quotes[symbol] != currency:
                 raise ValueError
             mapping[isin], quotes[symbol] = symbol, currency
+        return mapping, quotes
+    except (ValueError, TypeError, KeyError):
+        raise RuntimeError("Invalid explicitly verified Yahoo mapping file") from None
+
+
+def load_sync_config():
+    """Operator configuration only; credentials are read verbatim from environment."""
+    sync_mode = os.environ.get("SYNC_MODE", "full_history")
+    if sync_mode not in ("full_history", "prospective"):
+        raise RuntimeError("Invalid synchronization mode")
+    host = validate_ghost_host(os.environ.get("GHOST_HOST"))
+    token = os.environ.get("GHOST_TOKEN")
+    target = os.environ.get("GHOST_ACCOUNT_ID")
+    source = broker_identity(os.environ.get("DEGIRO_ACCOUNT_ID"))
+    mode = os.environ.get("DRY_RUN", "1").strip().lower()
+    if (not isinstance(token, str) or not token.strip() or "\r" in token or "\n" in token
+            or not isinstance(target, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", target)
+            or mode not in ("1", "true", "yes", "on", "0", "false", "no", "off")):
+        raise RuntimeError("Invalid Ghostfolio sync environment")
+    try:
+        document = yaml.safe_load(Path(os.environ.get("MAPPING_FILE", "mapping.yaml")).read_text())
+        mapping, quotes = verified_mapping_document(document)
     except (OSError, ValueError, TypeError, KeyError, yaml.YAMLError):
         raise RuntimeError("Invalid explicitly verified Yahoo mapping file") from None
     return {"ghost_host": host, "ghost_token": token, "source_account": source,
             "target_account": target, "dry_run": mode in ("1", "true", "yes", "on"),
-            "state_dir": os.environ.get("STATE_DIR")}, mapping, quotes
+            "state_dir": os.environ.get("STATE_DIR"), "sync_mode": sync_mode,
+            "cutover_manifest": os.environ.get("CUTOVER_MANIFEST"),
+            "cutover_sha256": os.environ.get("CUTOVER_SHA256")}, mapping, quotes
 
 
 def run_sync(from_date, to_date, window_days=90):
     """One broker read and complete target read; no completeness assertion invented."""
     config, mapping, quotes = load_sync_config()
-    if config["dry_run"]:
+    if config["dry_run"] and config.get("sync_mode") != "prospective":
         return run_sync_locked(config, mapping, quotes, from_date, to_date, window_days)
     with account_journal(config) as journal:
         if journal["document"]["pending"] is not None:
@@ -1147,7 +1512,15 @@ def run_sync(from_date, to_date, window_days=90):
 
 def run_sync_locked(config, mapping, quotes, from_date, to_date, window_days, journal=None):
     """Live lock covers source/target reads as well as dispatch."""
-    snapshot = read_degiro(from_date, to_date, window_days)
+    if config.get("sync_mode") == "prospective":
+        evidence = load_prospective_evidence(config["cutover_manifest"], config["cutover_sha256"])
+        context = prospective_opening_context(evidence, config, mapping, quotes)
+        from_date = date.fromisoformat(context["opening"]["from_date"])
+        to_date = max(to_date, datetime.now(ZoneInfo("Europe/Zurich")).date())
+        snapshot = read_degiro(from_date, to_date, window_days,
+            report_locale=("fr", "fr"), holdings=True)
+    else:
+        snapshot = read_degiro(from_date, to_date, window_days)
     expected_target = {"id": config["target_account"], "currency": snapshot["account_info"]["baseCurrency"]}
     with ghost_transport(config, expected_target) as session:
         response = session.get(f"{config['ghost_host']}/api/v1/account/{config['target_account']}")
@@ -1339,7 +1712,8 @@ def history_product_ids(rows):
     return sorted(result)
 
 
-def read_degiro(from_date, to_date, window_days=90, report_locale=None, orders=False):
+def read_degiro(from_date, to_date, window_days=90, report_locale=None, orders=False, holdings=False,
+                cutover_target_reader=None):
     """Fetch raw private data with one login and guaranteed bounded logout attempt."""
     from degiro_connector.trading.actions.action_connect import ActionConnect
     from degiro_connector.trading.actions.action_get_client_details import ActionGetClientDetails
@@ -1431,6 +1805,24 @@ def read_degiro(from_date, to_date, window_days=90, report_locale=None, orders=F
                            ("portfolio", "totalPortfolio", "cashFunds"))):
                 raise RuntimeError("Invalid DEGIRO update response")
             data["update"] = update
+            if holdings:
+                held = []
+                for row in cash_wrapper_rows(update, "portfolio"):
+                    identity = row.get("id")
+                    if isinstance(identity, str) and identity.startswith("FLATEX_"):
+                        continue
+                    held.append(int(broker_identity(identity)))
+                missing = sorted(set(held) - {int(identity) for identity in data["products"]})
+                stage = "products"
+                for offset in range(0, len(missing), 100):
+                    requested = missing[offset:offset + 100]
+                    products = broker_call(ActionGetProductsInfo.get_products_info,
+                        product_list=requested, raw=True, **shared)
+                    if (not isinstance(products, dict) or not isinstance(products.get("data"), dict)
+                            or any(not isinstance(products["data"].get(str(identity)), dict)
+                                   for identity in requested)):
+                        raise RuntimeError("Missing held DEGIRO product metadata")
+                    data["products"].update(products["data"])
             if report_locale:
                 stage = "account_report"
                 report = broker_call(ActionGetAccountReport.get_cash_account_report,
@@ -1441,6 +1833,9 @@ def read_degiro(from_date, to_date, window_days=90, report_locale=None, orders=F
                         or report.lstrip().startswith("<")):
                     raise RuntimeError("Invalid DEGIRO CSV report response")
                 data["account_report_csv"] = report
+            if cutover_target_reader is not None:
+                stage = "cutover_destination"
+                data["opening_destination"] = cutover_target_reader()
         except Exception as error:
             reason = getattr(session, "degiro_diagnostics", {}).get("auth_reason")
             if str(error) in API_FORMAT_ERRORS.values():
@@ -1525,6 +1920,9 @@ def main(argv=None):
             result = run_sync(start, end, args.window_days)
             log.info("Sync %s: %d proposed activities, %d accepted", "DRY_RUN" if result["dry_run"] else "live",
                      len(result["proposed"]), len(result["accepted"]))
+            if result.get("prospective_verified") is True:
+                log.info("Prospective contract verified; historical completeness and basis remain unverified")
+                return 0
             if not result["history_verified"]:
                 log.warning("History completeness is unverified; live writes remain blocked")
                 return 1
@@ -1541,11 +1939,11 @@ def main(argv=None):
     except Exception as error:
         if args.sync:
             message = str(error)
-            log.error("%s", message if message in API_FORMAT_ERRORS.values() else
+            log.error("%s", message if message in API_FORMAT_ERRORS.values() or message in PROSPECTIVE_FAILURES else
                       "DEGIRO sync failed; unknown, incomplete or uncertain account state blocks writes")
             return 1
         stages = ("login", "client_discovery", "transactions", "account_overview", "products",
-                  "account_info", "account_update", "account_report", "order_history")
+                  "account_info", "account_update", "account_report", "order_history", "cutover_destination")
         messages = {f"DEGIRO read failed at {stage}; no financial writes attempted" for stage in stages}
         messages.add("DEGIRO logout failed")
         messages.update(API_FORMAT_ERRORS.values())
