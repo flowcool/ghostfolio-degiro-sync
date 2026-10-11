@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: degirolab
       POSTGRES_USER: degirolab
-      POSTGRES_PASSWORD: ${LAB_POSTGRES_PASSWORD:?Inject lab secret from SOPS}
+      POSTGRES_PASSWORD: ${LAB_POSTGRES_PASSWORD:?Set dedicated lab secret}
     volumes: [postgres:/var/lib/postgresql/data]
     networks: [lab]
     healthcheck:
@@ -22,11 +22,11 @@ services:
     image: ${LAB_GHOST_IMAGE:?Set reviewed lab fixture image}
     restart: unless-stopped
     labels:
-      io.flowcool.degiro-lab: persistent-v1
+      org.ghostfolio.degiro-lab: persistent-v1
     environment:
-      DATABASE_URL: ${LAB_DATABASE_URL:?Inject matching lab database URL from SOPS}
-      ACCESS_TOKEN_SALT: ${LAB_ACCESS_TOKEN_SALT:?Inject lab secret from SOPS}
-      JWT_SECRET_KEY: ${LAB_JWT_SECRET_KEY:?Inject lab secret from SOPS}
+      DATABASE_URL: ${LAB_DATABASE_URL:?Set matching lab database URL}
+      ACCESS_TOKEN_SALT: ${LAB_ACCESS_TOKEN_SALT:?Set dedicated lab secret}
+      JWT_SECRET_KEY: ${LAB_JWT_SECRET_KEY:?Set dedicated lab secret}
       NODE_ENV: production
       REDIS_HOST: redis
       REDIS_PORT: "6379"

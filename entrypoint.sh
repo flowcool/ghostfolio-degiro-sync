@@ -2,6 +2,9 @@
 set -eu
 
 if [ "$#" -gt 0 ]; then
+    if [[ "$1" == --* ]]; then
+        exec python /app/degiro_to_ghostfolio.py "$@"
+    fi
     exec "$@"
 fi
 

@@ -1,17 +1,14 @@
 # Observed DEGIRO contract
 
-This extends the inspected connector contract in the approved plan. It describes
-read-only evidence from 2026-10-08, not a guarantee of undocumented API behavior.
-Private financial evidence stays outside Git. `cash-rules.yaml` owns repeated
-classification strings; unexpected categories or ambiguity always block writes.
+This documents the supported adapter contract, backed by pinned connector source
+and synthetic regressions. The private API can change without notice.
+`cash-rules.yaml` owns classifications; unexpected or ambiguous data blocks writes.
 
 ## Authentication and raw data
 
-Unattended TOTP from the provisioned SOPS environment was verified. A bounded
-session must preserve `degiro_connector.core.constants.headers.HEADERS` exactly.
-Plain requests defaults on agentvm were redirected to `/myracloud-blocked/`.
-The canonical connector headers restored login without following a redirect.
-Login exceptions and diagnostics expose fixed codes only, never HTTP bodies.
+Each execution obtains broker username/password/TOTP from the configured vault.
+The bounded broker session retains canonical connector headers and approved exact
+origins, refuses redirects and exposes fixed diagnostics instead of raw responses.
 
 The raw `cashMovements` fields observed include `id`, `type`, `description`,
 `currency`, `change`, `date`, `valueDate`, `balance`, optional `productId`,
@@ -22,25 +19,14 @@ use it as the current balance. All financial event fields must still agree.
 
 ## History and statement comparison
 
-A single366-day window and overlapping90-day windows yielded identical sets of
-3 execution IDs and88 cash IDs. Execution bodies matched exactly. Fourteen cash
-rows differed only in derived `balance`. A same-day request returned the expected
-one execution and six cash rows, proving both boundaries include that observed day.
-No pagination, arbitrary look-back limit or absence of server truncation is proven.
-No orders were returned for that year despite three executions: order history is
-not a reliable substitute for executed-transaction history in backfill.
+Window overlap compares stable IDs and exact financial fields, excluding only
+derived cash `balance`. Cash statements use local offset timestamps and minute
+precision, and UTF-8 decoding is validated. Order history is diagnostic and cannot
+establish execution completeness. Cash-sweep annotations without amounts remain
+distinct from cash-only signed sweep transfers. Private account history is not
+community compatibility evidence or a proof of global broker retention limits.
 
-The separate CSV statement contained the same88 movements. Its timestamps match
-the API's local offset timestamps (+01:00/+02:00), at minute precision; do not
-silently reinterpret them as UTC. Value date, descriptions, product ISIN and order
-reference agree. The CSV has UTF-8 bytes without a declared charset, so the
-transport explicitly validates UTF-8 and sets the decoding before connector use.
-Virement sweep annotations have no amount and blank CSV currency despite an API
-currency value. Degiro Cash Sweep Transfer rows carry signed amounts and CSV
-currency; they are cash-only movements, not nonfinancial notices. One trade differs by exactly one cent in the two cash views;
-unrounded execution price times absolute quantity lies within one cent of both.
-Florent explicitly approved this observed rounding on2026-10-10. The current
-prospective checks permit a difference of at most0.01 only for uniquely associated
+The prospective checks permit a difference of at most0.01 only for uniquely associated
 STOCK execution cash in a supported cent-valued currency, with contract size1.
 Declared execution total, API cash and CSV amounts must remain within0.01 of each
 other and of signed unrounded quantity times price; API/CSV amounts must be
@@ -51,58 +37,17 @@ this approval does not authorize arbitrary financial discrepancies.
 
 See [history reach and request limits](degiro-history-limits.md) for the
 distinction between observed historical access, unpublished broker limits and
-repository policies, including the later 2026 YTD comparison.
+repository policies.
 
 ## Extended historical read-only characterization
 
-A direct operator collection requested 2000-01-01..2026-10-08 in overlapping
-366-day windows, then reread the occupied 2019-04-25..2026-10-08 span in overlapping
-90-day windows. Both requests returned the same full authenticated CSV statement.
-Private archives live outside project repositories under
-`~/.local/share/ghostfolio-degiro-sync/history/`, with directories 0700, files 0600,
-per-response captures, a decoded UTF-8 CSV and SHA256 manifests. Authentication
-responses, headers, session URLs and client-details responses were not archived.
-
-The earliest observed movement was 2019-04-25 and the latest 2026-10-06.
-Nineteen annual pre-activity overview windows returned HTTP 200 with `data: {}`,
-without `cashMovements`. At that characterization's revision, the runtime
-rejected this missing collection. A temporary read-only collector preserved those
-envelopes and continued collection; it did not change that runtime or authorize
-synchronization. The current parser accepts only the exact cash-overview
-`data: {}` envelope as an empty collection; other malformed envelopes still fail.
-Empty ancient windows do not establish unlimited look-back or account inception.
-
-Across both widths, all 70 complete executed-transaction bodies agree. The 1,001
-cash rows with nonzero IDs also agree exactly after excluding the already observed
-window-derived `balance`. However, legacy `CASH_FUND_NAV_CHANGE` rows all have ID
-`0`: the annual capture contains 339 distinct bodies, the split capture 318.
-Of these, 150 annual-only and 129 split-only bodies differ between widths; every
-such difference is a 2019/2020 NAV event. These are not stable independently
-identifiable activity records. Never collapse them by ID, invent broker IDs,
-ignore their financial changes or infer an import policy from type alone.
-The strict runtime overlap check blocks distinct rows sharing ID `0`.
-
-The full CSV has 1,366 rows after its header, including three undated footer rows.
-An exact multiset comparison of date/minute, value date, ISIN, description,
-movement currency/amount and order reference matches 1,254 API rows. Another 83
-unique pairs differ by exactly one cent (81 NAV rows, two executed-trade cash rows);
-three pairs agree on those fields except description. The CSV also contains 23
-additional zero-valued NAV rows. These findings are recorded discrepancies, not
-accepted NAV rounding or description-normalization rules. The later bounded
-execution-rounding approval does not apply to these unstable fund records. No
-successful full-historical statement reconciliation or complete-history flag is
-claimed.
-
-Annual order history also contains a repeated order identity with changed content;
-order snapshots remain diagnostic, never executed-activity identities. Temporary
-merged diagnostic snapshots can contain extra rows after a partial failed merge.
-Their counts are not authoritative: comparisons above use the preserved individual
-window responses and exact body sets, with no broker mutation or Ghostfolio request.
-
-The fresh direct export enables a new source-pinned CSV transition investigation;
-it cannot recover the exact producer or omitted input of an old July backfill.
-Unsupported legacy fund behavior remains outside the approved import policy,
-alongside the interest/compensation gate. History verification remains false.
+The exact cash-overview `data: {}` envelope is accepted as an empty collection;
+other missing/malformed shapes fail. Empty historical windows do not establish
+account inception or unlimited retention. Legacy `CASH_FUND_NAV_CHANGE` records
+may share ID0 and differ across windows; the overlap guard refuses distinct rows
+with the same identity. Never invent IDs, ignore financial changes or apply the
+execution-cent tolerance to unstable fund records. Full-history completeness and
+basis remain unverified until independently proved for the actual account.
 
 ## Cash taxonomy and dividend association
 
@@ -161,42 +106,13 @@ and nonpositive FX rates produce separate incompatible-contract errors. A zero
 rate is not automatically evidence that an API response is old.
 
 Errors are fixed strings, preserved through the sanitized broker reader and both
-CLI modes. Unknown envelopes, including ancient `data: {}`, are never converted
-to empty history. Known legacy detection stops before merging cash events or any
+CLI modes. Only the exact cash-overview `data: {}` envelope is an empty cash
+collection; other unknown envelopes are never converted to empty history. Known legacy detection stops before merging cash events or any
 financial dispatch; preflight still validates the entire account afterward for
 compatible shapes. No missing amount, identity, currency or rate is synthesized.
 Read-only diagnostics still guarantee logout and retain credential privacy.
 Future historical support is separately tracked; these messages do not broaden
 import support or authorize a cash/category exception.
-
-## Historical scope extension findings
-
-The full raw-window stable set contains 110 paid dividend rows and 112 withholding
-rows. Exact product/currency/payment/value-date grouping yields 95 unique pairs.
-The remaining groups contain 15 payment-only rows, 13 tax-only singletons and two
-tax-only double groups. Nine payment-only rows have exactly one same-product,
-same-currency, same-calendar-day candidate with equal value date: eight timestamps
-differ by one second and one by four seconds. Each candidate/payment appears
-exactly once with its own financial fields in the retained CSV, at the same local
-minute. This corroborates the recorded rows, not an explicit payment reference.
-Five payments have no same-day withholding candidate and all use HKD; one has two
-candidates. Five isolated withholding rows are positive. The current exact-match,
-missing-tax and reversal guards remain intact; no tax is inferred or summed.
-
-A separate offline per-execution arithmetic diagnostic used placeholder symbols
-and broker currencies, not independently verified Yahoo quotes. Of 70 STOCK
-executions (41 BUY, 29 SELL), 34 passed the existing converter. The other outcomes
-were 18 invalid FX rates, three flagged transfers, five absent/invalid financial
-values, six uncharacterized currency-unit cases and four inconsistent side/sign
-cases. These are refusal outcomes, not diagnosed financial errors or permission
-to synthesize missing values. The source currencies were EUR, USD, JPY and CAD.
-No holding, quote mapping, full-source acceptance or financial write was proved.
-
-The broader stable ledger contains 16 Flatex interest rows, all zero, and one
-positive monetary-fund compensation. Unknown legacy fund events and every existing
-unsupported category still block the whole account. A follow-up policy proposal
-is separate from the approved implementation; it must be reviewed before changing
-these boundaries. See [the proposed contract extension](plans/history-contract-extension.md).
 
 ## Current cash
 
@@ -204,7 +120,7 @@ these boundaries. See [the proposed contract extension](plans/history-contract-e
 `portfolio`, `totalPortfolio`, `cashFunds`, each with a `value` list. The named
 `totalPortfolio` values include `totalCash`, `degiroCash`, `flatexCash` and
 `pendingSettlement`. Observed `totalCash = degiroCash + flatexCash`; `degiroCash`
-is zero in this account. The EUR cash-fund value and `FLATEX_EUR` pseudo-position
+must be zero under the supported EUR cash contract. The EUR cash-fund value and `FLATEX_EUR` pseudo-position
 size both equal `totalCash`: these are cross-checks, not extra amounts to sum.
 Adding them would double-count cash. Other currencies are not converted silently.
 `cryptoTotalCash` also equals `totalCash` in the observed response and is an
@@ -274,8 +190,7 @@ Pending executions are applied chronologically with no quantity epsilon; any
 negative position blocks the batch. A nearby manual trade of the same account,
 symbol and side blocks explicit reconciliation, regardless of quantity. Date
 proximity never creates a broker identity in full-history/prospective modes.
-For rolling mode, Florent explicitly adopted the IBKR manual matching rules on
-2026-10-10: closest same-account/symbol/side trade within2days and quantity
+Rolling mode applies the reviewed IBKR manual matching rules: closest same-account/symbol/side trade within2days and quantity
 difference below0.001 is consumed once; same-account/symbol dividend within3days
 is treated as represented. Canonical identities still require exact financial
 content. See [the rolling contract](prospective-sync.md) for limits; these
@@ -301,7 +216,7 @@ movement/currency fields. `cash_sweep_transfer` describes signed Degiro Cash Swe
 Transfer movements, which stay cash-only. These keys correct the initial inverted
 neutral-sweep interpretation. Any future annotation with a financial amount blocks
 classification. Observed zero-valued Flatex interest is still recognized as an
-unsupported account-level blocker; zero is not an exemption from Florent's policy.
+unsupported account-level blocker; zero is not an exemption from the supported policy.
 
 A dividend and withholding must form a unique group on product, currency and exact
 offset-aware payment/value-date instants. Multiple same-day payments at different

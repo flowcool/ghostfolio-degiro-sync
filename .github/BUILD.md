@@ -10,10 +10,23 @@ CodeQL analyzes Python independently. Dependency Review rejects newly introduced
 moderate or worse dependency vulnerabilities, including development scope.
 Required checks must pass before merging.
 
-PR builds never log in to a registry or publish images, and no image publication
-workflow exists yet: GHCR publication, the `main`-only `latest` tag and the weekly
-no-cache rebuild used by the IBKR repository are introduced with the packaging
-and deployment phase, with their own review. Nothing here deploys anything.
+PR builds never log in to a registry or publish images. `release-image.yml`
+publishes only a published semantic-version GitHub Release whose tag is on main.
+Its serialized preflight requires authenticated registry access and proves that
+the version tag is absent; existing tags and ambiguous registry failures abort.
+Each native architecture is built, scanned and smoke-tested before publishing by
+digest with SBOM and build provenance. The final job checks the version guard
+again, assembles the two digests, verifies amd64/arm64 and records the manifest.
+Only the current stable release can update `latest`; prereleases cannot do so.
+A release rerun never silently overwrites an existing version. Runtime code,
+Bitwarden artifacts and architecture checksums remain pinned. No workflow deploys.
+
+Community Compose pulls a published version or digest. Contributor builds use
+`compose.build.yaml`; they do not publish. Capture the currently installed
+RepoDigest before an upgrade, stop the scheduler, change DEGIRO_IMAGE, pull and
+recreate; restore that saved digest to roll back. Preserve mapping and the complete
+state/journal directory. Source/image rollback never undoes financial records.
+See the root README for operator commands.
 
 Runtime requirements pin the complete dependency closure. Dependabot proposes
 weekly Python, Actions and Docker updates (a Python release is proposed once 14

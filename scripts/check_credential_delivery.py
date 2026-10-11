@@ -18,8 +18,8 @@ import uuid
 
 import yaml
 
-LOADER_SHA256 = 'f605a539aa0348cc82d161861d5630d381c23db52a513cb4bbc65bcebd8ecc51'
-BROKER_KEYS = ('DEGIRO_USERNAME', 'DEGIRO_PASSWORD', 'DEGIRO_TOTP_SECRET')
+LOADER_SHA256 = '02ad9a6893aca7a69c64f7db2c15747edf4b7331025410d04146a486afae9d16'
+BROKER_KEYS = ('BW_CLIENTID', 'BW_CLIENTSECRET', 'BW_PASSWORD', 'BW_ITEM_ID')
 GHOST_KEYS = ('GHOST_TOKEN', 'GHOST_ACCESS_TOKEN')
 SECRET_KEYS = (*BROKER_KEYS, *GHOST_KEYS)
 LABEL = 'org.ghostfolio.degiro.credential-lab'
@@ -65,11 +65,7 @@ def loader_fixture(loader, directory, generation=1, failure=None, ghost_key='GHO
         decrypted += b'\nEXTRA=SYNTHETIC-EXTRA'
 
     def decrypt(command, **kwargs):
-        ensure(command == ['docker', 'run', '--rm', '-i', '-u',
-            str(os.getuid()) + ':' + str(os.getgid()), '-v',
-            '/etc/komodo-secrets/age-agentvm.key:/k:ro', '-e', 'SOPS_AGE_KEY_FILE=/k',
-            'ghcr.io/getsops/sops:v3.13.3', 'decrypt', '--input-type', 'dotenv',
-            '--output-type', 'dotenv', '/dev/stdin'])
+        ensure(command == ['synthetic-secret-provider'])
         ensure(kwargs == {'input': b'SYNTHETIC-ENCRYPTED-INPUT',
                          'capture_output': True, 'timeout': 60})
         if failure == 'timeout':

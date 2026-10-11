@@ -1,7 +1,7 @@
 # Existing Ghostfolio network; run once by default, CRON is opt-in.
 services:
   degiro-sync:
-    image: ${DEGIRO_IMAGE:?Set the reviewed immutable DEGIRO image}
+    image: ${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:v0.2.0}
     restart: "no"
     user: "10001:10001"
     read_only: true
@@ -9,12 +9,14 @@ services:
     security_opt: [no-new-privileges:true]
     tmpfs: ["/tmp:rw,nosuid,nodev,size=32m"]
     environment:
-      DEGIRO_USERNAME:
-      DEGIRO_PASSWORD:
-      DEGIRO_TOTP_SECRET:
-      GHOST_TOKEN:
-      GHOST_ACCESS_TOKEN:
-      GHOST_HOST: http://ghostfolio:3333
+      BW_SERVER: ${BW_SERVER:-https://vault.bitwarden.com}
+      BW_CLIENTID: ${BW_CLIENTID:-}
+      BW_CLIENTSECRET: ${BW_CLIENTSECRET:-}
+      BW_PASSWORD: ${BW_PASSWORD:-}
+      BW_ITEM_ID: ${BW_ITEM_ID:-}
+      GHOST_TOKEN: ${GHOST_TOKEN:-}
+      GHOST_ACCESS_TOKEN: ${GHOST_ACCESS_TOKEN:-}
+      GHOST_HOST: ${GHOST_HOST:-http://ghostfolio:3333}
       DEGIRO_ACCOUNT_ID: ${DEGIRO_ACCOUNT_ID:?Set source account}
       GHOST_ACCOUNT_ID: ${GHOST_ACCOUNT_ID:?Set target account}
       MAPPING_FILE: /config/mapping.yaml
@@ -24,16 +26,16 @@ services:
       DRY_RUN: ${DRY_RUN:-1}
       TZ: Europe/Zurich
       CRON: ${CRON:-}
-      APPRISE_URLS:
+      APPRISE_URLS: ${APPRISE_URLS:-}
       APPRISE_TIMEOUT: ${APPRISE_TIMEOUT:-10}
     volumes:
       - type: bind
-        source: ${DEGIRO_MAPPING_PATH:?Set existing mapping file}
+        source: ${DEGIRO_MAPPING_PATH:-./mapping.yaml}
         target: /config/mapping.yaml
         read_only: true
         bind: {create_host_path: false}
       - type: bind
-        source: ${DEGIRO_STATE_PATH:?Set existing private state directory}
+        source: ${DEGIRO_STATE_PATH:-./state}
         target: /state
         bind: {create_host_path: false}
     networks: [ghostfolio]

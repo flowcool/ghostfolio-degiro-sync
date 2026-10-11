@@ -1,0 +1,9 @@
+# Contributor-only overlay; community deployment uses the published image.
+services:
+  degiro-sync:
+    image: ghostfolio-degiro-sync:local
+    pull_policy: build
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}

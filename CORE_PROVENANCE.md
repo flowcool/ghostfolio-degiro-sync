@@ -86,7 +86,7 @@ permissions and runs weekly as well as on PR, push and manual dispatch.
 
 4. Review tests and adapter assumptions affected by the source changes. Commit the
    pin, generated artifact and any required regression tests together only with
-   Florent's authorization; push/PR publication also requires authorization.
+   the maintainer's authorization; push/PR publication also requires authorization.
    Missing/renamed units fail rather than silently falling back. Never hand-edit
    the guarded core or infer approval from a main-advance warning.
 

@@ -67,6 +67,11 @@ assert hashlib.sha256(Path("/app/scripts/recover_degiro.py").read_bytes()).hexdi
 print("Runtime UID, dependency closure, source-equivalent connector, immutable core and explicit app file set: PASS")
 '''
     print(run(*options, "-i", args.image, "python", "-", input_text=probe).strip())
+    output = run(*options, "-e", "BITWARDENCLI_APPDATA_DIR=/tmp/vault-smoke",
+        args.image, "bw", "--version")
+    version = re.search(r"^ARG BW_VERSION=(.+)$", Path("Dockerfile").read_text(), re.MULTILINE)[1]
+    assert version in output.splitlines()
+    print("Pinned Bitwarden CLI runs non-root in fresh writable temporary state: PASS")
     # Ask the actual scheduler for its next daily run, without broker code or network.
     output = run(*options, "-e", "TZ=Europe/Zurich", args.image, "bash", "-c",
         "printf '15 6 * * * true\\n' > /tmp/timezone-cron; "

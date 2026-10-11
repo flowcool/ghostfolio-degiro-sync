@@ -1,104 +1,23 @@
-# ghostfolio-degiro-sync
+# Repository working agreement
 
-Read [FINDINGS.md](FINDINGS.md) for the reconnaissance handoff, then the approved
-[delivery plan](docs/plans/2026-10-08-degiro-sync.md) and
-[CORE_PROVENANCE.md](CORE_PROVENANCE.md). Beads owns active execution state:
-epic `infra-8tt.56`, metadata `project=ghostfolio-degiro-sync`.
+The supported user deployment is Docker Compose. README.md owns the complete setup and configuration guide. Keep public artifacts provider-portable and free of personal hosts, paths, operator identities and private work-tracker records.
 
-## Architecture
+## Architecture and invariants
 
-- `degiro_to_ghostfolio.py`: DEGIRO fetch, broker-to-activity conversion, identities,
-  existing-activity indexes, mapping, matching, URL policy and orchestration.
-- `ghostfolio_core.py`: immutable broker-agnostic byte projection of the pinned
-  IBKR source. Never hand-edit it or put broker-specific behavior into it.
-- `scripts/check_core.py`: verifies the source projection and signals upstream
-  main changes. `--write` is deliberate regeneration, not automatic propagation.
-- The canonical IBKR sibling is read-only here. Review releases before repinning;
-  do not modify it or extract a shared package. Later adoption of a standalone core in IBKR is separate work.
+- `degiro_to_ghostfolio.py` owns DEGIRO conversion, identities, matching, URL policy, vault retrieval and orchestration.
+- `ghostfolio_core.py` is the immutable byte projection defined in CORE_PROVENANCE.md. Change the adapter, never hand-edit the projection or modify the canonical sibling from this project.
+- Functional Python: module-level functions, no custom classes or type annotations. Every logic change has an offline regression.
+- Runtime dependencies and downloaded binaries are pinned. Pytest and developer tools stay outside the runtime image.
+- Credentials enter through environment variables; the configured vault item supplies broker credentials per execution. Use isolated temporary CLI state, bounded subprocesses and secret-free diagnostics. Broker credentials must come from the vault; direct DEGIRO credential variables are rejected.
+- Read docs/ghostfolio-auth.md before changing authentication or transport. Keep exact credential exclusivity, one token exchange per execution, strict origins, no redirects and no raw response logging.
+- DRY_RUN permits authentication and reads while blocking financial writes. Unknown or ambiguous relevant account data blocks dispatch. Preserve all accounting, identity, coverage and uncertain-result recovery guards.
 
-## Working commands
+## Validation and delivery
 
-```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements-dev.txt
-.venv/bin/python -m pytest -q
-.venv/bin/python scripts/check_core.py --source ../ghostfolio-ibkr-sync --check-main
-```
+See CONTRIBUTING.md for developer commands. Run the full offline suite, core integrity, semantic diff, numstat and whitespace checks before committing. Synthetic tests and lab checks use disposable state without real vault, broker or production credentials.
 
-Local core verification reads the pinned Git blob and local main without changing
-the sibling. CI checks canonical remote main in disposable state. See provenance
-for the exact propagation and rollback procedure.
+Public bug reports and compatibility notices use GitHub Issues. Existing local work-tracker policy is supplied by the execution environment; do not publish private tracker IDs or paths.
 
-## Conventions and gates
+For PR descriptions and merge execution, read `.github/pull_request_template.md`; use `scripts/merge_pr.py` for merges. Required CI and a completed CodeRabbit review must cover the exact final head. Review triggering is managed externally by maintainers; pending, skipped or rate-limited review is not evidence. Record the completed review URL and SHA before guarded merge. Source approval never authorizes production deployment or financial mutations.
 
-Functional Python, no custom classes or type hints. The explicit Option C
-core/adapter split replaces the inherited mono-file convention. Follow
-`.claude/rules/python-conventions.md`, `.claude/rules/security.md` and
-`.claude/rules/delegation.md` (Codex ownership, explicit delegation, infra handoff).
-Runtime dependencies remain pinned; dev-only pytest never ships in the image.
-Every logic change has an offline regression. Pytest forbids network access;
-real read-only characterization is a separate operator procedure.
-
-Credentials come only from `os.environ`, backed by an off-git SOPS store and
-pointer. Before changing authentication, credential injection or recovery, read
-[the auth contract](docs/ghostfolio-auth.md): exactly one of `GHOST_ACCESS_TOKEN`
-(Security Token) or legacy `GHOST_TOKEN` (bearer), one exchange per execution in
-the adapter after local preflight, exact-origin validation and secret-free
-diagnostics. DRY_RUN permits login while financial writes remain blocked.
-Never log credentials, OTP, session data, raw client details or auth responses.
-
-Keep gates C1-C15 from the plan. Unverified cash categories, FX direction, history
-completeness and current-cash semantics remain implementation gates. Unknown or
-ambiguous relevant account data blocks writes. Default operational mode is DRY_RUN;
-production mutations/cleanup/deployment require separate explicit authorization.
-
-Florent explicitly authorized autonomous commits, branches, PRs, merges and
-releases for the approved implementation scope on 2026-10-08. Verify required CI
-and a completed CodeRabbit review covering the exact final head SHA before merging.
-Record the review URL and reviewed SHA in Beads and the PR. Skipped, pending or
-rate-limited reviews are not evidence. Florent manages hourly review triggers
-externally; do not schedule or repeat them here. Production financial mutations,
-cleanup and deployment retain their separate explicit authorization gates.
-
-For PR bodies, including skill-generated bodies, use the compatible sections in
-[the PR template](.github/pull_request_template.md); it also owns the
-guarded merge command and exact-head handoff procedure.
-Use `scripts/merge_pr.py` for merge execution; keep preflight and mutation in that
-single entry point. Existing pytest CI checks Python classes and annotations.
-
-At task start, fetch and inspect current main in an isolated worktree if this
-checkout is on an obsolete branch; preserve unrelated local state. For metadata,
-request selected JSON fields and relevant comments. Save large responses to
-ignored `tmp/` and summarize selected findings instead of printing whole histories
-or HTML error bodies.
-
-## Execution continuity
-
-When Florent requests autonomous execution, carry the agreed scope across task,
-commit and PR boundaries. A completed subtask or a pending external review is a
-progress update, not a reason to end the turn: select the next independently
-actionable authorized task. Do not require another "continue" message. Stop only
-when the authorized scope is complete, indispensable information is unavailable,
-or the next action requires an explicit authorization that has not been granted.
-An explicit pause request wins: finish only the current task when Florent permits
-that completion, reconcile durable state, then pause without selecting more work.
-Before stopping an autonomous run, record completion evidence, Florent's explicit
-pause, or the exact missing input/authorization, recovery attempts and why no
-independent authorized work remains. Unresolved financial semantics still permit
-research, offline characterization and contract proposals. Arm and reconcile the
-shared `autonomous-run` guard as described in global guidance.
-Keep the review-before-merge and production authorization gates above.
-
-## Agent skills
-
-### Issue tracker
-
-Issues are tracked in the shared Beads database, scoped with `project=ghostfolio-degiro-sync`. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-The canonical triage roles use the default label vocabulary. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-This is a single-context repository. See `docs/agents/domain.md`.
+Rollback source changes with an atomic Git revert. Preserve local journals and private captures. Runtime deployment, financial writes, cleanup and destructive recovery require the operator's explicit authorization.
