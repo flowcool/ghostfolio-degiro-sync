@@ -2,6 +2,12 @@
 
 User deployment is supported through Docker Compose only; see README.md. The host interpreter commands below are for development and offline verification.
 
+## Architecture context
+
+Read [docs/architecture.md](docs/architecture.md), [GLOSSARY.md](GLOSSARY.md)
+and the relevant [architecture decisions](docs/adr/) before changing module
+responsibilities, financial execution or recovery.
+
 ## Offline checks
 
 ```sh
