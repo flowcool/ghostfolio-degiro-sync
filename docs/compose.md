@@ -24,6 +24,10 @@ Supply nonsecret settings through the infra configuration mechanism:
 | `DRY_RUN` | Defaults to1; changing it requires separate financial authority |
 | `CRON` | Empty by default: run once. Five numeric fields enable scheduling |
 
+`TZ=Europe/Zurich` is defined in Compose; the image includes system `tzdata`
+for Supercronic and Python. The schedule follows local time across daylight
+saving changes rather than a fixed UTC offset.
+
 `SYNC_MODE=rolling`, `LOOKBACK_DAYS=90`, `MAPPING_FILE` and `STATE_DIR` are fixed
 inside the template. Inject `DEGIRO_USERNAME`, `DEGIRO_PASSWORD`,
 `DEGIRO_TOTP_SECRET` and exactly one of `GHOST_ACCESS_TOKEN` (Security Token,
@@ -45,6 +49,64 @@ The importer reuses IBKR's once-per-run Security Token exchange, including
 DRY_RUN. See the [authentication contract](ghostfolio-auth.md). Failed login stops
 before broker/target reads; no financial mutation or authentication retry follows.
 Preparing or deploying the test lab does not authorize production imports.
+
+### Approved scheduled DRY_RUN preparation
+
+Florent approved a manual DRY_RUN followed by two consecutive successful daily
+scheduled DRY_RUNs on 2026-10-11. Use `compose.yaml` together with
+`compose.dry-run.yaml`: the overlay fixes `DRY_RUN=1`, `TZ=Europe/Zurich` and
+`CRON=15 6 * * *`. Ambient `DRY_RUN=0` or `CRON` cannot change those overlay
+values. The base alone remains run-once by default.
+
+Infra owns image build/publication, immutable digest selection, Ugreen
+installation and protected host-loader execution. The following command tails
+are for that approved loader with the verified nonsecret configuration and
+exactly one Ghostfolio credential already injected. Run from the reviewed
+checkout; never print the resolved secret-bearing Compose configuration:
+
+```sh
+# First: suppress scheduling for one manual DRY_RUN and review its proposals.
+docker compose -f compose.yaml -f compose.dry-run.yaml run --rm -e CRON= degiro-sync
+# After successful manual review: enable daily simulations at 06:15 local time.
+docker compose -f compose.yaml -f compose.dry-run.yaml up -d degiro-sync
+```
+
+The manual container and scheduler use the same persistent private account
+journal and mapping. Do not run another account instance concurrently. Confirm
+the selected image/config, actual scheduler timezone, source/target identities,
+mapping hash and absence of unresolved intents before starting. Keep private
+proposal evidence and complete financial destination snapshots before/after
+each invocation; credentials and auth responses must not enter those records.
+
+The standard `--sync` CLI reports proposal/acceptance counts, not the full DTO
+plan. For detailed review, use fresh private broker/destination captures and
+the existing offline `scripts/prepare_lab.py` procedure below: its private
+`manifest.yaml` includes `expected_proposals` and `expected_cash`. Keep that
+saved-evidence plan distinct from the actual sync invocation; another broker
+event between reads can change proposals. Never treat an old manifest or a
+log count as approval of the next live batch.
+
+For each run, retain its interval and command result, exact proposed activities
+and independently verified proposed cash. Confirm zero accepted imports and
+unchanged destination financial signatures/cash. Compare consecutive proposals
+against fresh broker and destination reads: legitimate new broker events may
+change the plan, so identical proposal counts are not the acceptance criterion.
+Successful DRY_RUN does not import activities, update cash or advance live
+coverage; unimported proposals may therefore recur. Authentication POST and
+account-local locking/journal creation are permitted. Failure notifications
+remain silent under the existing DRY_RUN policy.
+
+Two successful scheduled simulations validate this preparation only. C15 stays
+open for separately authorized financial activation, verified target backup and
+restore access, first live import and repeated live scheduled reconciliation.
+A database-wide restore can affect other Ghostfolio accounts and is not an
+account-only rollback. No financial cleanup or restore is authorized here.
+
+Rollback of the scheduled DRY_RUN installation belongs to infra: stop only the
+positively identified importer, preserve mapping/journals/private evidence and
+restore its prior image/config through the host loader. Never stop Ghostfolio
+or remove its volumes to roll back this importer. Source rollback is the scoped
+Git revert of this change; it does not change a running container.
 
 ## Persistent isolated lab
 

@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 import time
@@ -37,8 +38,14 @@ from pathlib import Path
 import yaml
 import degiro_connector
 import degiro_to_ghostfolio
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from degiro_connector.trading.models.credentials import Credentials
 assert os.getuid() == 10001
+zone = ZoneInfo("Europe/Zurich")
+assert datetime(2026, 1, 15, 6, 15, tzinfo=zone).utcoffset() == timedelta(hours=1)
+assert datetime(2026, 7, 15, 6, 15, tzinfo=zone).utcoffset() == timedelta(hours=2)
+assert Path("/usr/share/zoneinfo/Europe/Zurich").is_file()
 expected = {expected!r}
 for name, version in expected.items():
     assert importlib.metadata.version(name) == version, name
@@ -60,6 +67,12 @@ assert hashlib.sha256(Path("/app/scripts/recover_degiro.py").read_bytes()).hexdi
 print("Runtime UID, dependency closure, source-equivalent connector, immutable core and explicit app file set: PASS")
 '''
     print(run(*options, "-i", args.image, "python", "-", input_text=probe).strip())
+    # Ask the actual scheduler for its next daily run, without broker code or network.
+    output = run(*options, "-e", "TZ=Europe/Zurich", args.image, "bash", "-c",
+        "printf '15 6 * * * true\\n' > /tmp/timezone-cron; "
+        "timeout 2s supercronic -debug /tmp/timezone-cron", expected=124)
+    assert re.search(r"job will run next at \d{4}-\d{2}-\d{2} 06:15:00 \+(?:0100 CET|0200 CEST)", output)
+    print("Actual daily scheduler uses 06:15 Europe/Zurich; winter/summer zone data present: PASS")
     output = run(*options, args.image, expected=1)
     assert "Running once" in output and "DEGIRO sync failed" in output
     print("Default run-once fails closed without credentials: PASS")
