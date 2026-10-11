@@ -9,7 +9,7 @@ import io
 import fcntl
 import hashlib
 from ipaddress import ip_address
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stderr
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from math import isfinite
@@ -68,6 +68,55 @@ API_FORMAT_ERRORS = {
     "fx_schema": "DEGIRO import blocked: incompatible execution FX format",
     "unknown": "DEGIRO import blocked: unrecognized API history format",
 }
+
+
+# Only these literal pairs may cross the public diagnostic boundary. Never
+# derive a token from exception text, paths, URLs, identifiers or provider data.
+BROKER_READ_STAGES = ("login", "client_discovery", "transactions", "account_overview",
+                      "products", "account_info", "account_update", "account_report",
+                      "order_history", "cutover_destination", "logout")
+FAILURE_DIAGNOSTICS = frozenset(
+    [("config", reason) for reason in ("arguments", "mode", "date_range", "window_days",
+        "lookback_days", "report_locale", "mapping", "state_dir", "account",
+        "sync_mode", "ghostfolio_credentials", "direct_credentials", "broker_credentials")]
+    + [("vault", reason) for reason in ("configuration", "temporary_state", "server",
+        "login", "unlock", "sync", "item", "logout")]
+    + [(stage, "failed") for stage in BROKER_READ_STAGES]
+    + [("login", reason) for reason in AUTH_FAILURE_REASONS]
+    + [("broker", "read"), ("broker", "api_format"), ("sync", "reconciliation"),
+       ("sync", "failed"), ("output", "destination"), ("output", "write"),
+       ("ghostfolio", "authentication"), ("ghostfolio", "transport"),
+       ("ghostfolio", "account_read"), ("ghostfolio", "activities_read")])
+
+
+def failure_diagnostic(error):
+    """Revalidate even attached metadata before rendering it publicly."""
+    value = getattr(error, "sync_diagnostic", None)
+    if (type(value) is tuple and len(value) == 2
+            and all(type(part) is str for part in value) and value in FAILURE_DIAGNOSTICS):
+        return value
+    return None
+
+
+def tag_failure(error, stage, reason):
+    """Keep the earliest known boundary while leaving exception semantics intact."""
+    if failure_diagnostic(error) is None and (stage, reason) in FAILURE_DIAGNOSTICS:
+        error.sync_diagnostic = (stage, reason)
+    return error
+
+
+@contextmanager
+def diagnostic_boundary(stage, reason):
+    try:
+        yield
+    except Exception as error:
+        tag_failure(error, stage, reason)
+        raise
+
+
+def log_failure(message, error, fallback=("sync", "failed")):
+    stage, reason = failure_diagnostic(error) or fallback
+    log.error("%s; stage=%s reason=%s", message, stage, reason)
 
 
 def check_api_import_format(snapshot):
@@ -723,8 +772,9 @@ def ghost_exchange_access_token(host, access_token):
 def authenticate_ghostfolio(config):
     """Resolve the security token once, discarding it from runtime config."""
     if "ghost_access_token" in config:
-        config["ghost_token"] = ghost_exchange_access_token(
-            config["ghost_host"], config.pop("ghost_access_token"))
+        with diagnostic_boundary("ghostfolio", "authentication"):
+            config["ghost_token"] = ghost_exchange_access_token(
+                config["ghost_host"], config.pop("ghost_access_token"))
 
 
 @contextmanager
@@ -1773,19 +1823,23 @@ def load_sync_config():
     """Operator configuration only; credentials are read verbatim from environment."""
     sync_mode = os.environ.get("SYNC_MODE", "full_history")
     if sync_mode not in ("full_history", "prospective", "rolling"):
-        raise RuntimeError("Invalid synchronization mode")
-    credentials = load_ghost_credentials()
+        raise tag_failure(RuntimeError("Invalid synchronization mode"), "config", "sync_mode")
+    with diagnostic_boundary("config", "ghostfolio_credentials"):
+        credentials = load_ghost_credentials()
     target = os.environ.get("GHOST_ACCOUNT_ID")
-    source = broker_identity(os.environ.get("DEGIRO_ACCOUNT_ID"))
+    with diagnostic_boundary("config", "account"):
+        source = broker_identity(os.environ.get("DEGIRO_ACCOUNT_ID"))
     mode = os.environ.get("DRY_RUN", "1").strip().lower()
     if (not isinstance(target, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", target)
             or mode not in ("1", "true", "yes", "on", "0", "false", "no", "off")):
-        raise RuntimeError("Invalid Ghostfolio sync environment")
+        raise tag_failure(RuntimeError("Invalid Ghostfolio sync environment"), "config", "account")
     try:
         document = yaml.safe_load(Path(os.environ.get("MAPPING_FILE", "mapping.yaml")).read_text())
-        mapping, quotes = verified_mapping_document(document)
+        with diagnostic_boundary("config", "mapping"):
+            mapping, quotes = verified_mapping_document(document)
     except (OSError, ValueError, TypeError, KeyError, yaml.YAMLError):
-        raise RuntimeError("Invalid explicitly verified Yahoo mapping file") from None
+        raise tag_failure(RuntimeError("Invalid explicitly verified Yahoo mapping file"),
+                          "config", "mapping") from None
     return {**credentials, "source_account": source,
             "target_account": target, "dry_run": mode in ("1", "true", "yes", "on"),
             "state_dir": os.environ.get("STATE_DIR"), "sync_mode": sync_mode,
@@ -1797,11 +1851,13 @@ def run_sync(from_date, to_date, window_days=90):
     """One broker read and complete target read; no completeness assertion invented."""
     config, mapping, quotes = load_sync_config()
     if config["dry_run"] and config.get("sync_mode") not in ("prospective", "rolling"):
-        return run_sync_locked(config, mapping, quotes, from_date, to_date, window_days)
-    with account_journal(config) as journal:
-        if journal["document"]["pending"] is not None and config.get("sync_mode") != "rolling":
-            raise RuntimeError("Unresolved durable write intent blocks account writes")
-        return run_sync_locked(config, mapping, quotes, from_date, to_date, window_days, journal)
+        with diagnostic_boundary("sync", "reconciliation"):
+            return run_sync_locked(config, mapping, quotes, from_date, to_date, window_days)
+    with diagnostic_boundary("config", "state_dir"), account_journal(config) as journal:
+        with diagnostic_boundary("sync", "reconciliation"):
+            if journal["document"]["pending"] is not None and config.get("sync_mode") != "rolling":
+                raise RuntimeError("Unresolved durable write intent blocks account writes")
+            return run_sync_locked(config, mapping, quotes, from_date, to_date, window_days, journal)
 
 
 def run_sync_locked(config, mapping, quotes, from_date, to_date, window_days, journal=None):
@@ -1830,18 +1886,21 @@ def run_sync_locked(config, mapping, quotes, from_date, to_date, window_days, jo
         authenticate_ghostfolio(config)
         snapshot = read_degiro(from_date, to_date, window_days)
     expected_target = {"id": config["target_account"], "currency": snapshot["account_info"]["baseCurrency"]}
-    with ghost_transport(config, expected_target) as session:
-        response = session.get(f"{config['ghost_host']}/api/v1/account/{config['target_account']}")
-        response.raise_for_status()
-        target = response.json()
-        response = session.get(f"{config['ghost_host']}/api/v1/activities")
-        response.raise_for_status()
-        existing = response.json()
-        if config.get("sync_mode") == "rolling":
-            recover_confirmed_import(journal, config, existing)
-        return synchronize_locked(config, snapshot, target, existing, mapping, quotes,
-            lambda activities: core.ghost_import_activities(config, activities),
-            lambda account, balance: core.ghost_update_cash_balance(config, account, balance), journal=journal)
+    with diagnostic_boundary("ghostfolio", "transport"), ghost_transport(config, expected_target) as session:
+        with diagnostic_boundary("ghostfolio", "account_read"):
+            response = session.get(f"{config['ghost_host']}/api/v1/account/{config['target_account']}")
+            response.raise_for_status()
+            target = response.json()
+        with diagnostic_boundary("ghostfolio", "activities_read"):
+            response = session.get(f"{config['ghost_host']}/api/v1/activities")
+            response.raise_for_status()
+            existing = response.json()
+        with diagnostic_boundary("sync", "reconciliation"):
+            if config.get("sync_mode") == "rolling":
+                recover_confirmed_import(journal, config, existing)
+            return synchronize_locked(config, snapshot, target, existing, mapping, quotes,
+                lambda activities: core.ghost_import_activities(config, activities),
+                lambda account, balance: core.ghost_update_cash_balance(config, account, balance), journal=journal)
 
 
 def broker_credentials():
@@ -1849,16 +1908,19 @@ def broker_credentials():
     from degiro_connector.trading.models.credentials import Credentials
     if any(name in os.environ for name in
            ("DEGIRO_USERNAME", "DEGIRO_PASSWORD", "DEGIRO_TOTP_SECRET")):
-        raise RuntimeError("Direct DEGIRO credentials are unsupported; configure Bitwarden")
+        raise tag_failure(RuntimeError("Direct DEGIRO credentials are unsupported; configure Bitwarden"),
+                          "config", "direct_credentials")
     values = vault_broker_credentials()
     try:
         return Credentials(username=values[0], password=values[1], totp_secret_key=values[2])
     except Exception:
-        raise RuntimeError("Invalid DEGIRO credentials") from None
+        raise tag_failure(RuntimeError("Invalid DEGIRO credentials"),
+                          "config", "broker_credentials") from None
 
 
 def vault_broker_credentials():
     """Fresh isolated CLI state per execution; raw output never reaches logs."""
+    stage = "configuration"
     try:
         names = ("BW_ITEM_ID", "BW_CLIENTID", "BW_CLIENTSECRET", "BW_PASSWORD")
         values = {name: os.environ.get(name) for name in names}
@@ -1870,6 +1932,7 @@ def vault_broker_credentials():
         server = validate_ghost_host(os.environ.get("BW_SERVER", "https://vault.bitwarden.com"))
         if not server.startswith("https://"):
             raise ValueError
+        stage = "temporary_state"
         deadline = time.monotonic() + 120
         with tempfile.TemporaryDirectory(prefix="degiro-vault-") as directory:
             os.chmod(directory, 0o700)
@@ -1889,6 +1952,7 @@ def vault_broker_credentials():
                     raise ValueError
                 return result.stdout.decode()
 
+            stage = "server"
             if server in ("https://bitwarden.com", "https://vault.bitwarden.com"):
                 run("config", "server", "https://bitwarden.com")
             elif server in ("https://bitwarden.eu", "https://vault.bitwarden.eu"):
@@ -1896,13 +1960,17 @@ def vault_broker_credentials():
                     "--api", "https://api.bitwarden.eu", "--identity", "https://identity.bitwarden.eu")
             else:
                 run("config", "server", server)
+            stage = "login"
             run("login", "--apikey")
             try:
+                stage = "unlock"
                 session = run("unlock", "--passwordenv", "BW_PASSWORD", "--raw").strip()
                 if not session or any(char.isspace() for char in session):
                     raise ValueError
                 environment["BW_SESSION"] = session
+                stage = "sync"
                 run("sync")
+                stage = "item"
                 item = json.loads(run("get", "item", item_id))
                 if (not isinstance(item, dict) or item.get("id") != item_id
                         or type(item.get("type")) is not int or item.get("type") != 1 or item.get("deletedDate")
@@ -1927,10 +1995,15 @@ def vault_broker_credentials():
                 credentials[2] = seed
                 return credentials
             finally:
+                previous_stage = stage
+                # Cleanup must not replace the diagnostic of an earlier failure.
+                stage = previous_stage if sys.exc_info()[0] is not None else "logout"
                 run("logout")
+                stage = previous_stage
 
     except Exception:
-        raise RuntimeError("Bitwarden credential retrieval failed; no broker login attempted") from None
+        raise tag_failure(RuntimeError("Bitwarden credential retrieval failed; no broker login attempted"),
+                          "vault", stage) from None
 
 
 @contextmanager
@@ -2119,12 +2192,13 @@ def read_degiro(from_date, to_date, window_days=90, report_locale=None, orders=F
     from degiro_connector.trading.models.transaction import HistoryRequest
     from degiro_connector.trading.models.order import HistoryRequest as OrderHistoryRequest
 
-    windows = history_windows(from_date, to_date, window_days)
+    with diagnostic_boundary("config", "date_range"):
+        windows = history_windows(from_date, to_date, window_days)
     if report_locale is not None and (
             not isinstance(report_locale, tuple) or len(report_locale) != 2
             or any(not isinstance(part, str) or not re.fullmatch(r"[a-z]{2}", part)
                    for part in report_locale)):
-        raise RuntimeError("Invalid DEGIRO report locale")
+        raise tag_failure(RuntimeError("Invalid DEGIRO report locale"), "config", "report_locale")
     credentials = broker_credentials()
     logger = quiet_broker_logger()
     session = bounded_broker_session()
@@ -2245,6 +2319,7 @@ def read_degiro(from_date, to_date, window_days=90, report_locale=None, orders=F
                 failure = RuntimeError(f"DEGIRO login failed: {reason}")
             else:
                 failure = RuntimeError(f"DEGIRO read failed at {stage}; no financial writes attempted")
+            tag_failure(failure, stage, reason if stage == "login" and reason in AUTH_FAILURE_REASONS else "failed")
         finally:
             if session_id:
                 try:
@@ -2253,12 +2328,13 @@ def read_degiro(from_date, to_date, window_days=90, report_locale=None, orders=F
                     if ok is not True:
                         raise RuntimeError("DEGIRO logout failed")
                 except Exception:
-                    failure = failure or RuntimeError("DEGIRO logout failed")
+                    failure = failure or tag_failure(RuntimeError("DEGIRO logout failed"), "logout", "failed")
             session.close()
     if failure:
         raise failure from None
     data["fetched_at"] = datetime.now(timezone.utc).isoformat()
-    check_api_import_format(data)
+    with diagnostic_boundary("broker", "api_format"):
+        check_api_import_format(data)
     return data
 
 
@@ -2458,7 +2534,8 @@ def finalize_failure(error):
 
 def discover_ghost_accounts():
     """Read only account identifiers; keep balances and credentials out of output."""
-    config = load_ghost_credentials()
+    with diagnostic_boundary("config", "ghostfolio_credentials"):
+        config = load_ghost_credentials()
     config["dry_run"] = True
     authenticate_ghostfolio(config)
     with private_broker_logs(), ghost_transport(config, {"id": "discovery"}) as session:
@@ -2483,9 +2560,9 @@ def discover_ghost_accounts():
 def main(argv=None):
     """Explicit operator modes; normal sync defaults to DRY_RUN and fails closed."""
     if not argv:
-        log.error("DEGIRO sync gates incomplete; use explicit --read-only characterization")
+        log.error("DEGIRO sync gates incomplete; use explicit --read-only characterization; stage=config reason=mode")
         return 1
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(prog="degiro-sync", description=__doc__)
     modes = parser.add_mutually_exclusive_group(required=True)
     modes.add_argument("--read-only", action="store_true")
     modes.add_argument("--sync", action="store_true")
@@ -2498,40 +2575,64 @@ def main(argv=None):
     parser.add_argument("--report-country")
     parser.add_argument("--report-language")
     parser.add_argument("--orders", action="store_true")
-    args = parser.parse_args(argv)
+    # argparse normally echoes invalid values, including accidentally pasted keys.
+    # Keep its error output private; --help still prints the static help to stdout.
     try:
+        with redirect_stderr(io.StringIO()):
+            args = parser.parse_args(argv)
+    except SystemExit as error:
+        if error.code == 0:
+            return 0
+        log.error("Invalid command arguments; stage=config reason=arguments; use --help")
+        return 2
+    try:
+        if not 2 <= args.window_days <= 366:
+            raise tag_failure(RuntimeError("Invalid broker query window"), "config", "window_days")
         if args.ghost_accounts:
             if (not args.output or args.plan_output or args.from_date or args.to_date
                     or args.report_country or args.report_language or args.orders):
-                raise RuntimeError("Account discovery requires only an output path")
-            output = snapshot_destination(args.output)
-            data = discover_ghost_accounts()
-            save_private_snapshot(data, output)
+                raise tag_failure(RuntimeError("Account discovery requires only an output path"),
+                                  "config", "arguments")
+            with diagnostic_boundary("output", "destination"):
+                output = snapshot_destination(args.output)
+            with diagnostic_boundary("ghostfolio", "account_read"):
+                data = discover_ghost_accounts()
+            with diagnostic_boundary("output", "write"):
+                save_private_snapshot(data, output)
             log.info("Private Ghostfolio account identifiers saved")
             return 0
         if args.sync:
             if args.output or args.report_country or args.report_language or args.orders:
-                raise RuntimeError("Read-only options cannot be used for synchronization")
+                raise tag_failure(RuntimeError("Read-only options cannot be used for synchronization"),
+                                  "config", "arguments")
             plan_output = None
             if args.plan_output:
                 if os.environ.get("DRY_RUN", "1").strip().lower() not in ("1", "true", "yes", "on"):
-                    raise RuntimeError("Proposal output requires DRY_RUN")
-                plan_output = snapshot_destination(args.plan_output)
-            end = date.fromisoformat(args.to_date or datetime.now(ZoneInfo("Europe/Zurich")).date().isoformat())
-            lookback = int(os.environ.get("LOOKBACK_DAYS", "90"))
-            if not 2 <= lookback <= 366:
-                raise RuntimeError("Invalid bounded history lookback")
-            if os.environ.get("SYNC_MODE") == "rolling" and lookback != 90:
-                raise RuntimeError("Rolling mode requires LOOKBACK_DAYS=90")
-            start = date.fromisoformat(args.from_date) if args.from_date else end - timedelta(days=lookback - 1)
-            result = run_sync(start, end, args.window_days)
+                    raise tag_failure(RuntimeError("Proposal output requires DRY_RUN"),
+                                      "config", "arguments")
+                with diagnostic_boundary("output", "destination"):
+                    plan_output = snapshot_destination(args.plan_output)
+            with diagnostic_boundary("config", "date_range"):
+                end = date.fromisoformat(args.to_date or datetime.now(ZoneInfo("Europe/Zurich")).date().isoformat())
+            with diagnostic_boundary("config", "lookback_days"):
+                lookback = int(os.environ.get("LOOKBACK_DAYS", "90"))
+                if not 2 <= lookback <= 366:
+                    raise RuntimeError("Invalid bounded history lookback")
+                if os.environ.get("SYNC_MODE") == "rolling" and lookback != 90:
+                    raise RuntimeError("Rolling mode requires LOOKBACK_DAYS=90")
+            with diagnostic_boundary("config", "date_range"):
+                start = date.fromisoformat(args.from_date) if args.from_date else end - timedelta(days=lookback - 1)
+                history_windows(start, end, args.window_days)
+            with diagnostic_boundary("sync", "reconciliation"):
+                result = run_sync(start, end, args.window_days)
             if plan_output is not None:
                 if result.get("dry_run") is not True or result.get("accepted"):
                     raise RuntimeError("Proposal output requires a financial simulation")
-                save_private_snapshot({"generated_at": datetime.now(timezone.utc).isoformat(),
-                    "activities": result["proposed"], "cash": result["cash"],
-                    "history_verified": result["history_verified"],
-                    "rolling_verified": result.get("rolling_verified", False)}, plan_output)
+                with diagnostic_boundary("output", "write"):
+                    save_private_snapshot({"generated_at": datetime.now(timezone.utc).isoformat(),
+                        "activities": result["proposed"], "cash": result["cash"],
+                        "history_verified": result["history_verified"],
+                        "rolling_verified": result.get("rolling_verified", False)}, plan_output)
                 log.info("Private simulation plan saved; no financial writes sent")
             log.info("Sync %s: %d proposed activities, %d accepted", "DRY_RUN" if result["dry_run"] else "live",
                      len(result["proposed"]), len(result["accepted"]))
@@ -2545,35 +2646,44 @@ def main(argv=None):
                 return 0
             if not result["history_verified"]:
                 log.warning("History completeness is unverified; live writes remain blocked")
-                finalize_failure(RuntimeError("History completeness is unverified"))
+                error = tag_failure(RuntimeError("History completeness is unverified"),
+                                    "sync", "reconciliation")
+                log_failure("History verification failed", error)
+                finalize_failure(error)
                 return 1
             return 0
         if args.plan_output or not args.output or not args.from_date or not args.to_date:
-            raise RuntimeError("Read-only snapshot requires dates and an output path")
-        output = snapshot_destination(args.output)
+            raise tag_failure(RuntimeError("Read-only snapshot requires dates and an output path"),
+                              "config", "arguments")
+        with diagnostic_boundary("output", "destination"):
+            output = snapshot_destination(args.output)
         locale = None
         if args.report_country or args.report_language:
             locale = (args.report_country, args.report_language)
-        data = read_degiro(date.fromisoformat(args.from_date), date.fromisoformat(args.to_date),
-                           args.window_days, report_locale=locale, orders=args.orders)
-        save_private_snapshot(data, output)
+        with diagnostic_boundary("config", "date_range"):
+            start, end = date.fromisoformat(args.from_date), date.fromisoformat(args.to_date)
+            history_windows(start, end, args.window_days)
+        with diagnostic_boundary("broker", "read"):
+            data = read_degiro(start, end, args.window_days, report_locale=locale, orders=args.orders)
+        with diagnostic_boundary("output", "write"):
+            save_private_snapshot(data, output)
     except Exception as error:
         if args.sync:
             finalize_failure(error)
             message = str(error)
-            log.error("%s", message if message in API_FORMAT_ERRORS.values() or message in PROSPECTIVE_FAILURES
-                      or message in ROLLING_FAILURES else
-                      "DEGIRO sync failed; unknown, incomplete or uncertain account state blocks writes")
+            log_failure(message if message in API_FORMAT_ERRORS.values() or message in PROSPECTIVE_FAILURES
+                        or message in ROLLING_FAILURES else
+                        "DEGIRO sync failed; unknown, incomplete or uncertain account state blocks writes", error)
             return 1
-        stages = ("login", "client_discovery", "transactions", "account_overview", "products",
-                  "account_info", "account_update", "account_report", "order_history", "cutover_destination")
-        messages = {f"DEGIRO read failed at {stage}; no financial writes attempted" for stage in stages}
+        messages = {f"DEGIRO read failed at {stage}; no financial writes attempted" for stage in BROKER_READ_STAGES}
         messages.add("DEGIRO logout failed")
         messages.update(API_FORMAT_ERRORS.values())
         messages.update(f"DEGIRO login failed: {reason}" for reason in AUTH_FAILURE_REASONS)
         message = str(error)
-        log.error("%s", message if message in messages else
-                  "DEGIRO read-only characterization failed; no financial writes attempted")
+        log_failure(message if message in messages else
+                    "Ghostfolio account discovery failed; no financial writes attempted" if args.ghost_accounts else
+                    "DEGIRO read-only characterization failed; no financial writes attempted", error,
+                    fallback=("ghostfolio", "account_read") if args.ghost_accounts else ("broker", "read"))
         return 1
     log.info("Read-only snapshot saved: %d transactions, %d cash movements",
              len(data["transactions"]), len(data["cash_movements"]))
