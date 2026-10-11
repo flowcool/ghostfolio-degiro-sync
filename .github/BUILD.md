@@ -12,11 +12,15 @@ Required checks must pass before merging.
 
 PR builds never log in to a registry or publish images. `release-image.yml`
 publishes only a published semantic-version GitHub Release whose tag is on main.
-Its serialized preflight requires authenticated registry access and proves that
-the version tag is absent; existing tags and ambiguous registry failures abort.
+Its serialized preflight authenticates to the registry without requiring a
+package to exist already. Failure diagnostics report only the phase and HTTP
+status, never credentials or response bodies.
 Each native architecture is built, scanned and smoke-tested before publishing by
-digest with SBOM and build provenance. The final job checks the version guard
-again, assembles the two digests, verifies amd64/arm64 and records the manifest.
+digest with SBOM and build provenance. This creates the package on its first
+release without creating or changing a version tag. The final job then proves
+the version tag is absent before assembling the two digests, verifies amd64/arm64
+and records the manifest. Existing version tags and ambiguous registry failures
+abort publication of the version manifest.
 Only the current stable release can update `latest`; prereleases cannot do so.
 A release rerun never silently overwrites an existing version. Runtime code,
 Bitwarden artifacts and architecture checksums remain pinned. No workflow deploys.
