@@ -2,7 +2,8 @@
 
 The root [README](../README.md) is the complete supported deployment guide.
 
-- `compose.yaml`: one importer for one DEGIRO/Ghostfolio account pair, local image build, existing Ghostfolio network, private mapping and persistent journal. Default is run-once DRY_RUN.
+- `compose.yaml`: one importer for one DEGIRO/Ghostfolio account pair, published GHCR image, existing Ghostfolio network, private mapping and persistent journal. Default is run-once DRY_RUN.
+- `compose.build.yaml`: contributor-only local image build overlay.
 - `compose.dry-run.yaml`: optional overlay fixing simulation mode and a daily 06:15 Europe/Zurich schedule.
 - `compose.lab.yaml`: contributor-only synthetic Ghostfolio lab, isolated from production; see CONTRIBUTING.md. It is not a user deployment prerequisite.
 
