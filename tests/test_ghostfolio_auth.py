@@ -69,7 +69,7 @@ def test_exchange_uses_only_approved_origin_and_no_ambient_credentials(monkeypat
     assert calls == [HOST + '/api/v1/auth/anonymous']
 
 
-@pytest.mark.parametrize('host', ['https://evil.invalid', HOST + '/', HOST + '?token=SECRET',
+@pytest.mark.parametrize('host', ['http://public.example', HOST + '/', HOST + '?token=SECRET',
     'http://user:SECRET@localhost:3333', HOST + '/api', HOST + '#SECRET'])
 def test_bad_origin_prevents_exchange(monkeypatch, host):
     monkeypatch.setattr(requests.Session, 'send', lambda *a, **kw: pytest.fail('HTTP attempted'))
@@ -292,6 +292,7 @@ def test_auth_failure_notification_and_cli_do_not_disclose_secrets(monkeypatch, 
     assert ACCESS not in caplog.text + notifications[0] and BEARER not in caplog.text + notifications[0]
 
 
-def test_compose_passes_both_credential_names_without_values():
+def test_compose_accepts_both_credential_modes_from_local_or_injected_environment():
     environment = yaml.safe_load(Path('compose.yaml').read_text())['services']['degiro-sync']['environment']
-    assert environment['GHOST_TOKEN'] is None and environment['GHOST_ACCESS_TOKEN'] is None
+    assert environment['GHOST_TOKEN'] == '${GHOST_TOKEN:-}'
+    assert environment['GHOST_ACCESS_TOKEN'] == '${GHOST_ACCESS_TOKEN:-}'

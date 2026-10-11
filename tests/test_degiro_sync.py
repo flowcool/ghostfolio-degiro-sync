@@ -273,9 +273,9 @@ def test_accepted_buys_must_fund_later_sells(snapshot):
     assert len(calls) == 1 and all(a['type'] != 'SELL' for a in calls[0])
 
 
-@pytest.mark.parametrize('url', ['https://evil.example', 'http://ghost.mylittlemess.fr',
-    'https://ghost.mylittlemess.fr/', 'https://user:pass@ghost.mylittlemess.fr',
-    'https://ghost.mylittlemess.fr?token=SECRET', 'http://127.0.0.1:9999', None])
+@pytest.mark.parametrize('url', ['http://public.example', 'https://portfolio.example/',
+    'https://user:pass@portfolio.example', 'https://portfolio.example?token=SECRET',
+    'http://169.254.169.254', None])
 def test_exact_target_origin_policy(url):
     with pytest.raises(RuntimeError) as error:
         adapter.validate_ghost_host(url)
@@ -375,7 +375,7 @@ def test_config_is_env_only_and_defaults_dry_run(monkeypatch, tmp_path):
     assert mapping == MAPPING and quotes == QUOTES
 
 
-@pytest.mark.parametrize('name,value', [('GHOST_HOST', 'https://evil.example'),
+@pytest.mark.parametrize('name,value', [('GHOST_HOST', 'http://public.example'),
     ('GHOST_TOKEN', ''), ('GHOST_TOKEN', 'SECRET\nHEADER'), ('GHOST_ACCOUNT_ID', '../other'),
     ('DEGIRO_ACCOUNT_ID', '0'), ('DRY_RUN', 'maybe')])
 def test_invalid_config_rejected_before_broker_read(monkeypatch, tmp_path, name, value):

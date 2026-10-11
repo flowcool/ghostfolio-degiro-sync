@@ -1,4 +1,4 @@
-# Allowlisted build context prevents private snapshots/SOPS pointers entering layers.
+# Allowlisted build context keeps credentials and private snapshots out of layers.
 **
 !Dockerfile
 !requirements.txt
@@ -9,3 +9,6 @@
 !scripts/
 scripts/**
 !scripts/recover_degiro.py
+!third_party/
+!third_party/bitwarden/
+!third_party/bitwarden/**

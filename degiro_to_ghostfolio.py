@@ -2,11 +2,13 @@
 """Read-only DEGIRO adapter; activity writes require the remaining validation gates."""
 
 import argparse
+import base64
 from collections import Counter
 import csv
 import io
 import fcntl
 import hashlib
+from ipaddress import ip_address
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -21,6 +23,7 @@ import subprocess
 import signal
 import sys
 import tempfile
+import time
 import uuid
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
@@ -632,12 +635,42 @@ def apply_cash_balance(snapshot, target_account, source_account, update_balance,
 
 
 def validate_ghost_host(host):
-    """Exact operator origins; fixed errors never expose URL userinfo or tokens."""
-    allowed = {"https://ghost.mylittlemess.fr", "http://ghostfolio:3333",
-               "http://localhost:3333", "http://127.0.0.1:3333"}
-    if not isinstance(host, str) or host not in allowed:
-        raise RuntimeError("Ghostfolio target URL is outside the approved origin policy")
-    return host
+    """Configured HTTPS origin or private HTTP; never disclose a rejected URL."""
+    try:
+        if not isinstance(host, str) or not host or host != host.strip():
+            raise ValueError
+        parts = urlsplit(host)
+        name = parts.hostname
+        if (parts.scheme not in ("http", "https") or not name
+                or parts.username is not None or parts.password is not None
+                or parts.path or parts.query or parts.fragment
+                or host != f"{parts.scheme}://{parts.netloc}"
+                or parts.netloc != parts.netloc.lower()
+                or any(ord(char) <= 32 or ord(char) >= 127 for char in host)
+                or "\\" in host or "%" in host or "?" in host or "#" in host
+                or (parts.port is not None and not 1 <= parts.port <= 65535)
+                or parts.netloc.endswith(":")):
+            raise ValueError
+        try:
+            address = ip_address(name)
+        except ValueError:
+            address = None
+            if len(name) > 253 or not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", name):
+                raise ValueError
+            if any(not label or len(label) > 63 or label.startswith("-")
+                   or label.endswith("-") for label in name.split(".")):
+                raise ValueError
+        if address is not None:
+            if address.is_unspecified or address.is_multicast or address.is_link_local:
+                raise ValueError
+            private = address.is_loopback or (address.is_private and not address.is_reserved)
+        else:
+            private = "." not in name and bool(re.search(r"[a-z]", name))
+        if parts.scheme == "http" and not private:
+            raise ValueError
+        return host
+    except (ValueError, TypeError):
+        raise RuntimeError("Ghostfolio target URL is outside the approved origin policy") from None
 
 
 # Adapted from ghostfolio-ibkr-sync 54958ab1035eb97a1f67f9072b79699813ec3800;
@@ -1812,16 +1845,86 @@ def run_sync_locked(config, mapping, quotes, from_date, to_date, window_days, jo
 
 
 def broker_credentials():
-    """Construct the connector model exclusively from the process environment."""
+    """Vault is the sole broker credential source for every execution."""
     from degiro_connector.trading.models.credentials import Credentials
-    values = [os.environ.get(name) for name in
-              ("DEGIRO_USERNAME", "DEGIRO_PASSWORD", "DEGIRO_TOTP_SECRET")]
-    if any(not isinstance(value, str) or not value.strip() for value in values):
-        raise RuntimeError("Missing DEGIRO credential environment variables")
+    if any(name in os.environ for name in
+           ("DEGIRO_USERNAME", "DEGIRO_PASSWORD", "DEGIRO_TOTP_SECRET")):
+        raise RuntimeError("Direct DEGIRO credentials are unsupported; configure Bitwarden")
+    values = vault_broker_credentials()
     try:
         return Credentials(username=values[0], password=values[1], totp_secret_key=values[2])
     except Exception:
         raise RuntimeError("Invalid DEGIRO credentials") from None
+
+
+def vault_broker_credentials():
+    """Fresh isolated CLI state per execution; raw output never reaches logs."""
+    try:
+        names = ("BW_ITEM_ID", "BW_CLIENTID", "BW_CLIENTSECRET", "BW_PASSWORD")
+        values = {name: os.environ.get(name) for name in names}
+        if any(not isinstance(value, str) or not value.strip() for value in values.values()):
+            raise ValueError
+        item_id = str(uuid.UUID(values.pop("BW_ITEM_ID")))
+        if item_id != os.environ["BW_ITEM_ID"].lower():
+            raise ValueError
+        server = validate_ghost_host(os.environ.get("BW_SERVER", "https://vault.bitwarden.com"))
+        if not server.startswith("https://"):
+            raise ValueError
+        deadline = time.monotonic() + 120
+        with tempfile.TemporaryDirectory(prefix="degiro-vault-") as directory:
+            os.chmod(directory, 0o700)
+            environment = {key: os.environ[key] for key in ("PATH", "LANG", "LC_ALL")
+                           if key in os.environ}
+            environment.update(values, BITWARDENCLI_APPDATA_DIR=directory,
+                               BW_NOINTERACTION="true")
+
+            def run(*arguments):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ValueError
+                result = subprocess.run(["/usr/local/bin/bw", *arguments],
+                    env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL, timeout=min(30, remaining), check=False)
+                if result.returncode or len(result.stdout) > 2_000_000:
+                    raise ValueError
+                return result.stdout.decode()
+
+            run("config", "server", server)
+            run("login", "--apikey")
+            try:
+                session = run("unlock", "--passwordenv", "BW_PASSWORD", "--raw").strip()
+                if not session or any(char.isspace() for char in session):
+                    raise ValueError
+                environment["BW_SESSION"] = session
+                run("sync")
+                item = json.loads(run("get", "item", item_id))
+                if (not isinstance(item, dict) or item.get("id") != item_id
+                        or item.get("type") != 1 or item.get("deletedDate")
+                        or not isinstance(item.get("login"), dict)):
+                    raise ValueError
+                login = item["login"]
+                credentials = [login.get(key) for key in ("username", "password", "totp")]
+                if any(not isinstance(value, str) or not value.strip() for value in credentials):
+                    raise ValueError
+                import pyotp
+                seed = credentials[2].strip()
+                if seed.startswith("otpauth://"):
+                    otp = pyotp.parse_uri(seed)
+                    if (not isinstance(otp, pyotp.TOTP) or otp.interval != 30
+                            or otp.digits != 6 or otp.digest != hashlib.sha1):
+                        raise ValueError
+                    seed = otp.secret
+                seed = seed.upper()
+                if not re.fullmatch(r"[A-Z2-7]{16,128}", seed):
+                    raise ValueError
+                base64.b32decode(seed + "=" * (-len(seed) % 8))
+                credentials[2] = seed
+                return credentials
+            finally:
+                run("logout")
+
+    except Exception:
+        raise RuntimeError("Bitwarden credential retrieval failed; no broker login attempted") from None
 
 
 @contextmanager

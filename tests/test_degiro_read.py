@@ -22,10 +22,10 @@ SEED = "JBSWY3DPEHPK3PXP"
 
 @pytest.fixture
 def credentials(monkeypatch):
-    for key, value in zip(("DEGIRO_USERNAME", "DEGIRO_PASSWORD", "DEGIRO_TOTP_SECRET"),
-                          (USERNAME, PASSWORD, SEED)):
-        monkeypatch.setenv(key, value)
-    monkeypatch.setenv("DEGIRO_ACCOUNT", json.dumps({"username": "wrong", "password": "wrong"}))
+    # Broker action tests isolate the already-tested vault boundary.
+    monkeypatch.setattr(adapter, "vault_broker_credentials", lambda: [USERNAME, PASSWORD, SEED])
+    for key in ("DEGIRO_USERNAME", "DEGIRO_PASSWORD", "DEGIRO_TOTP_SECRET"):
+        monkeypatch.delenv(key, raising=False)
     import pyotp
     monkeypatch.setattr(pyotp.TOTP, "now", lambda self: OTP)
 
@@ -101,20 +101,17 @@ def assert_no_secrets(text):
         assert secret not in text
 
 
-def test_env_only_credentials(credentials):
+def test_vault_credentials_construct_connector_model(credentials):
     model = adapter.broker_credentials()
     assert model.username == USERNAME and model.password == PASSWORD
     assert model.totp_secret_key == SEED and model.int_account is None
 
 
 @pytest.mark.parametrize("name", ["DEGIRO_USERNAME", "DEGIRO_PASSWORD", "DEGIRO_TOTP_SECRET"])
-@pytest.mark.parametrize("value", [None, "", "  "])
-def test_missing_credentials_fail_before_network(credentials, monkeypatch, name, value):
-    if value is None:
-        monkeypatch.delenv(name)
-    else:
-        monkeypatch.setenv(name, value)
-    with pytest.raises(RuntimeError, match="Missing DEGIRO"):
+@pytest.mark.parametrize("value", ["", "  ", "legacy-secret"])
+def test_direct_credentials_fail_before_network(credentials, monkeypatch, name, value):
+    monkeypatch.setenv(name, value)
+    with pytest.raises(RuntimeError, match="Direct DEGIRO credentials are unsupported"):
         adapter.broker_credentials()
 
 
