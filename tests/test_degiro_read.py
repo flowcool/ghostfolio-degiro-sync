@@ -44,7 +44,10 @@ def broker_http(monkeypatch, fail_path=None, failure=None, cash_without_id=False
         parts = urlsplit(request.url)
         path = parts.path
         calls.append((request, kwargs))
-        logging.getLogger("urllib3.connectionpool").debug("%s %s", request.url, PASSWORD)
+        # Assert suppression at the sink without intentionally logging credentials.
+        diagnostic_logger = logging.getLogger("urllib3.connectionpool")
+        assert diagnostic_logger.disabled and not diagnostic_logger.propagate
+        diagnostic_logger.debug("Synthetic broker HTTP diagnostic")
         if fail_path and fail_path in path:
             if isinstance(failure, Exception):
                 raise failure
@@ -131,6 +134,7 @@ def test_real_actions_preserve_raw_fields_and_fractional_quantity(credentials, m
         assert settings["allow_redirects"] is False
         assert settings["verify"] is True
     assert_no_secrets(caplog.text)
+    assert "Synthetic broker HTTP diagnostic" not in caplog.text
 
 
 def test_observed_empty_account_overview_is_acquired_without_history_claim(credentials, monkeypatch):
