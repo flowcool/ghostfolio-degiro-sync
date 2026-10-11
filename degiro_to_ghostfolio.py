@@ -2449,6 +2449,30 @@ def finalize_failure(error):
     except Exception:
         log.warning("Failure notification could not be sent: internal error")
 
+def discover_ghost_accounts():
+    """Read only account identifiers; keep balances and credentials out of output."""
+    config = load_ghost_credentials()
+    config["dry_run"] = True
+    authenticate_ghostfolio(config)
+    with private_broker_logs(), ghost_transport(config, {"id": "discovery"}) as session:
+        response = session.get(f"{config['ghost_host']}/api/v1/account")
+        response.raise_for_status()
+        body = response.json()
+    accounts = body.get("accounts") if isinstance(body, dict) else body
+    if not isinstance(accounts, list):
+        raise RuntimeError("Invalid Ghostfolio account discovery response")
+    result, identities = [], set()
+    for account in accounts:
+        if (not isinstance(account, dict) or not isinstance(account.get("id"), str)
+                or not re.fullmatch(r"[A-Za-z0-9_-]+", account["id"])
+                or account["id"] in identities or not isinstance(account.get("name"), str)
+                or not re.fullmatch(r"[A-Z]{3}", account.get("currency", ""))):
+            raise RuntimeError("Invalid Ghostfolio account discovery response")
+        identities.add(account["id"])
+        result.append({key: account[key] for key in ("id", "name", "currency")})
+    return {"accounts": result}
+
+
 def main(argv=None):
     """Explicit operator modes; normal sync defaults to DRY_RUN and fails closed."""
     if not argv:
@@ -2458,18 +2482,34 @@ def main(argv=None):
     modes = parser.add_mutually_exclusive_group(required=True)
     modes.add_argument("--read-only", action="store_true")
     modes.add_argument("--sync", action="store_true")
+    modes.add_argument("--ghost-accounts", action="store_true")
     parser.add_argument("--from-date")
     parser.add_argument("--to-date")
     parser.add_argument("--window-days", type=int, default=90)
     parser.add_argument("--output")
+    parser.add_argument("--plan-output", help="New private JSON proposal file; DRY_RUN sync only")
     parser.add_argument("--report-country")
     parser.add_argument("--report-language")
     parser.add_argument("--orders", action="store_true")
     args = parser.parse_args(argv)
     try:
+        if args.ghost_accounts:
+            if (not args.output or args.plan_output or args.from_date or args.to_date
+                    or args.report_country or args.report_language or args.orders):
+                raise RuntimeError("Account discovery requires only an output path")
+            output = snapshot_destination(args.output)
+            data = discover_ghost_accounts()
+            save_private_snapshot(data, output)
+            log.info("Private Ghostfolio account identifiers saved")
+            return 0
         if args.sync:
             if args.output or args.report_country or args.report_language or args.orders:
                 raise RuntimeError("Read-only options cannot be used for synchronization")
+            plan_output = None
+            if args.plan_output:
+                if os.environ.get("DRY_RUN", "1").strip().lower() not in ("1", "true", "yes", "on"):
+                    raise RuntimeError("Proposal output requires DRY_RUN")
+                plan_output = snapshot_destination(args.plan_output)
             end = date.fromisoformat(args.to_date or datetime.now(ZoneInfo("Europe/Zurich")).date().isoformat())
             lookback = int(os.environ.get("LOOKBACK_DAYS", "90"))
             if not 2 <= lookback <= 366:
@@ -2478,6 +2518,14 @@ def main(argv=None):
                 raise RuntimeError("Rolling mode requires LOOKBACK_DAYS=90")
             start = date.fromisoformat(args.from_date) if args.from_date else end - timedelta(days=lookback - 1)
             result = run_sync(start, end, args.window_days)
+            if plan_output is not None:
+                if result.get("dry_run") is not True or result.get("accepted"):
+                    raise RuntimeError("Proposal output requires a financial simulation")
+                save_private_snapshot({"generated_at": datetime.now(timezone.utc).isoformat(),
+                    "activities": result["proposed"], "cash": result["cash"],
+                    "history_verified": result["history_verified"],
+                    "rolling_verified": result.get("rolling_verified", False)}, plan_output)
+                log.info("Private simulation plan saved; no financial writes sent")
             log.info("Sync %s: %d proposed activities, %d accepted", "DRY_RUN" if result["dry_run"] else "live",
                      len(result["proposed"]), len(result["accepted"]))
             if result["dry_run"] and result.get("prospective_verified") is True:
@@ -2492,7 +2540,7 @@ def main(argv=None):
                 log.warning("History completeness is unverified; live writes remain blocked")
                 return 1
             return 0
-        if not args.output or not args.from_date or not args.to_date:
+        if args.plan_output or not args.output or not args.from_date or not args.to_date:
             raise RuntimeError("Read-only snapshot requires dates and an output path")
         output = snapshot_destination(args.output)
         locale = None

@@ -1,266 +1,35 @@
-# Compose importer and reusable Ugreen lab
+# Compose definitions
 
-Florent approved this operating boundary on 2026-10-10: maintain the Compose
-base here; infra installs and manages the persistent lab on Ugreen. The lab
-keeps its data between runs and is used on demand. Production activation remains
-separately authorized. No agentvm lab installation is part of this procedure.
+The root [README](../README.md) is the complete supported deployment guide.
 
-## Importer for an existing Ghostfolio
+- `compose.yaml`: one importer for one DEGIRO/Ghostfolio account pair, local image build, existing Ghostfolio network, private mapping and persistent journal. Default is run-once DRY_RUN.
+- `compose.dry-run.yaml`: optional overlay fixing simulation mode and a daily 06:15 Europe/Zurich schedule.
+- `compose.lab.yaml`: contributor-only synthetic Ghostfolio lab, isolated from production; see CONTRIBUTING.md. It is not a user deployment prerequisite.
 
-`compose.yaml` follows IBKR's one-service-per-account, mapping mount, internal
-Ghostfolio hostname and run-once/optional-supercronic pattern. It retains the
-DEGIRO rootless image, read-only filesystem, dropped capabilities, private
-persistent journal and reviewed URL policy. It does not install Ghostfolio.
+Vault and Ghostfolio credentials can be supplied in the ignored local `.env` or injected environment. No configuration backend is imposed. Never publish `docker compose config` output from a real deployment because it contains rendered credentials.
 
-Supply nonsecret settings through the infra configuration mechanism:
+A running service keeps its original environment until recreated. Vault item contents are fetched afresh on each execution. Stop the scheduler before manual catch-up or recovery and retain the existing journal. The simulation overlay cannot activate writes; start the base alone only after reviewing the account and configuring DRY_RUN=0.
 
-| Setting | Meaning |
-| --- | --- |
-| `DEGIRO_IMAGE` | Reviewed immutable runtime image digest selected by infra |
-| `GHOST_NETWORK` | Existing Ghostfolio Docker network, with `ghostfolio` alias |
-| `DEGIRO_ACCOUNT_ID`, `GHOST_ACCOUNT_ID` | Explicit source and destination identities |
-| `DEGIRO_MAPPING_PATH` | Existing verified mapping file, mounted read-only |
-| `DEGIRO_STATE_PATH` | Existing UID/GID10001 private0700 persistent directory |
-| `DRY_RUN` | Defaults to1; changing it requires separate financial authority |
-| `CRON` | Empty by default: run once. Five numeric fields enable scheduling |
+## Configuration contract
 
-`TZ=Europe/Zurich` is defined in Compose; the image includes system `tzdata`
-for Supercronic and Python. The schedule follows local time across daylight
-saving changes rather than a fixed UTC offset.
+Required vault values: `BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD`, `BW_ITEM_ID`;
+`BW_SERVER` defaults to the US Bitwarden HTTPS origin. The item UUID selects one
+Login with username, password and TOTP seed, fetched fresh at every broker run.
 
-`SYNC_MODE=rolling`, `LOOKBACK_DAYS=90`, `MAPPING_FILE` and `STATE_DIR` are fixed
-inside the template. Inject `DEGIRO_USERNAME`, `DEGIRO_PASSWORD`,
-`DEGIRO_TOTP_SECRET` and exactly one of `GHOST_ACCESS_TOKEN` (Security Token,
-recommended for cron) or `GHOST_TOKEN` (legacy bearer) from the approved off-git
-SOPS/host loader. Both Ghostfolio names are passed without values by Compose;
-leave the unused variable unset or blank in the launcher environment.
-Optional `APPRISE_URLS` is also protected environment input; `APPRISE_TIMEOUT`
-defaults to10. Compose passes environment names; never commit values, put them
-in a plaintext env file, print rendered secret-bearing Compose configuration,
-or place them in command-line arguments.
+Ghostfolio uses `GHOST_HOST` (default container origin) and exactly one of
+`GHOST_ACCESS_TOKEN` (recommended Security Token) or `GHOST_TOKEN` (legacy bearer).
+`DEGIRO_ACCOUNT_ID`, `GHOST_ACCOUNT_ID` and `GHOST_NETWORK` select the account pair
+and existing reachable Docker network. Credentials are verbatim environment values.
 
-The loader/recreation contract in [runtime.md](runtime.md) still applies.
-`restart: "no"` avoids silently restarting with stale environment values.
-Infra's supervisor must rerun the loader when recreating the container. An
-explicit cron setting starts the scheduler; it does not run an immediate sync.
-Use a separate run-once command for a reviewed initial DRY_RUN.
+`DEGIRO_MAPPING_PATH` defaults to `./mapping.yaml`, mounted read-only and readable
+by UID10001. `DEGIRO_STATE_PATH` defaults to `./state`, writable by UID/GID10001,
+mode0700. `.env` and mapping are private mode0600. Missing bind paths are refused.
+`DRY_RUN=1` and empty `CRON` are safe defaults; APPRISE_URLS is optional.
 
-The importer reuses IBKR's once-per-run Security Token exchange, including
-DRY_RUN. See the [authentication contract](ghostfolio-auth.md). Failed login stops
-before broker/target reads; no financial mutation or authentication retry follows.
-Preparing or deploying the test lab does not authorize production imports.
-
-### Approved scheduled DRY_RUN preparation
-
-Florent approved a manual DRY_RUN followed by two consecutive successful daily
-scheduled DRY_RUNs on 2026-10-11. Use `compose.yaml` together with
-`compose.dry-run.yaml`: the overlay fixes `DRY_RUN=1`, `TZ=Europe/Zurich` and
-`CRON=15 6 * * *`. Ambient `DRY_RUN=0` or `CRON` cannot change those overlay
-values. The base alone remains run-once by default.
-
-Infra owns image build/publication, immutable digest selection, Ugreen
-installation and protected host-loader execution. The following command tails
-are for that approved loader with the verified nonsecret configuration and
-exactly one Ghostfolio credential already injected. Run from the reviewed
-checkout; never print the resolved secret-bearing Compose configuration:
-
-```sh
-# First: suppress scheduling for one manual DRY_RUN and review its proposals.
-docker compose -f compose.yaml -f compose.dry-run.yaml run --rm -e CRON= degiro-sync
-# After successful manual review: enable daily simulations at 06:15 local time.
-docker compose -f compose.yaml -f compose.dry-run.yaml up -d degiro-sync
-```
-
-The manual container and scheduler use the same persistent private account
-journal and mapping. Do not run another account instance concurrently. Confirm
-the selected image/config, actual scheduler timezone, source/target identities,
-mapping hash and absence of unresolved intents before starting. Keep private
-proposal evidence and complete financial destination snapshots before/after
-each invocation; credentials and auth responses must not enter those records.
-
-The standard `--sync` CLI reports proposal/acceptance counts, not the full DTO
-plan. For detailed review, use fresh private broker/destination captures and
-the existing offline `scripts/prepare_lab.py` procedure below: its private
-`manifest.yaml` includes `expected_proposals` and `expected_cash`. Keep that
-saved-evidence plan distinct from the actual sync invocation; another broker
-event between reads can change proposals. Never treat an old manifest or a
-log count as approval of the next live batch.
-
-For each run, retain its interval and command result, exact proposed activities
-and independently verified proposed cash. Confirm zero accepted imports and
-unchanged destination financial signatures/cash. Compare consecutive proposals
-against fresh broker and destination reads: legitimate new broker events may
-change the plan, so identical proposal counts are not the acceptance criterion.
-Successful DRY_RUN does not import activities, update cash or advance live
-coverage; unimported proposals may therefore recur. Authentication POST and
-account-local locking/journal creation are permitted. Failure notifications
-remain silent under the existing DRY_RUN policy.
-
-Two successful scheduled simulations validate this preparation only. C15 stays
-open for separately authorized financial activation, verified target backup and
-restore access, first live import and repeated live scheduled reconciliation.
-A database-wide restore can affect other Ghostfolio accounts and is not an
-account-only rollback. No financial cleanup or restore is authorized here.
-
-Rollback of the scheduled DRY_RUN installation belongs to infra: stop only the
-positively identified importer, preserve mapping/journals/private evidence and
-restore its prior image/config through the host loader. Never stop Ghostfolio
-or remove its volumes to roll back this importer. Source rollback is the scoped
-Git revert of this change; it does not change a running container.
-
-## Persistent isolated lab
-
-`compose.lab.yaml` defines a separate `ghostfolio-degiro-lab` project:
-
-- Ghostfolio3.81.0, Postgres15-alpine and Redis7-alpine use the exact pinned
-  versions/digests already used by the disposable DEGIRO lab.
-- PostgreSQL has a project-owned named volume. Normal stop/restart retains it;
-  do not run `down -v` or delete runs/state to reset a test.
-- The Docker network is internal, with no production or proxy network attached.
-  Ghostfolio declares only `127.0.0.1:3334` by default (`LAB_UI_PORT` can change).
-  There is no Traefik route or new public hostname.
-- `lab-check` is an on-demand `tests` profile. It receives no broker credentials,
-  production bearer, notifications or cron. Its only writable mount is `/runs`;
-  inputs and scripts are read-only.
-
-Build the fixture image with `docker build -f lab/Dockerfile -t LAB_IMAGE lab/`
-through infra's approved image workflow. The image reuses the disposable lab's
-exact quote/profile seam: native import/account/database code stays unchanged;
-Yahoo profile lookup reads `/lab/profiles.json` instead of the network. The
-profile file contains synthetic TEST and retained destination profile metadata.
-Unknown symbols fail. This fixture is for import/recovery testing, not live
-prices, market performance or production deployment.
-
-Infra injects `LAB_POSTGRES_PASSWORD`, its matching `LAB_DATABASE_URL`,
-`LAB_ACCESS_TOKEN_SALT` and `LAB_JWT_SECRET_KEY` through SOPS. Nonsecret settings
-are `LAB_GHOST_IMAGE`, `DEGIRO_IMAGE`, `LAB_UI_PORT`, `LAB_PROFILES_PATH`,
-`LAB_CAPTURES_PATH` and `LAB_RUNS_PATH`. Use dedicated Ugreen paths under the
-existing `/volume1/docker` convention, separate from production. The project
-name must remain `ghostfolio-degiro-lab` for the host guard.
-
-Prepare captures before installation and make a private copy owned by UID10001
-for the runner: directories0700, regular files0600, no hard links/symlinks.
-Keep original evidence in its original location and verify copied hashes.
-`LAB_PROFILES_PATH` points to a separate hash-identical `profiles.json` copy
-owned by the fixture server UID1000, with a private parent directory. Keep the
-runner's complete captured bundle private to UID10001. `LAB_RUNS_PATH` is an
-existing UID/GID10001 directory0700.
-Do not make input files globally readable to solve permissions.
-
-Health/readiness is the native `GET /api/v1/health`. Infra verifies readiness,
-persistent storage and ownership before testing. For UI inspection:
-
-```sh
-ssh -N -L 3334:127.0.0.1:3334 ugreen
-```
-
-Then open `http://127.0.0.1:3334` locally. Infra supplies the usual SSH target.
-
-On Ugreen Docker29.6, the internal bridge did not activate the declared host
-port. Infra verified host access to the owned Ghostfolio container IP instead.
-Use `ssh -N -L 3334:LAB_CONTAINER_IP:3333 ugreen` with that IP, obtained from
-the positively identified lab service; resolve it again after recreation.
-Keep the internal network and avoid adding a proxy or production network.
-
-## Prepare frozen real-capture replay
-
-The development command below performs no HTTP or Docker action. Use the
-retained90-day broker capture, complete destination capture and verified mapping
-with their independently retained SHA256 values:
-
-```sh
-.venv/bin/python scripts/prepare_lab.py \
-  --broker PRIVATE_BROKER.json --broker-sha256 BROKER_SHA256 \
-  --destination PRIVATE_DESTINATION.json --destination-sha256 DESTINATION_SHA256 \
-  --mapping PRIVATE_MAPPING.yaml --mapping-sha256 MAPPING_SHA256 \
-  --output-directory NEW_PRIVATE_DIRECTORY
-```
-
-It runs the original complete-destination rolling preflight at the capture's
-clock, copies source bytes unchanged, prepares offline asset profiles and pins
-the expected activity plan in `manifest.yaml`. Retain its printed manifest
-digest independently. Preparation refuses unsafe/changed files, output/input
-aliases and overwrites. A partial directory after an I/O failure is unapproved;
-choose a new output directory rather than overwriting it.
-
-The real replay seeds only the captured target account in a new isolated test
-user/account, preserving financial DTOs and mapping only the account ID. It
-verifies exact native stored signatures, including the full captured target
-history, before importing proposals. Other production accounts are not copied;
-their ownership/conflicts have already been checked by original offline
-preflight. No opening trades or historical evidence are invented. A native seed
-rejection, duplicate collapse or signature difference fails the test and leaves
-private evidence for diagnosis; it is not silently repaired.
-
-The retained capture has 107 activities whose stored currency is NULL. The
-pinned import DTO requires a valid currency even though the database permits
-NULL. Preserve these values with infra's parameterized baseline fixture helper
-inside the positively owned lab, rather than filling historical currencies.
-For this capture, the helper invokes the guarded replay with `--external-seed`.
-The worker publishes `stage: seed-required` in its private run ledger and waits
-up to 120 seconds. After exact baseline insertion, the helper atomically writes
-`seed-ready.json` with `version: 1`, `user_id`, `account_id` and
-`manifest_sha256` matching that run. It must be a UID10001-owned, single-link,
-regular file with mode0600. The worker accepts no extra fields and still proves
-all native financial signatures before running the sync. A receipt alone is
-insufficient. The worker receives no database secrets or Docker access.
-
-## Invoke the persistent lab
-
-Run on Ugreen from the reviewed checkout with infra's lab-only protected
-environment. Retain the source tree because the Compose runner mounts its
-script and public fixture. No real DEGIRO credentials are needed:
-
-```sh
-python3 scripts/run_compose_lab.py synthetic --manifest-sha256 MANIFEST_SHA256
-python3 scripts/run_compose_lab.py replay --manifest-sha256 MANIFEST_SHA256
-```
-
-The direct replay above requires an API-representable baseline. Use infra's
-combined helper for the retained NULL-currency capture; it coordinates the
-external seeding and guarded worker as one operation. Do not run
-`--external-seed` alone without the helper: the wait will expire without imports.
-
-The host wrapper validates the exact Compose project/service, fixture image
-marker, internal network, localhost publication and absence of foreign network
-members. It then validates runner configuration before arming the command.
-Do not bypass it with a direct `docker compose run lab-check`.
-
-Each invocation creates a separate test user/account. Its ephemeral bearer stays
-in memory, never in run files. `LAB_RUNS_PATH/<uuid>/run.yaml` records staged
-ownership/provenance and final counts; `state/` retains the actual adapter
-journal. Failed runs retain both, without automatically retrying, deleting test
-data, stopping services or terminating DB sessions. Repeated invocations add
-isolated test records; cleanup requires a separately reviewed exact ownership
-manifest and explicit reset authorization.
-
-The host imposes a ten-minute deadline. If it expires, it inspects the unique
-worker name/UUID label and removes only that exact owned disposable worker ID.
-Persistent services and data remain intact. Failed worker-ownership checks leave
-it for explicit recovery and print only its safe generated name. Stopping the
-worker does not prove cancellation of an in-flight Ghostfolio request; preserve
-the uncertain journal and investigate exact readback before further work.
-
-The synthetic scenario reuses opening10/SELL2/dividend/fee evidence, checks
-DRY_RUN zero writes, exact native imports/cash, a lost acknowledgement followed
-by positive readback recovery, preserved opening rows and a repeat with zero
-new imports. The real scenario imports the previously pinned proposal, verifies
-cash and preserved seed rows, then repeats without new activities. Its clock is
-the saved broker capture's `fetched_at`: this is frozen replay, not a fresh
-DEGIRO read or a production-ready plan. Historical basis/completeness stay
-unverified.
-
-The existing [disposable acceptance](isolated-acceptance.md) still owns tests
-that delay database INSERTs, stop the app or prove cancellation. Never attach
-`scripts/isolated_acceptance.py` to this persistent infra-owned stack.
-
-## Rollback and ownership
-
-Source rollback is an atomic revert of the Compose/lab implementation commit.
-Infra owns image builds/publication, Ugreen install, secret provisioning,
-controlled service stop and restoration of the prior image/config. Preserve the
-database volume, captures and private runs/journals. Image/code rollback neither
-undoes imported records nor cancels requests. Lab reset and production financial
-recovery are separate explicit actions. The production importer and lab templates
-are independent; installing the latter must not change the existing Ghostfolio
-stack or activate its scheduler.
+The container accepts `--read-only --from-date DATE --to-date DATE --output PATH`
+for private broker discovery and `--ghost-accounts --output PATH` for private
+Ghostfolio ID/name/currency discovery. The latter never contacts the broker.
+Use a nonempty placeholder for unknown IDs during discovery, then replace it.
+`--sync --plan-output /state/plan.json` requires DRY_RUN and publishes exact proposed
+activities/cash without credentials. Outputs are mode0600 and existing destinations
+are refused before authentication; choose new filenames and keep captures private.
