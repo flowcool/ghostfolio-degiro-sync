@@ -82,12 +82,84 @@ def test_unauthorized_registry_never_treated_as_absent(monkeypatch):
     assert len(calls) == 1
 
 
+def test_registry_diagnostics_expose_status_only(monkeypatch, capsys):
+    response = SimpleNamespace(status_code=403, text="SYNTHETIC-RESPONSE-SECRET")
+    monkeypatch.setattr(release.requests, "Session", lambda: nullcontext(
+        SimpleNamespace(get=lambda *args, **kwargs: response)))
+    with pytest.raises(RuntimeError):
+        release.registry_version_absent("owner/repo", "v0.2.0", "actor", "SYNTHETIC-TOKEN")
+    captured = capsys.readouterr()
+    assert captured.err == "Registry token endpoint HTTP 403\n"
+    assert captured.out == ""
+
+
+def test_registry_exception_is_reported_by_phase_without_secret(monkeypatch, tmp_path, capsys):
+    import json
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps(event()))
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GITHUB_ACTOR", "actor")
+    monkeypatch.setenv("GH_TOKEN", "SYNTHETIC-TOKEN")
+    monkeypatch.setattr(release.sys, "argv", ["release_image.py", "--registry"])
+    monkeypatch.setattr(release.subprocess, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(release.subprocess, "check_output", lambda *args, **kwargs: "same-sha\n")
+    def fail(*args):
+        raise RuntimeError("SYNTHETIC-RESPONSE-SECRET")
+    monkeypatch.setattr(release, "registry_version_absent", fail)
+    with pytest.raises(SystemExit) as failure:
+        release.main()
+    assert str(failure.value) == (
+        "Release preflight failed at registry authorization and version absence; version publication refused")
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize("token_status,token,api_status,allowed", [
+    (200, "registry-session", 200, True), (403, "unused", 200, False),
+    (200, "", 200, False), (200, "bad token", 200, False),
+    (200, "registry-session", 401, False), (200, "registry-session", 302, False)])
+def test_registry_login_does_not_request_nonexistent_package(monkeypatch, capsys,
+        token_status, token, api_status, allowed):
+    calls = []
+    session = SimpleNamespace(trust_env=True)
+    def get(url, **options):
+        calls.append(url)
+        assert session.trust_env is False
+        assert options["allow_redirects"] is False and options["timeout"] == (10, 30)
+        if url == "https://ghcr.io/token":
+            assert options["params"] == {"service": "ghcr.io"}
+            assert options["auth"] == ("actor", "SYNTHETIC-TOKEN")
+            return SimpleNamespace(status_code=token_status, json=lambda: {"token": token})
+        assert url == "https://ghcr.io/v2/"
+        assert options["headers"] == {"Authorization": "Bearer registry-session"}
+        return SimpleNamespace(status_code=api_status)
+    session.get = get
+    monkeypatch.setattr(release.requests, "Session", lambda: nullcontext(session))
+    if allowed:
+        release.registry_login("actor", "SYNTHETIC-TOKEN")
+    else:
+        with pytest.raises(RuntimeError):
+            release.registry_login("actor", "SYNTHETIC-TOKEN")
+    expected_calls = 2 if token_status == 200 and token == "registry-session" else 1
+    assert len(calls) == expected_calls
+    diagnostics = capsys.readouterr()
+    assert diagnostics.out == "" and "SYNTHETIC-TOKEN" not in diagnostics.err
+    assert "registry-session" not in diagnostics.err
+
+
 def test_release_manifest_requires_both_native_gates_and_no_pr_publication():
     workflow = yaml.safe_load(Path(".github/workflows/release-image.yml").read_text())
     triggers = workflow.get("on", workflow.get(True))
     assert triggers == {"release": {"types": ["published"]}}
     jobs = workflow["jobs"]
+    assert any(step.get("run") == "python scripts/release_image.py --registry-login"
+               for step in jobs["preflight"]["steps"])
     assert jobs["manifest"]["needs"] == ["preflight", "native-image"]
+    guard = next(i for i, step in enumerate(jobs["manifest"]["steps"])
+                 if step.get("run") == "python scripts/release_image.py --registry")
+    publish = next(i for i, step in enumerate(jobs["manifest"]["steps"])
+                   if "Assemble version manifest" in step.get("name", ""))
+    assert guard < publish
     assert {item["arch"] for item in jobs["native-image"]["strategy"]["matrix"]["include"]} == {"amd64", "arm64"}
     steps = jobs["native-image"]["steps"]
     smoke = next(i for i, step in enumerate(steps) if "smoke_container.py" in step.get("run", ""))
@@ -99,6 +171,6 @@ def test_release_manifest_requires_both_native_gates_and_no_pr_publication():
     assert 'releases/latest' in promotion["run"]
     base = yaml.safe_load(Path("compose.yaml").read_text())["services"]["degiro-sync"]
     assert "build" not in base
-    assert base["image"] == "${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:v0.2.0}"
+    assert base["image"] == "${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:v0.2.1}"
     contributor = yaml.safe_load(Path("compose.build.yaml").read_text())["services"]["degiro-sync"]
     assert contributor["build"]["context"] == "." and contributor["pull_policy"] == "build"
