@@ -92,7 +92,7 @@ def test_invalid_configuration_refuses_cli_before_network(vault, monkeypatch, ch
         adapter.broker_credentials()
 
 
-@pytest.mark.parametrize("change", ["wrong-id", "deleted", "type", "no-login", "no-seed", "temporary-otp", "hotp", "sha256", "digits", "interval"])
+@pytest.mark.parametrize("change", ["wrong-id", "deleted", "type", "bool-type", "no-login", "no-seed", "temporary-otp", "hotp", "sha256", "digits", "interval"])
 def test_item_and_totp_contract_reject_ambiguous_data(vault, monkeypatch, change):
     if change == "wrong-id":
         vault["id"] = "another-item"
@@ -100,6 +100,8 @@ def test_item_and_totp_contract_reject_ambiguous_data(vault, monkeypatch, change
         vault["deletedDate"] = "2026-01-01"
     elif change == "type":
         vault["type"] = 2
+    elif change == "bool-type":
+        vault["type"] = True
     elif change == "no-login":
         vault["login"] = None
     else:

@@ -1905,7 +1905,7 @@ def vault_broker_credentials():
                 run("sync")
                 item = json.loads(run("get", "item", item_id))
                 if (not isinstance(item, dict) or item.get("id") != item_id
-                        or item.get("type") != 1 or item.get("deletedDate")
+                        or type(item.get("type")) is not int or item.get("type") != 1 or item.get("deletedDate")
                         or not isinstance(item.get("login"), dict)):
                     raise ValueError
                 login = item["login"]
