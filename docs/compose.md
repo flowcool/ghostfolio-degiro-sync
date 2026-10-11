@@ -126,6 +126,19 @@ preflight. No opening trades or historical evidence are invented. A native seed
 rejection, duplicate collapse or signature difference fails the test and leaves
 private evidence for diagnosis; it is not silently repaired.
 
+The retained capture has 107 activities whose stored currency is NULL. The
+pinned import DTO requires a valid currency even though the database permits
+NULL. Preserve these values with infra's parameterized baseline fixture helper
+inside the positively owned lab, rather than filling historical currencies.
+For this capture, the helper invokes the guarded replay with `--external-seed`.
+The worker publishes `stage: seed-required` in its private run ledger and waits
+up to 120 seconds. After exact baseline insertion, the helper atomically writes
+`seed-ready.json` with `version: 1`, `user_id`, `account_id` and
+`manifest_sha256` matching that run. It must be a UID10001-owned, single-link,
+regular file with mode0600. The worker accepts no extra fields and still proves
+all native financial signatures before running the sync. A receipt alone is
+insufficient. The worker receives no database secrets or Docker access.
+
 ## Invoke the persistent lab
 
 Run on Ugreen from the reviewed checkout with infra's lab-only protected
@@ -136,6 +149,11 @@ script and public fixture. No real DEGIRO credentials are needed:
 python3 scripts/run_compose_lab.py synthetic --manifest-sha256 MANIFEST_SHA256
 python3 scripts/run_compose_lab.py replay --manifest-sha256 MANIFEST_SHA256
 ```
+
+The direct replay above requires an API-representable baseline. Use infra's
+combined helper for the retained NULL-currency capture; it coordinates the
+external seeding and guarded worker as one operation. Do not run
+`--external-seed` alone without the helper: the wait will expire without imports.
 
 The host wrapper validates the exact Compose project/service, fixture image
 marker, internal network, localhost publication and absence of foreign network

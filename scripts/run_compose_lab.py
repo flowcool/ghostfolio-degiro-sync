@@ -70,6 +70,9 @@ def verify_stack(compose):
 
 
 def invoke(args):
+    external_seed = getattr(args, 'external_seed', False)
+    if external_seed and args.scenario != 'replay':
+        raise RuntimeError('External baseline seeding is restricted to replay')
     path = Path(args.compose_file).resolve()
     compose = ['docker', 'compose', '-p', PROJECT, '-f', str(path)]
     network = verify_stack(compose)
@@ -102,7 +105,8 @@ def invoke(args):
         command(compose + ['run', '--rm', '--no-deps', '-T', '--name', name,
             '--label', 'io.flowcool.degiro-lab-worker=' + marker,
             '-e', 'DEGIRO_PERSISTENT_LAB', 'lab-check', 'python', '/lab/persistent_lab.py',
-            args.scenario, '--manifest-sha256', args.manifest_sha256], timeout=600,
+            args.scenario, '--manifest-sha256', args.manifest_sha256]
+            + (['--external-seed'] if external_seed else []), timeout=600,
             environment=environment)
     except subprocess.TimeoutExpired:
         try:
@@ -118,6 +122,8 @@ def main():
     parser.add_argument('scenario', choices=('synthetic', 'replay'))
     parser.add_argument('--compose-file', default='compose.lab.yaml')
     parser.add_argument('--manifest-sha256', required=True)
+    parser.add_argument('--external-seed', action='store_true',
+        help='Replay only: coordinate with infra-owned exact baseline preparation')
     try:
         invoke(parser.parse_args())
         return 0

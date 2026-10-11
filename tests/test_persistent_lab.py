@@ -296,3 +296,101 @@ def test_runner_refuses_operator_credentials_before_any_network(monkeypatch, nam
     monkeypatch.setenv(name, 'synthetic-forbidden-value')
     with pytest.raises(RuntimeError):
         runner.execute(SimpleNamespace(scenario='replay', manifest_sha256='0' * 64))
+
+
+@pytest.mark.parametrize('run_scenario, external_seed', [('synthetic', False), ('replay', True)])
+def test_execute_native_account_and_external_baseline(private_inputs, tmp_path, monkeypatch, run_scenario, external_seed):
+    if external_seed:
+        path = Path(private_inputs.destination)
+        destination = json.loads(path.read_text())
+        destination['activities']['activities'][0]['currency'] = None
+        raw = json.dumps(destination).encode()
+        path.write_bytes(raw)
+        private_inputs.destination_sha256 = hashlib.sha256(raw).hexdigest()
+    digest = prepare_lab.prepare(private_inputs)
+    captures = Path(private_inputs.output_directory)
+    runs = tmp_path / "runs"
+    runs.mkdir(mode=0o700)
+    real_path = runner.Path
+    monkeypatch.setattr(runner, "Path", lambda value: {"/captures": captures,
+        "/runs": runs, "/lab/fixture.yaml": real_path("tests/fixtures/degiro_contract.yaml")}.get(value, real_path(value)))
+    monkeypatch.setenv("DEGIRO_PERSISTENT_LAB", "persistent-v1")
+    for key in ("DEGIRO_USERNAME", "DEGIRO_PASSWORD", "DEGIRO_TOTP_SECRET", "GHOST_TOKEN", "APPRISE_URLS"):
+        monkeypatch.delenv(key, raising=False)
+    account = {"id": "native-lab", "currency": "EUR", "balance": 0}
+    activities = {"count": 0, "activities": []}
+    readbacks = []
+    def seed_ready(output, evidence):
+        assert evidence['stage'] == 'seed-required' and evidence['seed_count'] == 1
+        destination = json.loads((captures / 'destination.json').read_text())
+        rows = runner.remap_seeds(destination, account['id'])
+        assert rows[0]['currency'] is None
+        activities.update(count=len(rows), activities=[activity_row(row, 'seed') for row in rows])
+    monkeypatch.setattr(runner, 'wait_for_seed', seed_ready)
+    def request(method, url, json=None, **unused):
+        path = url.removeprefix(runner.HOST)
+        value, status = {}, 200
+        if method == "POST" and path == "/api/v1/user":
+            value, status = {"authToken": "synthetic-test-only"}, 201
+        elif path == "/api/v1/user":
+            value = {"id": "isolated-user"}
+        elif method == "POST" and path == "/api/v1/account":
+            value, status = {"id": account["id"]}, 201
+        elif method == "GET" and path == "/api/v1/account/" + account["id"]:
+            readbacks.append(path)
+            value = deepcopy(account)
+        elif method == "POST" and path == "/api/v1/import":
+            assert not external_seed
+            activities["activities"] = [activity_row(row, "seed") for row in json["activities"]]
+            activities["count"] = len(activities["activities"])
+            status = 201
+        elif path == "/api/v1/activities":
+            value = deepcopy(activities)
+        return SimpleNamespace(status_code=status, json=lambda: value)
+    session = SimpleNamespace(headers={}, request=request)
+    monkeypatch.setattr(runner.requests, "Session", lambda: __import__("contextlib").nullcontext(session))
+    def lifecycle(config, snapshot, mapping, quotes, call, expected, **unused):
+        assert (external_seed or readbacks) and len(expected) == 3
+        return {"created": 3, "repeat_created": 0}
+    monkeypatch.setattr(runner, "lifecycle", lifecycle)
+    runner.execute(SimpleNamespace(scenario=run_scenario, manifest_sha256=digest, external_seed=external_seed))
+    assert yaml.safe_load(next(runs.glob("*/run.yaml")).read_text())["stage"] == "complete"
+
+
+@pytest.mark.parametrize("change", [None, "account", "manifest", "extra", "mode", "symlink", "links", "missing"])
+def test_external_seed_receipt_requires_exact_private_run(tmp_path, monkeypatch, change):
+    evidence = {"user_id": "lab-user", "account_id": "lab-account", "manifest_sha256": "a" * 64}
+    receipt = {"version": 1, **evidence}
+    if change == "account":
+        receipt["account_id"] = "foreign-account"
+    elif change == "manifest":
+        receipt["manifest_sha256"] = "b" * 64
+    elif change == "extra":
+        receipt["unexpected"] = True
+    path = tmp_path / "seed-ready.json"
+    if change != "missing":
+        path.write_text(json.dumps(receipt))
+        path.chmod(0o644 if change == "mode" else 0o600)
+    if change == "symlink":
+        original = tmp_path / "original"
+        path.rename(original)
+        path.symlink_to(original)
+    elif change == "links":
+        __import__("os").link(path, tmp_path / "linked")
+    if change is None:
+        runner.wait_for_seed(tmp_path, evidence, timeout=0)
+    else:
+        with pytest.raises((RuntimeError, OSError)):
+            runner.wait_for_seed(tmp_path, evidence, timeout=0)
+
+
+def test_external_seeding_refuses_synthetic_before_any_access(monkeypatch):
+    def forbidden(*args):
+        pytest.fail('No stack or capture access is allowed')
+    monkeypatch.setattr(wrapper, 'verify_stack', forbidden)
+    monkeypatch.setattr(runner, 'load_replay', forbidden)
+    args = SimpleNamespace(scenario='synthetic', external_seed=True)
+    with pytest.raises(RuntimeError):
+        wrapper.invoke(args)
+    with pytest.raises(RuntimeError):
+        runner.execute(args)

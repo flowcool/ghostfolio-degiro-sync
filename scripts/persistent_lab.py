@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import stat
 import sys
+import time
 import uuid
 
 import requests
@@ -27,6 +28,29 @@ HOST = 'http://ghostfolio:3333'
 def require(condition):
     if not condition:
         raise RuntimeError('Persistent lab evidence differs; private details suppressed')
+
+
+def wait_for_seed(output, evidence, timeout=120):
+    """Wait for infra's private receipt; native readback still proves every seed."""
+    deadline = time.monotonic() + timeout
+    path = output / 'seed-ready.json'
+    while True:
+        try:
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except FileNotFoundError:
+            require(time.monotonic() < deadline)
+            time.sleep(1)
+            continue
+        with os.fdopen(descriptor, 'rb') as stream:
+            info = os.fstat(stream.fileno())
+            require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()
+                and info.st_nlink == 1 and stat.S_IMODE(info.st_mode) == 0o600)
+            raw = stream.read(4097)
+        require(len(raw) <= 4096)
+        receipt = json.loads(raw, object_pairs_hook=adapter.unique_evidence_pairs)
+        require(receipt == {'version': 1, **{key: evidence[key] for key in
+            ('user_id', 'account_id', 'manifest_sha256')}})
+        return
 
 
 def load_replay(root, digest):
@@ -151,6 +175,8 @@ def lifecycle(config, snapshot, mapping, quotes, call, expected, lose_reply=Fals
 
 
 def execute(args):
+    external_seed = getattr(args, 'external_seed', False)
+    require(not external_seed or args.scenario == 'replay')
     require(os.environ.get('DEGIRO_PERSISTENT_LAB') == 'persistent-v1')
     require(not any(os.environ.get(key) for key in
         ('DEGIRO_USERNAME', 'DEGIRO_PASSWORD', 'DEGIRO_TOTP_SECRET', 'GHOST_TOKEN', 'APPRISE_URLS')))
@@ -204,7 +230,11 @@ def execute(args):
             seeds = remap_seeds(destination, account['id'])
             require(len(seeds) == manifest['seed_count'])
             expected = [{**row, 'accountId': account['id']} for row in manifest['expected_proposals']]
-        if seeds:
+        if external_seed:
+            evidence.update(stage='seed-required', seed_count=len(seeds))
+            save()
+            wait_for_seed(output, evidence)
+        elif seeds:
             call('POST', '/api/v1/import', {'activities': seeds}, 201)
         actual = records(call('GET', '/api/v1/activities'), account)
         require(Counter(actual.values()) == Counter(map(adapter.activity_signature, seeds)))
@@ -214,6 +244,7 @@ def execute(args):
             'source_account': snapshot['source_account'], 'target_account': account['id'],
             'sync_mode': 'rolling', 'dry_run': True, 'state_dir': str(state)}
         if expected is None:
+            account = call('GET', '/api/v1/account/' + config['target_account'])
             expected = adapter.synchronize_locked(config, snapshot, account,
                 call('GET', '/api/v1/activities'), mapping, quotes, None, None,
                 now=adapter.prospective_instant(snapshot['fetched_at']))['proposed']
@@ -232,6 +263,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('scenario', choices=('synthetic', 'replay'))
     parser.add_argument('--manifest-sha256', required=True)
+    parser.add_argument('--external-seed', action='store_true',
+        help='Replay only: wait for infra-owned exact baseline fixture preparation')
     try:
         execute(parser.parse_args())
         return 0
