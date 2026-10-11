@@ -75,3 +75,22 @@ def test_unsafe_source_pin_refused_before_metadata_request():
     api.request = lambda *a: pytest.fail("Unsafe pin reached API")
     with pytest.raises(ValueError):
         watch.monitor(api, "owner/destination", [{"repository": "owner/source?token=secret", "commit": "a" * 40}])
+
+
+def test_node_fixture_digest_is_watched_and_closed_notices_acknowledge(monkeypatch):
+    pins = watch.fixture_image_pins()
+    assert pins[0]["image"] == "node" and pins[0]["tag"] == "22-slim"
+    monkeypatch.setattr(watch, "fixture_image_digest", lambda pin: "sha256:" + "b" * 64)
+    api = fake_api()
+    assert watch.monitor(api, "owner/destination", pins) == [1]
+    assert "Contributor fixture image" in api.writes[0]["body"]
+    api.issues[0]["state"] = "closed"
+    assert watch.monitor(api, "owner/destination", pins) == []
+
+
+def test_image_read_failure_prevents_all_source_notices(monkeypatch):
+    api = fake_api()
+    monkeypatch.setattr(watch, "fixture_image_digest", lambda pin: (_ for _ in ()).throw(RuntimeError("failure")))
+    with pytest.raises(RuntimeError):
+        watch.monitor(api, "owner/destination", [{"repository": "owner/source", "commit": "a" * 40}] + watch.fixture_image_pins())
+    assert api.writes == []
