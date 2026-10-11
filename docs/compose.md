@@ -51,7 +51,7 @@ Preparing or deploying the test lab does not authorize production imports.
 - PostgreSQL has a project-owned named volume. Normal stop/restart retains it;
   do not run `down -v` or delete runs/state to reset a test.
 - The Docker network is internal, with no production or proxy network attached.
-  Ghostfolio exposes only `127.0.0.1:3334` by default (`LAB_UI_PORT` can change).
+  Ghostfolio declares only `127.0.0.1:3334` by default (`LAB_UI_PORT` can change).
   There is no Traefik route or new public hostname.
 - `lab-check` is an on-demand `tests` profile. It receives no broker credentials,
   production bearer, notifications or cron. Its only writable mount is `/runs`;
@@ -75,8 +75,10 @@ name must remain `ghostfolio-degiro-lab` for the host guard.
 Prepare captures before installation and make a private copy owned by UID10001
 for the runner: directories0700, regular files0600, no hard links/symlinks.
 Keep original evidence in its original location and verify copied hashes.
-`LAB_PROFILES_PATH` is the copied bundle's `profiles.json`; the fixture server
-must have read access. `LAB_RUNS_PATH` is an existing UID/GID10001 directory0700.
+`LAB_PROFILES_PATH` points to a separate hash-identical `profiles.json` copy
+owned by the fixture server UID1000, with a private parent directory. Keep the
+runner's complete captured bundle private to UID10001. `LAB_RUNS_PATH` is an
+existing UID/GID10001 directory0700.
 Do not make input files globally readable to solve permissions.
 
 Health/readiness is the native `GET /api/v1/health`. Infra verifies readiness,
@@ -87,6 +89,12 @@ ssh -N -L 3334:127.0.0.1:3334 ugreen
 ```
 
 Then open `http://127.0.0.1:3334` locally. Infra supplies the usual SSH target.
+
+On Ugreen Docker29.6, the internal bridge did not activate the declared host
+port. Infra verified host access to the owned Ghostfolio container IP instead.
+Use `ssh -N -L 3334:LAB_CONTAINER_IP:3333 ugreen` with that IP, obtained from
+the positively identified lab service; resolve it again after recreation.
+Keep the internal network and avoid adding a proxy or production network.
 
 ## Prepare frozen real-capture replay
 
@@ -118,6 +126,19 @@ preflight. No opening trades or historical evidence are invented. A native seed
 rejection, duplicate collapse or signature difference fails the test and leaves
 private evidence for diagnosis; it is not silently repaired.
 
+The retained capture has 107 activities whose stored currency is NULL. The
+pinned import DTO requires a valid currency even though the database permits
+NULL. Preserve these values with infra's parameterized baseline fixture helper
+inside the positively owned lab, rather than filling historical currencies.
+For this capture, the helper invokes the guarded replay with `--external-seed`.
+The worker publishes `stage: seed-required` in its private run ledger and waits
+up to 120 seconds. After exact baseline insertion, the helper atomically writes
+`seed-ready.json` with `version: 1`, `user_id`, `account_id` and
+`manifest_sha256` matching that run. It must be a UID10001-owned, single-link,
+regular file with mode0600. The worker accepts no extra fields and still proves
+all native financial signatures before running the sync. A receipt alone is
+insufficient. The worker receives no database secrets or Docker access.
+
 ## Invoke the persistent lab
 
 Run on Ugreen from the reviewed checkout with infra's lab-only protected
@@ -128,6 +149,11 @@ script and public fixture. No real DEGIRO credentials are needed:
 python3 scripts/run_compose_lab.py synthetic --manifest-sha256 MANIFEST_SHA256
 python3 scripts/run_compose_lab.py replay --manifest-sha256 MANIFEST_SHA256
 ```
+
+The direct replay above requires an API-representable baseline. Use infra's
+combined helper for the retained NULL-currency capture; it coordinates the
+external seeding and guarded worker as one operation. Do not run
+`--external-seed` alone without the helper: the wait will expire without imports.
 
 The host wrapper validates the exact Compose project/service, fixture image
 marker, internal network, localhost publication and absence of foreign network
