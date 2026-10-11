@@ -2431,8 +2431,9 @@ NOTIFY_REASONS = {
 
 
 def finalize_failure(error):
-    """IBKR delivery policy: one sanitized failed-run alert, never for DRY_RUN."""
-    if os.environ.get("DRY_RUN", "1").strip().lower() not in ("0", "false", "no", "off"):
+    """One private alert for live failures or scheduled simulations."""
+    live = os.environ.get("DRY_RUN", "1").strip().lower() in ("0", "false", "no", "off")
+    if not live and not os.environ.get("CRON", "").strip():
         return
     try:
         settings = load_notification_config()
@@ -2538,6 +2539,7 @@ def main(argv=None):
                 return 0
             if not result["history_verified"]:
                 log.warning("History completeness is unverified; live writes remain blocked")
+                finalize_failure(RuntimeError("History completeness is unverified"))
                 return 1
             return 0
         if args.plan_output or not args.output or not args.from_date or not args.to_date:
