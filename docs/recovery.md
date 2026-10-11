@@ -110,7 +110,7 @@ prove the old PUT finished or was independently cancelled. Partial/absent import
 results likewise require independent completion/cancellation evidence; do not
 erase state or change namespace to force retry. The approved acceptance issue owns
 that remaining procedure. Production service interruption/compensation requires
-Florent's separate authorization.
+the maintainer's separate authorization.
 
 ## Rollback
 

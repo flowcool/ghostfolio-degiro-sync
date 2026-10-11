@@ -141,13 +141,13 @@ def test_replay_binding_detects_retained_input_changes(private_inputs, changed):
 
 def inspected(monkeypatch, change=None):
     labels = {'com.docker.compose.project': wrapper.PROJECT,
-        'com.docker.compose.service': 'ghostfolio', 'io.flowcool.degiro-lab': wrapper.MARKER}
+        'com.docker.compose.service': 'ghostfolio', 'org.ghostfolio.degiro-lab': wrapper.MARKER}
     network_labels = {'com.docker.compose.project': wrapper.PROJECT, 'com.docker.compose.network': 'lab'}
     ports = {'3333/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '3334'}]}
     if change == 'project':
         labels['com.docker.compose.project'] = 'ghostfolio-production'
     if change == 'marker':
-        labels.pop('io.flowcool.degiro-lab')
+        labels.pop('org.ghostfolio.degiro-lab')
     if change == 'public':
         ports['3333/tcp'][0]['HostIp'] = '0.0.0.0'
     def command(args, **kwargs):
@@ -157,7 +157,7 @@ def inspected(monkeypatch, change=None):
             return '\n'.join(json.dumps(value) for value in
                 (change != 'external', network_labels, {'server': {}}))
         if args[:3] == ['docker', 'image', 'inspect']:
-            return json.dumps({'io.flowcool.degiro-lab': wrapper.MARKER} if change != 'image' else {})
+            return json.dumps({'org.ghostfolio.degiro-lab': wrapper.MARKER} if change != 'image' else {})
         if 'Config.Labels "com.docker.compose.project"' in args[-2]:
             return 'foreign' if change == 'foreign' else wrapper.PROJECT
         return '\n'.join(json.dumps(value) for value in
@@ -268,7 +268,7 @@ def test_replay_cash_mismatch_refused_before_any_write(tmp_path, monkeypatch, sc
 def test_timeout_cleanup_requires_exact_worker_ownership(monkeypatch, owned):
     calls = []
     labels = {'com.docker.compose.project': wrapper.PROJECT,
-        'com.docker.compose.service': 'lab-check', 'io.flowcool.degiro-lab-worker': 'marker'}
+        'com.docker.compose.service': 'lab-check', 'org.ghostfolio.degiro-lab-worker': 'marker'}
     if not owned:
         labels['com.docker.compose.service'] = 'ghostfolio'
     def command(args, **kwargs):
@@ -290,7 +290,7 @@ def test_runner_refuses_unarmed_invocation_before_any_network(monkeypatch):
         runner.execute(SimpleNamespace(scenario='synthetic', manifest_sha256='0' * 64))
 
 
-@pytest.mark.parametrize('name', ['DEGIRO_USERNAME', 'DEGIRO_PASSWORD', 'DEGIRO_TOTP_SECRET', 'GHOST_TOKEN', 'GHOST_ACCESS_TOKEN', 'APPRISE_URLS'])
+@pytest.mark.parametrize('name', ['DEGIRO_USERNAME', 'DEGIRO_PASSWORD', 'DEGIRO_TOTP_SECRET', 'BW_CLIENTID', 'BW_CLIENTSECRET', 'BW_PASSWORD', 'BW_ITEM_ID', 'BW_SESSION', 'GHOST_TOKEN', 'GHOST_ACCESS_TOKEN', 'APPRISE_URLS'])
 def test_runner_refuses_operator_credentials_before_any_network(monkeypatch, name):
     monkeypatch.setenv('DEGIRO_PERSISTENT_LAB', wrapper.MARKER)
     monkeypatch.setenv(name, 'synthetic-forbidden-value')

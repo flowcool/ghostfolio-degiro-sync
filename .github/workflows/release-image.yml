@@ -94,6 +94,13 @@ jobs:
           ignore-unfixed: true
           exit-code: "0"
       - run: python scripts/smoke_container.py degiro-release:check
+      - name: Synthetic complete community journey before publication
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true --tmpfs /tmp:rw,nosuid,nodev,size=32m \
+            --mount type=bind,src="$PWD/scripts/community_journey.py",dst=/journey/community_journey.py,readonly \
+            --mount type=bind,src="$PWD/tests/fixtures/degiro_contract.yaml",dst=/journey/degiro_contract.yaml,readonly \
+            degiro-release:check python /journey/community_journey.py
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
         with:
           registry: ghcr.io

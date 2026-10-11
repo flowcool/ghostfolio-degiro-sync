@@ -1,7 +1,6 @@
 # Interest and monetary-fund compensation: adopted reporting policy
 
-This document records the accounting arbitration delegated by Florent on
-2026-10-09. Zero Flatex interest will be retained as zero INTEREST activities;
+This document records the adopted reporting contract. Zero Flatex interest will be retained as zero INTEREST activities;
 positive monetary-fund compensation will use INTEREST as a cash-yield reporting
 convention, with a distinct source identity and symbol. The adapter supports
 only the observed EUR contract below, including identity, readback and recovery.
@@ -29,9 +28,9 @@ Private amounts, account identities and input rows are not published here.
 
 ## Decision evidence and limits
 
-Florent supplied an explanation that compensation offsets negative yield on
+The reporting rationale treats compensation as an offset of negative yield on
 cash held in money-market funds, rather than brokerage fees or margin debit
-interest, and delegated the reporting choice. The official
+interest. The official
 [DEGIRO Investment Services Conditions](https://www.degiro.ch/data/pdf/fr/Conditions_Services_De_Placement.pdf)
 (articles 10.1.2 and 10.2.1, PDF page 24) confirm standing instructions to invest
 client cash in money-market funds for clients offered and choosing that option. Articles 10.1.1 and 10.3.3 describe their gradual replacement
@@ -153,7 +152,7 @@ of these movements; native import must not also credit the account balance.
 
 ## Approval, validation and rollback
 
-Adopted on 2026-10-09 under Florent's delegated accounting arbitration, revised
+Adopted on 2026-10-09 under the maintainer's delegated accounting arbitration, revised
 following his supplied economic explanation and official framework sources.
 The [README](../README.md#accounting-policy-preserve-cash-yield-and-source-identity)
 states the rationale. No further operator accounting choice is a prerequisite

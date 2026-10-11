@@ -174,7 +174,7 @@ contains deliberately blocking Flatex interest/fund compensation. These findings
 do not authorize excluding those rows, asserting an independent statement proof,
 clearing cash/partial uncertainty or running live imports. Full real read-only
 reconciliation and operator CSV transition remain separate evidence requirements;
-production mutations/deployment retain Florent's explicit approval gate.
+production mutations/deployment retain the maintainer's explicit approval gate.
 
 ## Prospective cutover acceptance
 
@@ -195,5 +195,4 @@ rehearsal reached native import and quantity reconciliation, then rejected a
 lab assertion comparing mutable nested account metadata. The lab now checks exact
 created IDs and financial signatures, as the production protection contract does.
 Both failed rehearsals removed all UUID-owned lab resources and count as no
-prospective acceptance. The final successful rehearsal is recorded in Beads with
-its exact tested implementation/image evidence.
+prospective acceptance. Reproduction must record the exact tested implementation and image digest.

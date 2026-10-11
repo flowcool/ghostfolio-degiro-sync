@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
-"""Load encrypted DEGIRO credentials into a child environment without a shell."""
+"""Synthetic provider fixture; all subprocess and child boundaries are mocked."""
 import os
 import subprocess
 import sys
 from pathlib import Path
 
-STORE = Path(__file__).resolve().with_name("access-degiro.local.env")
-KEYS = {"DEGIRO_USERNAME", "DEGIRO_PASSWORD", "DEGIRO_TOTP_SECRET"}
+STORE = Path(__file__).resolve().with_name("synthetic-vault-input")
+KEYS = {"BW_CLIENTID", "BW_CLIENTSECRET", "BW_PASSWORD", "BW_ITEM_ID"}
 
 def main():
-    command = ["docker", "run", "--rm", "-i", "-u", str(os.getuid()) + ":" + str(os.getgid()),
-               "-v", "/etc/komodo-secrets/age-agentvm.key:/k:ro", "-e", "SOPS_AGE_KEY_FILE=/k",
-               "ghcr.io/getsops/sops:v3.13.3", "decrypt", "--input-type", "dotenv",
-               "--output-type", "dotenv", "/dev/stdin"]
+    command = ["synthetic-secret-provider"]
     try:
         result = subprocess.run(command, input=STORE.read_bytes(), capture_output=True, timeout=60)
         if result.returncode:
@@ -24,10 +21,10 @@ def main():
         sys.stderr.write("DEGIRO credential loading failed; details suppressed.\n")
         return 1
     if sys.argv[1:] == ["--check"]:
-        print("DEGIRO_USERNAME_present=True DEGIRO_PASSWORD_present=True DEGIRO_TOTP_SECRET_present=True")
+        print("Vault environment fields present")
         return 0
     if len(sys.argv) < 2:
-        sys.stderr.write("Usage: run-degiro-env.py --check | COMMAND [ARG ...]\n")
+        sys.stderr.write("Usage: synthetic-loader.py --check | COMMAND [ARG ...]\n")
         return 2
     env = os.environ.copy()
     env.update(values)

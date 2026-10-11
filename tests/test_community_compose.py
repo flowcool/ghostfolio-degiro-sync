@@ -143,3 +143,13 @@ def test_existing_discovery_output_refused_before_auth(monkeypatch, tmp_path):
     destination.write_bytes(b"original")
     assert adapter.main(["--ghost-accounts", "--output", str(destination)]) == 1
     assert destination.read_bytes() == b"original"
+
+
+def test_complete_synthetic_community_journey(monkeypatch, capsys):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("community_journey", Path("scripts/community_journey.py"))
+    journey = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(journey)
+    monkeypatch.setenv("COMMUNITY_FIXTURE", str(Path("tests/fixtures/degiro_contract.yaml").resolve()))
+    journey.main()
+    assert "zero financial writes" in capsys.readouterr().out

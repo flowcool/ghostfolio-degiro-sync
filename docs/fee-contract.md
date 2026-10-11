@@ -2,13 +2,8 @@
 
 ## Target-version evidence
 
-The read-only production version probe on 2026-10-08 returned Ghostfolio `3.81.0`:
-
-```sh
-ssh ugreen docker exec ghost grep -m1 version /ghostfolio/apps/api/package.json
-```
-
-This is dated evidence, not a pin on production. The source was inspected in an
+The reviewed Ghostfolio lab version is `3.81.0`, pinned in `lab/Dockerfile`.
+The source was inspected in an
 existing scratch checkout at tag `3.81.0`, commit
 `920d0787541a8568920fc11f978aa01e5a52c581`:
 
@@ -62,7 +57,7 @@ become a second FEE. Missing or ambiguous execution evidence blocks.
 
 ## Disposable server acceptance
 
-On 2026-10-08, agentvm ran `ghostfolio/ghostfolio:3.81.0` at image digest
+On 2026-10-08, the development host ran `ghostfolio/ghostfolio:3.81.0` at image digest
 `sha256:7c925671dba267cc2175195f064b42b9733f3ea170a21db488b7d2be3319e088`,
 with separate Postgres/Redis on an internal Docker network. There were no host
 binds, production credentials, production database connections or persistent
@@ -81,9 +76,7 @@ one newly created lab user/account, and the actual immutable core evidence match
 | Repeat identical import | Empty accepted list, stored count remained one |
 | Preview with free-text MANUAL symbol | HTTP400; stored count remained one |
 
-The temporary driver command was `.venv/bin/python tmp/fee-lab/acceptance.py`;
-its success summary and provenance are recorded in `infra-8tt.56.7`. Temporary
-lab/auth material stays ignored. To reproduce, create a fresh isolated project at
+To reproduce, create a fresh isolated project at
 the pinned image with empty Postgres/Redis, create a disposable user and account,
 normalize the synthetic fee fixture, and run the probes above in order. Never
 point this mutating procedure at production. Stop/remove only that disposable

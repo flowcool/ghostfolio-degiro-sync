@@ -100,3 +100,10 @@ jobs:
           exit-code: "0"
       - name: Isolated run-once and real cron smoke
         run: python scripts/smoke_container.py degiro-smoke:ci
+      - name: Synthetic complete community journey
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true --tmpfs /tmp:rw,nosuid,nodev,size=32m \
+            --mount type=bind,src="$PWD/scripts/community_journey.py",dst=/journey/community_journey.py,readonly \
+            --mount type=bind,src="$PWD/tests/fixtures/degiro_contract.yaml",dst=/journey/degiro_contract.yaml,readonly \
+            degiro-smoke:ci python /journey/community_journey.py

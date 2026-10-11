@@ -2,7 +2,7 @@
 
 ## Approved rolling operating contract
 
-Florent confirmed this contract on 2026-10-10. Set `SYNC_MODE=rolling` for
+the maintainer confirmed this contract on 2026-10-10. Set `SYNC_MODE=rolling` for
 normal operation: retrieve the 90 calendar days ending on the current
 Europe/Zurich date (`today - 89 days` through today, inclusive). `LOOKBACK_DAYS`
 remains 90. An explicit earlier `--from-date` supports catch-up; `--to-date`
@@ -18,7 +18,7 @@ require separate explicit authorization. No opening BUY, invented cash flow,
 or historical-basis certification is introduced.
 
 Existing exact canonical identities are skipped; changed financial content
-is refused. Florent explicitly approved the existing IBKR manual-entry rules:
+is refused. the maintainer explicitly approved the existing IBKR manual-entry rules:
 BUY/SELL entries of the same account, symbol and side may match within two
 calendar days when quantity differs by less than 0.001; the closest match is
 consumed once. Nearby entries with different quantities refuse processing.
@@ -75,7 +75,7 @@ and use a forward fix or explicitly reviewed state migration rather than deletin
 
 Prospective mode preserves existing Ghostfolio history and synchronizes eligible
 operations after a verified cutover. It does not certify historical accounting,
-cost basis, fees, performance or tax reporting. Florent approved prospective
+cost basis, fees, performance or tax reporting. the maintainer approved prospective
 real-account acceptance on2026-10-10: fresh opening captures must agree on
 holdings, and broker cash must pass independent validation, followed by an actual prospective DRY_RUN with
 zero financial writes. C13 and CSV-transition/recovery preflight evidence remain
@@ -108,7 +108,7 @@ short positions and unknown instruments block. Opening broker cash must independ
 pass the existing EUR/zero-pending-settlement checks. Destination cash may be
 stale because the operator does not maintain it manually; an opening cash
 difference does not block validation. DRY_RUN displays the independently verified
-broker balance proposed for Ghostfolio and sends no balance update. Florent
+broker balance proposed for Ghostfolio and sends no balance update. the maintainer
 approved this behavior on2026-10-10. Actual updates retain separate production authority.
 The baseline records existing inventory; it creates no opening BUY or cash flow.
 Only `basis_status: unverified` is currently supported. Accurate historical basis
@@ -178,7 +178,7 @@ processing rather than silently losing an outage interval.
 
 Each run requires raw cash-statement multiset agreement, with exact dates,
 minutes, value dates, ISINs, descriptions, currencies and order references. Amounts
-are exact except for the execution rounding explicitly approved by Florent
+are exact except for the execution rounding explicitly approved by the maintainer
 on2026-10-10: a unique STOCK execution with contract size1 and a supported
 cent-valued currency may corroborate an API/CSV difference of at most0.01.
 Both cent-valued cash views and the declared execution total must remain within
@@ -225,9 +225,8 @@ Offline tests exercise manifest integrity, opening agreement, boundary/coverage
 refusals, exact plans, input preservation, first/repeated runs, uncertainty and the
 actual configuration/command path. The existing owned Ghostfolio lab exercises
 native acceptance and recovery with public synthetic broker evidence. Neither
-proves that a real account's opening contract is valid. Real-account evidence
-belongs to acceptance issue infra-8tt.56.11; production activation and rollout
-remain in infra-8tt.56.12 and require Florent's separate authorization.
+proves that a real account's opening contract is valid. Real-account evidence and production activation require the operator's
+separate review and explicit authorization.
 
 Required CI and completed CodeRabbit review must cover the exact implementation
 head before integration. Production scheduling, credentials, network and image

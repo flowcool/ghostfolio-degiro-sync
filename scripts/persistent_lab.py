@@ -179,7 +179,7 @@ def execute(args):
     require(not external_seed or args.scenario == 'replay')
     require(os.environ.get('DEGIRO_PERSISTENT_LAB') == 'persistent-v1')
     require(not any(os.environ.get(key) for key in
-        ('DEGIRO_USERNAME', 'DEGIRO_PASSWORD', 'DEGIRO_TOTP_SECRET', 'GHOST_TOKEN', 'GHOST_ACCESS_TOKEN', 'APPRISE_URLS')))
+        ('DEGIRO_USERNAME', 'DEGIRO_PASSWORD', 'DEGIRO_TOTP_SECRET', 'BW_CLIENTID', 'BW_CLIENTSECRET', 'BW_PASSWORD', 'BW_ITEM_ID', 'BW_SESSION', 'GHOST_TOKEN', 'GHOST_ACCESS_TOKEN', 'APPRISE_URLS')))
     root = Path('/captures')
     manifest, broker, destination, mapping, quotes = load_replay(root, args.manifest_sha256)
     runs = Path('/runs')
@@ -264,7 +264,7 @@ def main():
     parser.add_argument('scenario', choices=('synthetic', 'replay'))
     parser.add_argument('--manifest-sha256', required=True)
     parser.add_argument('--external-seed', action='store_true',
-        help='Replay only: wait for infra-owned exact baseline fixture preparation')
+        help='Replay only: wait for contributor-owned exact baseline fixture preparation')
     try:
         execute(parser.parse_args())
         return 0
