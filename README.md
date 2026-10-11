@@ -77,7 +77,7 @@ Obtain the personal API key from Bitwarden account settings, **Security → Keys
 | `BW_PASSWORD` | Yes | Vault master password; used to unlock the encrypted vault |
 | `BW_ITEM_ID` | Yes | UUID of the DEGIRO Login item |
 
-**Migrating from direct broker credentials?** Move the DEGIRO username, password and TOTP seed into the vault Login item, configure the `BW_*` values above, and remove `DEGIRO_USERNAME`, `DEGIRO_PASSWORD` and `DEGIRO_TOTP_SECRET` from the container environment. Nonempty direct credential variables are explicitly rejected, even when vault credentials are configured. There is no direct-login fallback.
+**Migrating from direct broker credentials?** Move the DEGIRO username, password and TOTP seed into the vault Login item, configure the `BW_*` values above, and remove `DEGIRO_USERNAME`, `DEGIRO_PASSWORD` and `DEGIRO_TOTP_SECRET` from the container environment. Direct credential variables are explicitly rejected when present (including empty values), even when vault credentials are configured. There is no direct-login fallback.
 
 <details>
 <summary>How vault sessions are isolated</summary>
@@ -231,11 +231,24 @@ Stop the existing scheduler first and review the catch-up in DRY_RUN. Interrupte
 
 ## Troubleshooting
 
-Some CLI failures deliberately use a generic message to avoid exposing secrets or financial records. A message mentioning “characterization” or “uncertain account state” does not identify the failing check or prove that authentication succeeded. Check these local prerequisites first:
+Failed commands append a stable diagnostic pair, for example `stage=config reason=mapping` or `stage=transactions reason=failed`. Both tokens come from a fixed allowlist; exceptions, credentials, keys, URLs, paths, account IDs and response values are never included in the diagnostic. Malformed CLI arguments return exit code 2 with a fixed message; operational failures return 1. Use `--help` for command syntax.
+
+| Diagnostic | Where to look |
+| --- | --- |
+| `stage=config` | The named local check: `arguments`, `mode`, `date_range`, `window_days`, `lookback_days`, `report_locale`, `mapping`, `state_dir`, `account`, `sync_mode`, `ghostfolio_credentials`, `direct_credentials` or `broker_credentials` |
+| `stage=vault` | Vault `configuration`, `temporary_state`, `server`, `login`, `unlock`, `sync`, `item` or `logout`; `item` includes Login/TOTP validation |
+| `stage=login` | DEGIRO login; a known fixed auth reason may distinguish timeout, TLS, HTTP refusal or required interactive authentication |
+| `stage=client_discovery`, `transactions`, `account_overview`, `products`, `account_info`, `account_update`, `account_report`, `order_history`, `cutover_destination`, `logout` | The named broker read/cleanup step; `reason=failed` does not echo provider data |
+| `stage=ghostfolio` | Token `authentication`, `transport`, `account_read` or `activities_read` |
+| `stage=output` | Private file `destination` validation or `write` |
+| `stage=broker` | General `read` failure or post-read `api_format` validation |
+| `stage=sync` | `reconciliation` of account evidence, or an unclassified `failed` run |
+
+The earliest classified failure is preserved across outer boundaries. A token identifies the failed check, not a root cause or proof that all preceding authentication succeeded. Generic summaries remain private by design; older images may not include diagnostic tokens. Check these local prerequisites first:
 
 | Symptom / check | What to verify |
 | --- | --- |
-| Vault or broker login fails | All required `BW_*` values; exact Login item UUID; username, password and supported TOTP seed; no nonempty direct `DEGIRO_*` credential variables |
+| Vault or broker login fails | All required `BW_*` values; exact Login item UUID; username, password and supported TOTP seed; no direct `DEGIRO_*` credential variables |
 | Read-only capture fails | Both ISO dates, end on or after start, a new writable `--output` path, and `--window-days` between 2 and 366 |
 | Mapping is rejected | Valid ISINs, exactly `symbol`/`currency`, EUR/USD/JPY only, no whitespace or currency conflicts; UID 10001 can read the mount |
 | State access fails | Existing directory owned by UID 10001, mode 0700, accessible bind-mount ACLs; preserve existing journals |
