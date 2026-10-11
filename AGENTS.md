@@ -39,10 +39,13 @@ Runtime dependencies remain pinned; dev-only pytest never ships in the image.
 Every logic change has an offline regression. Pytest forbids network access;
 real read-only characterization is a separate operator procedure.
 
-DEGIRO_USERNAME, DEGIRO_PASSWORD, DEGIRO_TOTP_SECRET and GHOST_TOKEN come only from
-`os.environ`, backed by an off-git SOPS store and pointer. Never log credentials,
-OTP, session data, raw client details or auth responses. Validate the target URL
-before any credential-bearing request; token exchange is outside scope.
+Credentials come only from `os.environ`, backed by an off-git SOPS store and
+pointer. Before changing authentication, credential injection or recovery, read
+[the auth contract](docs/ghostfolio-auth.md): exactly one of `GHOST_ACCESS_TOKEN`
+(Security Token) or legacy `GHOST_TOKEN` (bearer), one exchange per execution in
+the adapter after local preflight, exact-origin validation and secret-free
+diagnostics. DRY_RUN permits login while financial writes remain blocked.
+Never log credentials, OTP, session data, raw client details or auth responses.
 
 Keep gates C1-C15 from the plan. Unverified cash categories, FX direction, history
 completeness and current-cash semantics remain implementation gates. Unknown or
