@@ -166,11 +166,14 @@ def test_release_manifest_requires_both_native_gates_and_no_pr_publication():
     push = next(i for i, step in enumerate(steps) if step.get("id") == "image")
     assert smoke < push and steps[push]["with"]["provenance"] == "mode=max"
     assert steps[push]["with"]["sbom"] is True
+    verification = next(step for step in steps if "Verify publication" in step.get("name", ""))
+    assert 'scripts/verify_release_image.py' in verification["run"]
+    assert 'containerimage.config.digest' not in verification["run"]
     promotion = next(step for step in jobs["manifest"]["steps"] if "Promote" in step.get("name", ""))
     assert promotion["if"] == "needs.preflight.outputs.prerelease == 'false'"
     assert 'releases/latest' in promotion["run"]
     base = yaml.safe_load(Path("compose.yaml").read_text())["services"]["degiro-sync"]
     assert "build" not in base
-    assert base["image"] == "${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:v0.2.1}"
+    assert base["image"] == "${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:v0.2.2}"
     contributor = yaml.safe_load(Path("compose.build.yaml").read_text())["services"]["degiro-sync"]
     assert contributor["build"]["context"] == "." and contributor["pull_policy"] == "build"

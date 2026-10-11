@@ -68,7 +68,7 @@ The hostname in `GHOST_HOST` must resolve from the importer container. For the d
 | `CRON` | Empty | Empty runs once; five numeric cron fields enable the scheduler |
 | `APPRISE_URLS` | Empty | Optional JSON list of notification URLs, e.g. `'["ntfy://notification-host/topic"]'` |
 | `APPRISE_TIMEOUT` | `10` | Notification deadline in seconds, 1–30 |
-| `DEGIRO_IMAGE` | `ghcr.io/flowcool/ghostfolio-degiro-sync:v0.2.1` | Published version or immutable `ghcr.io/flowcool/ghostfolio-degiro-sync@sha256:...` digest; amd64/arm64 |
+| `DEGIRO_IMAGE` | `ghcr.io/flowcool/ghostfolio-degiro-sync:v0.2.2` | Published version or immutable `ghcr.io/flowcool/ghostfolio-degiro-sync@sha256:...` digest; amd64/arm64 |
 
 The template sets `SYNC_MODE=rolling`, `LOOKBACK_DAYS=90`, `TZ=Europe/Zurich`, `/config/mapping.yaml` and `/state`. The broker date boundary is Europe/Zurich. The container runs as UID/GID 10001, with a read-only root filesystem and no Linux capabilities. Existing mounts are required; Compose refuses to create missing files silently.
 
