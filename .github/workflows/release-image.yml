@@ -122,20 +122,10 @@ jobs:
             org.opencontainers.image.version=${{ env.RELEASE_TAG }}
       - name: Verify publication uses the validated image configuration
         env:
-          BUILD_METADATA: ${{ steps.image.outputs.metadata }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
           ARCH: ${{ matrix.arch }}
         run: |
-          python - <<'PY'
-          import json, os, re, subprocess
-          from pathlib import Path
-          local = subprocess.check_output(['docker', 'inspect', '--format', '{{.Id}}', 'degiro-release:check'], text=True).strip()
-          assert json.loads(os.environ['BUILD_METADATA'])['containerimage.config.digest'] == local
-          digest = os.environ['IMAGE_DIGEST']
-          assert re.fullmatch(r'sha256:[0-9a-f]{64}', digest)
-          Path('digests').mkdir()
-          Path('digests', os.environ['ARCH'] + '.txt').write_text(digest)
-          PY
+          python scripts/verify_release_image.py --image "$IMAGE" --digest "$IMAGE_DIGEST" --arch "$ARCH"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: digest-${{ matrix.arch }}
