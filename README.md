@@ -1,6 +1,6 @@
 # ghostfolio-degiro-sync
 
-Synchronize DEGIRO executions, dividends, supported fees and current cash with an existing [Ghostfolio](https://ghostfol.io) account using Docker Compose. Bitwarden or Vaultwarden supplies the DEGIRO login and TOTP secret on every execution. No host Python installation or external secret-management platform is required.
+Synchronize DEGIRO executions, dividends, supported fees and current cash with an existing [Ghostfolio](https://ghostfol.io) account using Docker Compose. Bitwarden or Vaultwarden supplies the DEGIRO login and TOTP secret on every execution. The container includes the connector, vault CLI and scheduler.
 
 **Start with a simulation.** `DRY_RUN=1` performs authentication and reads, proposes activities and cash, and sends no financial writes. Supported synchronization uses a rolling 90-day window; it does not certify your earlier history or cost basis.
 
@@ -50,7 +50,8 @@ Every synchronization creates private temporary CLI state, authenticates, unlock
 | Variable | Required | Meaning / default |
 | --- | --- | --- |
 | `GHOST_HOST` | Yes | Final Ghostfolio origin; default `http://ghostfolio:3333`. HTTPS origins and private/container HTTP are supported; paths, URL credentials, redirects, queries and fragments are refused |
-| `GHOST_ACCESS_TOKEN` | Yes | Ghostfolio **Security Token**, exchanged for a bearer once per execution |
+| `GHOST_ACCESS_TOKEN` | Recommended | Ghostfolio **Security Token**, exchanged for a bearer once per execution; configure exactly one Ghostfolio credential |
+| `GHOST_TOKEN` | Alternative | Legacy expiring bearer; leave unset when using `GHOST_ACCESS_TOKEN` |
 | `GHOST_ACCOUNT_ID` | Yes | Destination account UUID; use the private account discovery below |
 | `DEGIRO_ACCOUNT_ID` | Yes | Numeric DEGIRO source `intAccount`; see discovery below |
 | `GHOST_NETWORK` | Yes | Existing Docker network that reaches Ghostfolio; inspect available names with `docker network ls` |
