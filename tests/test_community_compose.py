@@ -103,7 +103,13 @@ def test_compose_renders_synthetic_configuration_without_network(tmp_path):
     assert service["environment"]["BW_PASSWORD"] == "fake"
     assert not any(key.startswith("DEGIRO_"+suffix) for key in service["environment"]
                    for suffix in ("USERNAME", "PASSWORD", "TOTP"))
-    assert all(volume["bind"]["create_host_path"] is False for volume in service["volumes"])
+    # Compose versions differ in whether false JSON fields are omitted.
+    # Verify the explicit source guard as well as its rendered boolean semantics.
+    import yaml
+    source = yaml.safe_load(Path("compose.yaml").read_text())["services"]["degiro-sync"]
+    assert all(volume["bind"]["create_host_path"] is False for volume in source["volumes"])
+    assert all(volume.get("bind", {}).get("create_host_path", False) is False
+               for volume in service["volumes"])
     assert service["volumes"][0]["read_only"] is True
     assert config["networks"]["ghostfolio"]["external"] is True
     assert config["networks"]["ghostfolio"]["name"] == "synthetic-network"
