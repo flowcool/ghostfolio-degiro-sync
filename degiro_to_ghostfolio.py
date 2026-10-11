@@ -1889,7 +1889,13 @@ def vault_broker_credentials():
                     raise ValueError
                 return result.stdout.decode()
 
-            run("config", "server", server)
+            if server in ("https://bitwarden.com", "https://vault.bitwarden.com"):
+                run("config", "server", "https://bitwarden.com")
+            elif server in ("https://bitwarden.eu", "https://vault.bitwarden.eu"):
+                run("config", "server", "https://vault.bitwarden.eu",
+                    "--api", "https://api.bitwarden.eu", "--identity", "https://identity.bitwarden.eu")
+            else:
+                run("config", "server", server)
             run("login", "--apikey")
             try:
                 session = run("unlock", "--passwordenv", "BW_PASSWORD", "--raw").strip()

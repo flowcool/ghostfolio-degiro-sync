@@ -171,3 +171,18 @@ def test_vault_failure_prevents_any_broker_request(vault, monkeypatch, stage):
     monkeypatch.setattr(requests.Session, "send", lambda *a, **k: pytest.fail("Broker contacted"))
     with pytest.raises(RuntimeError, match="Bitwarden credential retrieval failed"):
         adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2))
+
+
+@pytest.mark.parametrize("server,arguments", [
+    ("https://bitwarden.com", ["config", "server", "https://bitwarden.com"]),
+    ("https://vault.bitwarden.com", ["config", "server", "https://bitwarden.com"]),
+    ("https://bitwarden.eu", ["config", "server", "https://vault.bitwarden.eu", "--api",
+        "https://api.bitwarden.eu", "--identity", "https://identity.bitwarden.eu"]),
+    ("https://vault.bitwarden.eu", ["config", "server", "https://vault.bitwarden.eu", "--api",
+        "https://api.bitwarden.eu", "--identity", "https://identity.bitwarden.eu"]),
+    ("https://vault.example", ["config", "server", "https://vault.example"])])
+def test_cloud_regions_and_self_hosted_use_correct_cli_endpoints(vault, monkeypatch, server, arguments):
+    monkeypatch.setenv("BW_SERVER", server)
+    calls, _ = mock_cli(monkeypatch, vault)
+    assert adapter.broker_credentials().username == vault["login"]["username"]
+    assert calls[0] == arguments

@@ -19,3 +19,10 @@ Empty CRON runs once. Five numeric fields start Supercronic without an immediate
 Stop the importer, preserve mapping/journals, pull/select the reviewed image and recreate the service. Restart alone retains its environment. API-key/master-password changes require recreation; DEGIRO item changes are fetched on the next execution. Source rollback uses a scoped Git revert; it does not reverse account activities or cash. An older version may reject a newer journal: use a reviewed forward fix or explicit migration instead of deleting state.
 
 Developer-only lab and synthetic credential-delivery checks are documented in CONTRIBUTING.md. They never use a real vault or broker account.
+
+Official US cloud origins are normalized to the CLI's `https://bitwarden.com`
+configuration, which selects its separate API/identity defaults. EU cloud origins
+select explicit `https://api.bitwarden.eu` and `https://identity.bitwarden.eu`
+endpoints; a web-vault hostname alone is not a self-hosted API origin. Other HTTPS
+origins retain the CLI's self-hosted server behavior. This is an adapter mapping,
+not a transport redirect or an operator TLS override.
