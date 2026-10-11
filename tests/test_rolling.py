@@ -173,7 +173,8 @@ def test_matching_manual_sell_prevents_duplicate_and_preserves_holdings(rolling)
     assert {a["type"] for a in sync_account(rolling)["proposed"]} == {"DIVIDEND", "FEE"}
 
 
-def test_actual_command_uses_rolling_today_and_private_read_only_plan(rolling, monkeypatch, tmp_path):
+@pytest.mark.parametrize('credential_mode', ['bearer', 'access'])
+def test_actual_command_uses_rolling_today_and_private_read_only_plan(rolling, monkeypatch, tmp_path, credential_mode):
     from types import SimpleNamespace
     from contextlib import contextmanager
     from test_degiro_sync import response
@@ -195,6 +196,15 @@ def test_actual_command_uses_rolling_today_and_private_read_only_plan(rolling, m
     monkeypatch.setenv('DRY_RUN', '1')
     monkeypatch.setenv('GHOST_HOST', config['ghost_host'])
     monkeypatch.setenv('GHOST_TOKEN', 'synthetic-token')
+    monkeypatch.delenv('GHOST_ACCESS_TOKEN', raising=False)
+    auth_calls = []
+    def exchange(host, token):
+        auth_calls.append((host, token))
+        return 'synthetic-token'
+    monkeypatch.setattr(adapter, 'ghost_exchange_access_token', exchange)
+    if credential_mode == 'access':
+        monkeypatch.delenv('GHOST_TOKEN')
+        monkeypatch.setenv('GHOST_ACCESS_TOKEN', 'synthetic-security-token')
     monkeypatch.setenv('GHOST_ACCOUNT_ID', config['target_account'])
     monkeypatch.setenv('DEGIRO_ACCOUNT_ID', config['source_account'])
     monkeypatch.setenv('STATE_DIR', config['state_dir'])
@@ -203,6 +213,7 @@ def test_actual_command_uses_rolling_today_and_private_read_only_plan(rolling, m
     monkeypatch.setenv('MAPPING_FILE', str(mapping))
     queried = []
     def acquire(start, end, window_days, **kwargs):
+        assert len(auth_calls) == (1 if credential_mode == 'access' else 0)
         queried.append((start.isoformat(), end.isoformat(), kwargs))
         return deepcopy(snapshot)
     monkeypatch.setattr(adapter, 'read_degiro', acquire)
@@ -213,6 +224,7 @@ def test_actual_command_uses_rolling_today_and_private_read_only_plan(rolling, m
     @contextmanager
     def transport(cfg, target):
         assert cfg['dry_run'] is True
+        assert cfg['ghost_token'] == 'synthetic-token' and 'ghost_access_token' not in cfg
         yield SimpleNamespace(get=get)
     monkeypatch.setattr(adapter, 'ghost_transport', transport)
     monkeypatch.setattr(adapter.core, 'ghost_import_activities', lambda *a: pytest.fail('POST'))
@@ -222,6 +234,7 @@ def test_actual_command_uses_rolling_today_and_private_read_only_plan(rolling, m
     assert len(reads) == 2 and state(config) is None
     assert adapter.main(['--sync', '--from-date', today.isoformat()]) == 1
     assert len(queried) == 1
+    assert auth_calls == ([(config['ghost_host'], 'synthetic-security-token')] if credential_mode == 'access' else [])
     monkeypatch.setenv('LOOKBACK_DAYS', '30')
     assert adapter.main(['--sync']) == 1
     assert len(queried) == 1

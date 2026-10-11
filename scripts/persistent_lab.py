@@ -179,7 +179,7 @@ def execute(args):
     require(not external_seed or args.scenario == 'replay')
     require(os.environ.get('DEGIRO_PERSISTENT_LAB') == 'persistent-v1')
     require(not any(os.environ.get(key) for key in
-        ('DEGIRO_USERNAME', 'DEGIRO_PASSWORD', 'DEGIRO_TOTP_SECRET', 'GHOST_TOKEN', 'APPRISE_URLS')))
+        ('DEGIRO_USERNAME', 'DEGIRO_PASSWORD', 'DEGIRO_TOTP_SECRET', 'GHOST_TOKEN', 'GHOST_ACCESS_TOKEN', 'APPRISE_URLS')))
     root = Path('/captures')
     manifest, broker, destination, mapping, quotes = load_replay(root, args.manifest_sha256)
     runs = Path('/runs')

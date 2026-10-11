@@ -333,3 +333,14 @@ Unobserved signs, currencies, product/order/FX/tax relationships and source fiel
 remain write-blocking. Existing identity/readback/recovery and C1-C15 gates remain
 applicable; legacy NAV/history, CSV transition and production authorization are
 not relaxed by this extension.
+
+## Approved Ghostfolio authentication extension (2026-10-11)
+
+Florent approved reuse of the pinned IBKR per-run Security Token exchange in the
+DEGIRO adapter. The [authentication contract](../ghostfolio-auth.md) extends the
+original exclusion of automatic authentication: mutually exclusive environment
+`GHOST_ACCESS_TOKEN` and legacy `GHOST_TOKEN`, stricter exact-origin/private HTTP,
+one exchange before broker/target reads, and no refresh during financial work.
+DRY_RUN permits authentication only; all C1-C15 financial and production gates
+remain unchanged. The immutable core/projection boundary and sibling stay
+unchanged. Infra owns credential provisioning, rotation and installation.

@@ -72,7 +72,7 @@ Supply the environment and a read-only mapping file using the off-git SOPS
 pointer and [synchronization configuration](synchronization.md). The temporary
 Bitwarden-derived DEGIRO store/loader is described in [read-only.md](read-only.md);
 it supplies broker environment variables without a plaintext env file. Ghostfolio
-bearer provisioning is separate. Never pass secret values as command-line
+credential provisioning is separate. Never pass secret values as command-line
 arguments or print a Docker inspection containing the environment. An eventual
 production Compose/runtime-secret setup belongs to the authorized infra rollout.
 
@@ -89,15 +89,16 @@ without adding SOPS, an age key, a decryptor or a secret service to the app imag
 | --- | --- |
 | Broker source | Off-git SOPS dotenv, exactly `DEGIRO_USERNAME`, `DEGIRO_PASSWORD`, `DEGIRO_TOTP_SECRET`; restricted host-side access |
 | Host decrypt | Existing `run-degiro-env.py` runs SOPS with captured output, a 60-second limit and the host key; validates the complete nonempty key set before executing a child |
-| Ghostfolio source | Independently provisioned `GHOST_TOKEN` in the launcher environment; an already valid bearer, with no token exchange in this scope |
+| Ghostfolio source | Independently provisioned `GHOST_ACCESS_TOKEN` (Security Token) or legacy `GHOST_TOKEN` (bearer), exactly one nonempty; exchange Security Token once per run after local preflight |
 | Injection | `docker run --env NAME` copies values from the loader's child environment; values never appear in argv or a plaintext env file |
-| Container access | UID/GID10001 receives the four variables; it cannot access the SOPS source, host key or Bitwarden |
+| Container access | UID/GID10001 receives three broker variables and one Ghostfolio credential; it cannot access the SOPS source, host key or Bitwarden |
 | Cron | Supercronic's Python child inherits the container environment; no decrypt or vault access happens per minute/job |
 | Restart/refresh | Start a fresh host loader process and recreate the container. The environment is a snapshot; direct `docker restart` retains old values and is outside this contract |
 | Unavailable source | Missing/unreadable store, unavailable key/decryption failure, timeout or invalid key set stops the loader before Docker/application execution; stale inherited broker variables do not provide a fallback |
 
 Infra owns target-host provisioning and refresh, including the independent
-Ghostfolio bearer lifecycle. The supported launcher uses `--restart=no` and
+Ghostfolio Security Token provisioning/rotation or legacy bearer lifecycle.
+The supported launcher uses `--restart=no` and
 foreground `docker run --rm`: any host supervisor restart must rerun the loader
 and create a new container. A credential rotation requires a controlled stop
 and recreation of a cron container; changing the encrypted file cannot update
@@ -106,7 +107,12 @@ revoke its in-memory credentials; infra must stop it if continued use is no
 longer authorized. Job/authentication errors remain application failures, with
 no automatic vault refresh or broker-login retry.
 
-The existing loader inherits `GHOST_TOKEN` from its caller. Its private dotenv
+The existing broker loader inherits the selected `GHOST_ACCESS_TOKEN` or legacy
+`GHOST_TOKEN` from its caller; it does not decrypt or rename that independent
+Ghostfolio credential. Infra must inject exactly one nonempty name and leave the
+other unset or blank. The application exchanges the Security Token once per
+sync/recovery/capture execution, including DRY_RUN; it never refreshes mid-run.
+See [authentication](ghostfolio-auth.md). The broker loader's private dotenv
 format uses one literal nonempty value per line, split on the first `=`; it
 does not evaluate shell quoting or expansion and does not support embedded
 newlines. Infra must preserve that representation when provisioning/rotating.
@@ -135,13 +141,13 @@ It substitutes a synthetic store, SOPS subprocess and child execution boundary
 before calling the loader; no real encrypted store, key, vault or SOPS container
 is used. Six unavailable/invalid-source cases must suppress private diagnostics
 and execute no child. Valid output supplies all three broker variables and
-preserves the independently supplied synthetic bearer.
+preserves either independently supplied synthetic Ghostfolio credential mode.
 
 The resulting synthetic environment enters disposable, network-disabled,
 rootless containers through environment names. The actual entrypoint and actual
 minute cron run a hashes-only replacement of the broker script, proving child
 delivery without broker/HTTP activity. Two generations exercise recreation and
-credential refresh for both run-once and cron. Passing this is harness evidence,
+credential refresh for both credential modes, run-once and cron. Passing this is harness evidence,
 not actual broker authentication or proof that the target host is provisioned.
 
 Ownership records under ignored `tmp/credential-recovery/` contain only names,
@@ -155,14 +161,16 @@ that manual recovery. Never prune the host or inspect `Config.Env`.
 The target needs Docker, the approved immutable app image, UID/GID10001 access
 to its mounted files, a host-side private SOPS store encrypted for that host's
 key, a bounded host loader equivalent to the reviewed agentvm loader, and
-independent bearer provisioning. The current agentvm key/path is not proof of
+independent Ghostfolio credential provisioning. The current agentvm key/path is
+not proof of
 target-host decryption access. Infra selects the target host, supervisor,
 source/key paths and refresh procedure during the separately authorized rollout.
 
 The launcher template is an argument vector, not a shell secret-substitution
 recipe: invoke `python3 HOST_LOADER docker run --rm --restart=no`, followed by
 `--env DEGIRO_USERNAME --env DEGIRO_PASSWORD --env DEGIRO_TOTP_SECRET
---env GHOST_TOKEN`, explicitly allowlisted nonsecret account/origin settings,
+--env GHOST_ACCESS_TOKEN` (or legacy `--env GHOST_TOKEN`), explicitly allowlisted
+nonsecret account/origin settings,
 `DRY_RUN=1`, `SYNC_MODE=rolling`, `LOOKBACK_DAYS=90`, and the reviewed image
 digest. Supply `CRON` only for cron mode. Use a read-only mapping mount and a
 persistent private0700 `STATE_DIR` owned by UID10001, including for rolling

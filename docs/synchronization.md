@@ -21,9 +21,13 @@ The HTTP origins are for the existing private container network or isolated loca
 acceptance, not public credential transport. No arbitrary origin, URL credentials,
 query, path prefix or redirect is accepted. Changing this policy requires review.
 
-`GHOST_TOKEN` comes only from the environment. It is an already valid bearer;
-Security Token exchange remains outside this scope. Use the off-git secret
-pointer, never a command-line secret or committed environment file.
+Supply exactly one environment credential: `GHOST_ACCESS_TOKEN` is the durable
+Ghostfolio Security Token, exchanged for a bearer once per execution; legacy
+`GHOST_TOKEN` is an already valid bearer used unchanged. Blank inputs count as
+absent; both or neither fail before network access. Use the off-git secret
+pointer, never a command-line secret or committed environment file. See the
+[authentication contract](ghostfolio-auth.md) for privacy and failure behavior.
+DRY_RUN permits the login POST, while financial writes remain forbidden.
 
 Required non-secret environment values:
 

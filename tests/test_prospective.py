@@ -342,7 +342,8 @@ def test_actual_dry_run_command_exercises_config_and_orchestration(prospective_a
     assert adapter.main(["--sync", "--from-date", "2025-12-31", "--to-date", "2026-01-04"]) == 1
 
 
-def test_dry_run_command_keeps_acquisition_scope_and_read_only_transports(prospective_account, tmp_path, monkeypatch, caplog):
+@pytest.mark.parametrize('credential_mode', ['bearer', 'access'])
+def test_dry_run_command_keeps_acquisition_scope_and_read_only_transports(prospective_account, tmp_path, monkeypatch, caplog, credential_mode):
     config, snapshot, destination = prospective_account
     now = datetime.now(timezone.utc)
     snapshot["fetch_started_at"] = (now - timedelta(seconds=1)).isoformat()
@@ -357,7 +358,17 @@ def test_dry_run_command_keeps_acquisition_scope_and_read_only_transports(prospe
             "MAPPING_FILE": str(mapping_path)}.items():
         monkeypatch.setenv(key, value)
     acquired, requests = [], []
+    monkeypatch.delenv('GHOST_ACCESS_TOKEN', raising=False)
+    auth_calls = []
+    def exchange(host, token):
+        auth_calls.append((host, token))
+        return 'synthetic-token'
+    monkeypatch.setattr(adapter, 'ghost_exchange_access_token', exchange)
+    if credential_mode == 'access':
+        monkeypatch.delenv('GHOST_TOKEN')
+        monkeypatch.setenv('GHOST_ACCESS_TOKEN', 'synthetic-security-token')
     def read(start, end, days, **kwargs):
+        assert len(auth_calls) == (1 if credential_mode == 'access' else 0)
         acquired.append((start, end, days, kwargs))
         return deepcopy(snapshot)
     def get(url):
@@ -366,6 +377,7 @@ def test_dry_run_command_keeps_acquisition_scope_and_read_only_transports(prospe
         return SimpleNamespace(raise_for_status=lambda: None, json=lambda: deepcopy(body))
     @contextmanager
     def transport(cfg, target):
+        assert cfg['ghost_token'] == 'synthetic-token' and 'ghost_access_token' not in cfg
         yield SimpleNamespace(get=get)
     monkeypatch.setattr(adapter, "read_degiro", read)
     monkeypatch.setattr(adapter, "ghost_transport", transport)
@@ -381,6 +393,7 @@ def test_dry_run_command_keeps_acquisition_scope_and_read_only_transports(prospe
     monkeypatch.setenv("CUTOVER_SHA256", "0" * 64)
     assert adapter.main(["--sync"]) == 1
     assert len(acquired) == 1 and len(requests) == 2
+    assert auth_calls == ([(config['ghost_host'], 'synthetic-security-token')] if credential_mode == 'access' else [])
 
 
 def test_prepare_command_publishes_only_after_validating_and_refuses_overwrite(evidence, tmp_path, capsys):
