@@ -51,7 +51,7 @@ Preparing or deploying the test lab does not authorize production imports.
 - PostgreSQL has a project-owned named volume. Normal stop/restart retains it;
   do not run `down -v` or delete runs/state to reset a test.
 - The Docker network is internal, with no production or proxy network attached.
-  Ghostfolio exposes only `127.0.0.1:3334` by default (`LAB_UI_PORT` can change).
+  Ghostfolio declares only `127.0.0.1:3334` by default (`LAB_UI_PORT` can change).
   There is no Traefik route or new public hostname.
 - `lab-check` is an on-demand `tests` profile. It receives no broker credentials,
   production bearer, notifications or cron. Its only writable mount is `/runs`;
@@ -75,8 +75,10 @@ name must remain `ghostfolio-degiro-lab` for the host guard.
 Prepare captures before installation and make a private copy owned by UID10001
 for the runner: directories0700, regular files0600, no hard links/symlinks.
 Keep original evidence in its original location and verify copied hashes.
-`LAB_PROFILES_PATH` is the copied bundle's `profiles.json`; the fixture server
-must have read access. `LAB_RUNS_PATH` is an existing UID/GID10001 directory0700.
+`LAB_PROFILES_PATH` points to a separate hash-identical `profiles.json` copy
+owned by the fixture server UID1000, with a private parent directory. Keep the
+runner's complete captured bundle private to UID10001. `LAB_RUNS_PATH` is an
+existing UID/GID10001 directory0700.
 Do not make input files globally readable to solve permissions.
 
 Health/readiness is the native `GET /api/v1/health`. Infra verifies readiness,
@@ -87,6 +89,12 @@ ssh -N -L 3334:127.0.0.1:3334 ugreen
 ```
 
 Then open `http://127.0.0.1:3334` locally. Infra supplies the usual SSH target.
+
+On Ugreen Docker29.6, the internal bridge did not activate the declared host
+port. Infra verified host access to the owned Ghostfolio container IP instead.
+Use `ssh -N -L 3334:LAB_CONTAINER_IP:3333 ugreen` with that IP, obtained from
+the positively identified lab service; resolve it again after recreation.
+Keep the internal network and avoid adding a proxy or production network.
 
 ## Prepare frozen real-capture replay
 

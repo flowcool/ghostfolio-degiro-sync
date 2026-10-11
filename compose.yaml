@@ -7,7 +7,7 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    tmpfs: [/tmp:rw,nosuid,nodev,size=32m]
+    tmpfs: ["/tmp:rw,nosuid,nodev,size=32m"]
     environment:
       DEGIRO_USERNAME:
       DEGIRO_PASSWORD:

@@ -197,6 +197,7 @@ def test_compose_reuses_pins_and_separates_runtime_from_lab():
     assert runtime['restart'] == 'no' and runtime['cap_drop'] == ['ALL']
     assert runtime['security_opt'] == ['no-new-privileges:true']
     assert production['networks']['ghostfolio']['external'] is True
+    assert checker['tmpfs'] == runtime['tmpfs'] == ['/tmp:rw,nosuid,nodev,size=32m']
 
 
 @pytest.mark.parametrize('change', [None, 'credentials', 'network', 'mount', 'privileged', 'extra_host', 'timeout'])
