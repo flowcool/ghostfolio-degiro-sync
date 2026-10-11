@@ -199,6 +199,9 @@ numeric schedule fields are accepted and supercronic validates them. Named
 shortcuts and embedded commands/newlines are rejected. Only the fixed sync command
 is written to the crontab; no environment-provided command is evaluated.
 Supercronic retains its default non-overlapping scheduling for this single job.
+The Compose base sets `TZ=Europe/Zurich`; the image retains system `tzdata`.
+The approved [DRY_RUN Compose overlay](compose.md#approved-scheduled-dry_run-preparation)
+defines daily scheduling at 06:15 local time and keeps financial writes blocked.
 Independent instances targeting the same account still require operator control.
 Live invocations and prospective/rolling DRY_RUN require one shared private
 persistent `STATE_DIR` for their account lock and durable intent. Rolling mode

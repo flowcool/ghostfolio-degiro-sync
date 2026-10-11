@@ -22,6 +22,7 @@ services:
       SYNC_MODE: rolling
       LOOKBACK_DAYS: "90"
       DRY_RUN: ${DRY_RUN:-1}
+      TZ: Europe/Zurich
       CRON: ${CRON:-}
       APPRISE_URLS:
       APPRISE_TIMEOUT: ${APPRISE_TIMEOUT:-10}

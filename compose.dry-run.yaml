@@ -1,0 +1,7 @@
+# Combine with compose.yaml only after reviewing the manual DRY_RUN.
+services:
+  degiro-sync:
+    environment:
+      DRY_RUN: "1"
+      TZ: Europe/Zurich
+      CRON: "15 6 * * *"
