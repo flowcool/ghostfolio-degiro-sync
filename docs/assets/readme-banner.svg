@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="240" viewBox="0 0 880 240" role="img" aria-labelledby="title description">
+  <title id="title">DEGIRO to Ghostfolio</title>
+  <desc id="description">A portfolio activity line connects DEGIRO to Ghostfolio. Docker Compose, vault credentials and simulation first.</desc>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1">
+      <stop stop-color="#101827"/>
+      <stop offset="1" stop-color="#25204a"/>
+    </linearGradient>
+    <linearGradient id="activity">
+      <stop stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+  <rect width="880" height="240" rx="20" fill="url(#background)"/>
+  <g stroke="#ffffff" stroke-opacity=".05">
+    <path d="M0 60H880M0 120H880M0 180H880M110 0V240M220 0V240M330 0V240M440 0V240M550 0V240M660 0V240M770 0V240"/>
+  </g>
+  <path d="M36 165H150L180 140L215 157L265 109L310 124L355 87L395 105H480L515 76L555 94L600 53L640 68L690 40H844" fill="none" stroke="url(#activity)" stroke-width="3" stroke-linejoin="round" opacity=".35"/>
+  <rect x="170" y="72" width="540" height="92" rx="18" fill="#121a2b" fill-opacity=".9" stroke="#ffffff" stroke-opacity=".12"/>
+  <g font-family="system-ui, -apple-system, sans-serif" text-anchor="middle">
+    <text x="318" y="129" fill="#f8fafc" font-size="32" font-weight="700" letter-spacing="2">DEGIRO</text>
+    <text x="562" y="129" fill="#f8fafc" font-size="32" font-weight="700">Ghostfolio</text>
+    <text x="440" y="201" fill="#cbd5e1" font-size="15" letter-spacing=".8">Docker Compose · Vault credentials · Simulation first</text>
+  </g>
+  <path d="M410 118H465M453 106L465 118L453 130" fill="none" stroke="#a78bfa" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
