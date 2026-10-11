@@ -1,6 +1,7 @@
 """Published index verification rejects ambiguity and untested native configurations."""
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -64,3 +65,24 @@ def test_invalid_reference_never_executes_docker(monkeypatch, image, digest, arc
     monkeypatch.setattr(release.subprocess, "check_output", lambda *args, **kwargs: pytest.fail("Unexpected command"))
     with pytest.raises(RuntimeError):
         release.verify(image, digest, arch)
+
+
+@pytest.mark.parametrize("succeeds", [True, False])
+def test_cli_only_hands_verified_digest_to_manifest_job(monkeypatch, tmp_path, succeeds):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["verify_release_image.py", "--image", "ghcr.io/owner/repo",
+        "--digest", DIGEST, "--arch", "amd64"])
+    def verify(image, digest, arch):
+        assert (image, digest, arch) == ("ghcr.io/owner/repo", DIGEST, "amd64")
+        if not succeeds:
+            raise RuntimeError("Published configuration mismatch")
+        return digest
+    monkeypatch.setattr(release, "verify", verify)
+    artifact = tmp_path / "digests" / "amd64.txt"
+    if succeeds:
+        release.main()
+        assert artifact.read_text() == DIGEST
+    else:
+        with pytest.raises(RuntimeError):
+            release.main()
+        assert not artifact.exists()
