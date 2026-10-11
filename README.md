@@ -89,6 +89,10 @@ python3 -m venv .venv
 
 Tests are offline and HTTP is mocked. The local checker reads pinned Git objects
 without modifying the sibling; the CI checker fetches into disposable state.
+Ghostfolio authentication accepts exactly one of `GHOST_ACCESS_TOKEN` (Security
+Token exchanged once per execution, recommended for cron) or legacy `GHOST_TOKEN`
+(pre-fetched bearer). The login POST is allowed in DRY_RUN; financial writes stay
+blocked. See the [authentication contract](docs/ghostfolio-auth.md).
 Credentials are supplied only from environment variables backed by an off-git
 SOPS store and [non-secret pointer](secrets.pointer.yaml). Do not put real credentials into examples, tests or logs.
 

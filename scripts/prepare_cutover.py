@@ -27,6 +27,7 @@ def capture(output, config, from_date=None):
     paths = {name: adapter.snapshot_destination(root / (name + ".json"))
         for name in ("broker", "destination")}
     root.mkdir(mode=0o700, parents=True, exist_ok=False)
+    adapter.authenticate_ghostfolio(config)
     def destination():
         target = {"id": config["target_account"], "currency": "EUR"}
         with adapter.ghost_transport(config, target) as session:

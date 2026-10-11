@@ -290,7 +290,7 @@ def test_runner_refuses_unarmed_invocation_before_any_network(monkeypatch):
         runner.execute(SimpleNamespace(scenario='synthetic', manifest_sha256='0' * 64))
 
 
-@pytest.mark.parametrize('name', ['DEGIRO_USERNAME', 'DEGIRO_PASSWORD', 'DEGIRO_TOTP_SECRET', 'GHOST_TOKEN', 'APPRISE_URLS'])
+@pytest.mark.parametrize('name', ['DEGIRO_USERNAME', 'DEGIRO_PASSWORD', 'DEGIRO_TOTP_SECRET', 'GHOST_TOKEN', 'GHOST_ACCESS_TOKEN', 'APPRISE_URLS'])
 def test_runner_refuses_operator_credentials_before_any_network(monkeypatch, name):
     monkeypatch.setenv('DEGIRO_PERSISTENT_LAB', wrapper.MARKER)
     monkeypatch.setenv(name, 'synthetic-forbidden-value')
@@ -315,7 +315,7 @@ def test_execute_native_account_and_external_baseline(private_inputs, tmp_path, 
     monkeypatch.setattr(runner, "Path", lambda value: {"/captures": captures,
         "/runs": runs, "/lab/fixture.yaml": real_path("tests/fixtures/degiro_contract.yaml")}.get(value, real_path(value)))
     monkeypatch.setenv("DEGIRO_PERSISTENT_LAB", "persistent-v1")
-    for key in ("DEGIRO_USERNAME", "DEGIRO_PASSWORD", "DEGIRO_TOTP_SECRET", "GHOST_TOKEN", "APPRISE_URLS"):
+    for key in ("DEGIRO_USERNAME", "DEGIRO_PASSWORD", "DEGIRO_TOTP_SECRET", "GHOST_TOKEN", "GHOST_ACCESS_TOKEN", "APPRISE_URLS"):
         monkeypatch.delenv(key, raising=False)
     account = {"id": "native-lab", "currency": "EUR", "balance": 0}
     activities = {"count": 0, "activities": []}

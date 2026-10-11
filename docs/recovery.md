@@ -56,7 +56,8 @@ account and complete activity GETs from the approved origin while holding the
 same owner lock. Transport is forced into GET-only mode, even if the normal sync
 configuration enables writes. Wrong account, excluded/redacted context, malformed
 or incomplete readback and changed request ID refuse confirmation. There is no
-broker login, token exchange, automatic replay or cash/partial cancellation.
+broker login, automatic replay or cash/partial cancellation. Security Token
+mode permits one Ghostfolio login POST before the financial GET-only readback.
 
 Recovery is currently exercised in
 offline regressions and the [disposable full-server delayed-result/restart
@@ -66,9 +67,11 @@ remains separate.
 ## Operator preflight and local confirmation
 
 Select the exact pending request ID from the private journal before beginning.
-Provide `GHOST_HOST`, `GHOST_TOKEN`, `GHOST_ACCOUNT_ID`, `DEGIRO_ACCOUNT_ID` and
-`STATE_DIR` from the established environment/secret pointer. The command does not
-require broker credentials or a mapping file. Do not paste a bearer into its
+Provide `GHOST_HOST`, exactly one of `GHOST_ACCESS_TOKEN` or legacy `GHOST_TOKEN`,
+`GHOST_ACCOUNT_ID`, `DEGIRO_ACCOUNT_ID` and `STATE_DIR` from the established
+environment/secret pointer. The command does not require broker credentials or
+a mapping file. The same [auth contract](ghostfolio-auth.md) applies; a
+wrong/missing pending intent fails before login. Do not paste either credential into its
 arguments. Stop scheduled adapter work before operator recovery; its owner lock
 also refuses overlap rather than waiting.
 

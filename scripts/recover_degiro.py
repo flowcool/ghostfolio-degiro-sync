@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GET-only positive import recovery; explicit local confirmation, no replay."""
+"""Positive import recovery with optional login; local confirmation, no replay."""
 import argparse
 import os
 from pathlib import Path
@@ -15,15 +15,15 @@ def main(argv=None):
     parser.add_argument('--confirm-local-state', action='store_true',
         help='Confirm only the matched private import intent; no financial mutation')
     args = parser.parse_args(argv)
-    config = {'ghost_host': os.environ.get('GHOST_HOST'), 'ghost_token': os.environ.get('GHOST_TOKEN'),
-        'target_account': os.environ.get('GHOST_ACCOUNT_ID'),
-        'source_account': os.environ.get('DEGIRO_ACCOUNT_ID'), 'state_dir': os.environ.get('STATE_DIR')}
     try:
+        config = {**adapter.load_ghost_credentials(),
+            'target_account': os.environ.get('GHOST_ACCOUNT_ID'),
+            'source_account': os.environ.get('DEGIRO_ACCOUNT_ID'), 'state_dir': os.environ.get('STATE_DIR')}
         result = adapter.readback_import_intent(config, expected_intent_id=args.expected_intent_id,
             confirm=args.confirm_local_state)
         action = 'confirmed locally' if result['confirmed'] else 'verified; intent retained'
         print('Positive import recovery: ' + str(result['matched']) + ' exact activities ' + action
-              + '; GET only, no replay or financial mutation'
+              + '; financial readback GET only, no replay or financial mutation'
               + '; snapshot SHA-256=' + result['snapshot_sha256'])
         return 0
     except Exception:

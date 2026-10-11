@@ -26,7 +26,10 @@ Supply nonsecret settings through the infra configuration mechanism:
 
 `SYNC_MODE=rolling`, `LOOKBACK_DAYS=90`, `MAPPING_FILE` and `STATE_DIR` are fixed
 inside the template. Inject `DEGIRO_USERNAME`, `DEGIRO_PASSWORD`,
-`DEGIRO_TOTP_SECRET` and `GHOST_TOKEN` from the approved off-git SOPS/host loader.
+`DEGIRO_TOTP_SECRET` and exactly one of `GHOST_ACCESS_TOKEN` (Security Token,
+recommended for cron) or `GHOST_TOKEN` (legacy bearer) from the approved off-git
+SOPS/host loader. Both Ghostfolio names are passed without values by Compose;
+leave the unused variable unset or blank in the launcher environment.
 Optional `APPRISE_URLS` is also protected environment input; `APPRISE_TIMEOUT`
 defaults to10. Compose passes environment names; never commit values, put them
 in a plaintext env file, print rendered secret-bearing Compose configuration,
@@ -38,8 +41,9 @@ Infra's supervisor must rerun the loader when recreating the container. An
 explicit cron setting starts the scheduler; it does not run an immediate sync.
 Use a separate run-once command for a reviewed initial DRY_RUN.
 
-DEGIRO currently needs an already valid Ghostfolio bearer. Reusing IBKR's token
-renewal is separate work and must be settled before permanent production cron.
+The importer reuses IBKR's once-per-run Security Token exchange, including
+DRY_RUN. See the [authentication contract](ghostfolio-auth.md). Failed login stops
+before broker/target reads; no financial mutation or authentication retry follows.
 Preparing or deploying the test lab does not authorize production imports.
 
 ## Persistent isolated lab

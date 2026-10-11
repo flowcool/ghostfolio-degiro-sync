@@ -133,13 +133,14 @@ def test_interrupted_record_update_keeps_prior_private_record(tmp_path, monkeypa
 
 @pytest.mark.parametrize('failure', [None, 'missing', 'locked', 'timeout',
                                     'unreadable', 'empty', 'unexpected-key'])
-def test_pinned_loader_boundaries_are_offline_and_fail_before_child(tmp_path, failure):
+@pytest.mark.parametrize('ghost_key', ['GHOST_TOKEN', 'GHOST_ACCESS_TOKEN'])
+def test_pinned_loader_boundaries_are_offline_and_fail_before_child(tmp_path, failure, ghost_key):
     loader = Path(__file__).parent / 'fixtures/runtime_env_loader.py'
-    result = delivery.loader_fixture(loader, tmp_path, generation=2, failure=failure)
+    result = delivery.loader_fixture(loader, tmp_path, generation=2, failure=failure, ghost_key=ghost_key)
     if failure:
         assert result is None
     else:
-        assert all(result[key] == value for key, value in delivery.synthetic_values(2).items())
+        assert all(result[key] == value for key, value in delivery.synthetic_values(2, ghost_key).items())
 
 
 def test_termination_blocks_both_signals_before_cleanup_transition(monkeypatch):

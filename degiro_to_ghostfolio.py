@@ -640,6 +640,60 @@ def validate_ghost_host(host):
     return host
 
 
+# Adapted from ghostfolio-ibkr-sync 54958ab1035eb97a1f67f9072b79699813ec3800;
+# deliberately outside the immutable projection. See docs/ghostfolio-auth.md.
+GHOST_AUTH_TIMEOUT = (10, 30)
+_HEADER_SAFE_TOKEN_RE = re.compile(r"[\x21-\x7e]+")
+
+
+def load_ghost_credentials():
+    """Exactly one environment credential; blank inputs count as absent."""
+    host = validate_ghost_host(os.environ.get("GHOST_HOST"))
+    token = os.environ.get("GHOST_TOKEN")
+    access = os.environ.get("GHOST_ACCESS_TOKEN")
+    token = token if token and token.strip() else None
+    access = access if access and access.strip() else None
+    if (token is None) == (access is None):
+        raise RuntimeError("Set exactly one of GHOST_TOKEN or GHOST_ACCESS_TOKEN")
+    if token is not None:
+        if "\r" in token or "\n" in token:
+            raise RuntimeError("Invalid Ghostfolio sync environment")
+        return {"ghost_host": host, "ghost_token": token}
+    return {"ghost_host": host, "ghost_token": None, "ghost_access_token": access}
+
+
+def ghost_exchange_access_token(host, access_token):
+    """IBKR exchange contract with DEGIRO exact origin and private transport."""
+    validate_ghost_host(host)
+    if not isinstance(access_token, str) or not access_token.strip():
+        raise RuntimeError("Invalid Ghostfolio security token")
+    with private_broker_logs(), requests.Session() as session:
+        session.trust_env = False
+        try:
+            response = session.post(f"{host}/api/v1/auth/anonymous",
+                json={"accessToken": access_token}, timeout=GHOST_AUTH_TIMEOUT,
+                allow_redirects=False)
+        except requests.RequestException:
+            raise RuntimeError("Ghostfolio login failed: network error") from None
+        if not 200 <= response.status_code < 300:
+            raise RuntimeError(f"Ghostfolio login failed: HTTP {response.status_code}")
+        try:
+            body = response.json()
+        except ValueError:
+            raise RuntimeError("Ghostfolio login failed: response is not JSON") from None
+        token = body.get("authToken") if isinstance(body, dict) else None
+        if not isinstance(token, str) or not _HEADER_SAFE_TOKEN_RE.fullmatch(token):
+            raise RuntimeError("Ghostfolio login failed: response has no usable authToken")
+        return token
+
+
+def authenticate_ghostfolio(config):
+    """Resolve the security token once, discarding it from runtime config."""
+    if "ghost_access_token" in config:
+        config["ghost_token"] = ghost_exchange_access_token(
+            config["ghost_host"], config.pop("ghost_access_token"))
+
+
 @contextmanager
 def ghost_transport(config, target_account):
     """Bind immutable core to bounded HTTP for this sequential single-thread run."""
@@ -1037,12 +1091,13 @@ def resolve_import_intent(config, existing_body, *, expected_intent_id):
 
 
 def readback_import_intent(config, *, expected_intent_id, confirm=False):
-    """Authenticated GET-only recovery; default preflight preserves private state."""
+    """Optional login then financial GET-only recovery; explicit confirmation."""
     if type(confirm) is not bool:
         raise RuntimeError("Invalid local recovery confirmation mode")
     readonly = {**config, "dry_run": True}
     with account_journal(readonly) as journal:
         selected_import_intent(journal, expected_intent_id)
+        authenticate_ghostfolio(readonly)
         target = {"id": readonly["target_account"]}
         with ghost_transport(readonly, target) as session:
             response = session.get(f"{readonly['ghost_host']}/api/v1/account/{target['id']}")
@@ -1686,13 +1741,11 @@ def load_sync_config():
     sync_mode = os.environ.get("SYNC_MODE", "full_history")
     if sync_mode not in ("full_history", "prospective", "rolling"):
         raise RuntimeError("Invalid synchronization mode")
-    host = validate_ghost_host(os.environ.get("GHOST_HOST"))
-    token = os.environ.get("GHOST_TOKEN")
+    credentials = load_ghost_credentials()
     target = os.environ.get("GHOST_ACCOUNT_ID")
     source = broker_identity(os.environ.get("DEGIRO_ACCOUNT_ID"))
     mode = os.environ.get("DRY_RUN", "1").strip().lower()
-    if (not isinstance(token, str) or not token.strip() or "\r" in token or "\n" in token
-            or not isinstance(target, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", target)
+    if (not isinstance(target, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", target)
             or mode not in ("1", "true", "yes", "on", "0", "false", "no", "off")):
         raise RuntimeError("Invalid Ghostfolio sync environment")
     try:
@@ -1700,7 +1753,7 @@ def load_sync_config():
         mapping, quotes = verified_mapping_document(document)
     except (OSError, ValueError, TypeError, KeyError, yaml.YAMLError):
         raise RuntimeError("Invalid explicitly verified Yahoo mapping file") from None
-    return {"ghost_host": host, "ghost_token": token, "source_account": source,
+    return {**credentials, "source_account": source,
             "target_account": target, "dry_run": mode in ("1", "true", "yes", "on"),
             "state_dir": os.environ.get("STATE_DIR"), "sync_mode": sync_mode,
             "cutover_manifest": os.environ.get("CUTOVER_MANIFEST"),
@@ -1725,6 +1778,8 @@ def run_sync_locked(config, mapping, quotes, from_date, to_date, window_days, jo
         context = prospective_opening_context(evidence, config, mapping, quotes)
         from_date = date.fromisoformat(context["opening"]["from_date"])
         to_date = max(to_date, datetime.now(ZoneInfo("Europe/Zurich")).date())
+        history_windows(from_date, to_date, window_days)
+        authenticate_ghostfolio(config)
         snapshot = read_degiro(from_date, to_date, window_days,
             report_locale=("fr", "fr"), holdings=True)
     elif config.get("sync_mode") == "rolling":
@@ -1734,8 +1789,12 @@ def run_sync_locked(config, mapping, quotes, from_date, to_date, window_days, jo
         coverage = journal["document"].get("coverage")
         if coverage and from_date > prospective_instant(coverage["through"]).astimezone(ZoneInfo("Europe/Zurich")).date():
             raise RuntimeError("Rolling coverage gap requires explicit catch-up start")
+        history_windows(from_date, to_date, window_days)
+        authenticate_ghostfolio(config)
         snapshot = read_degiro(from_date, to_date, window_days, report_locale=("fr", "fr"), holdings=True)
     else:
+        history_windows(from_date, to_date, window_days)
+        authenticate_ghostfolio(config)
         snapshot = read_degiro(from_date, to_date, window_days)
     expected_target = {"id": config["target_account"], "currency": snapshot["account_info"]["baseCurrency"]}
     with ghost_transport(config, expected_target) as session:

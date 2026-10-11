@@ -20,7 +20,8 @@ import yaml
 
 LOADER_SHA256 = 'f605a539aa0348cc82d161861d5630d381c23db52a513cb4bbc65bcebd8ecc51'
 BROKER_KEYS = ('DEGIRO_USERNAME', 'DEGIRO_PASSWORD', 'DEGIRO_TOTP_SECRET')
-SECRET_KEYS = (*BROKER_KEYS, 'GHOST_TOKEN')
+GHOST_KEYS = ('GHOST_TOKEN', 'GHOST_ACCESS_TOKEN')
+SECRET_KEYS = (*BROKER_KEYS, *GHOST_KEYS)
 LABEL = 'org.ghostfolio.degiro.credential-lab'
 SIGNALS = {signal.SIGINT, signal.SIGTERM}
 
@@ -30,8 +31,8 @@ def ensure(condition):
         raise RuntimeError('Synthetic credential delivery evidence failed')
 
 
-def synthetic_values(generation):
-    return {key: f'SYNTHETIC-{generation}-{key}-DO-NOT-LOG' for key in SECRET_KEYS}
+def synthetic_values(generation, ghost_key='GHOST_TOKEN'):
+    return {key: f'SYNTHETIC-{generation}-{key}-DO-NOT-LOG' for key in (*BROKER_KEYS, ghost_key)}
 
 
 def clean_environment():
@@ -41,11 +42,12 @@ def clean_environment():
             if key in os.environ}
 
 
-def loader_fixture(loader, directory, generation=1, failure=None):
+def loader_fixture(loader, directory, generation=1, failure=None, ghost_key='GHOST_TOKEN'):
     """Execute the reviewed loader with every secret-bearing boundary substituted."""
     source = loader.read_bytes()
     ensure(hashlib.sha256(source).hexdigest() == LOADER_SHA256)
-    body = synthetic_values(generation)
+    ensure(ghost_key in GHOST_KEYS)
+    body = synthetic_values(generation, ghost_key)
     store = directory / 'synthetic-encrypted-store'
     store.write_bytes(b'SYNTHETIC-ENCRYPTED-INPUT')
     store.chmod(0o600)
@@ -87,7 +89,7 @@ def loader_fixture(loader, directory, generation=1, failure=None):
         captured.append(environment.copy())
 
     output = io.StringIO()
-    inherited = {**clean_environment(), 'GHOST_TOKEN': body['GHOST_TOKEN']}
+    inherited = {**clean_environment(), ghost_key: body[ghost_key]}
     # Existing stale broker values must never defeat unavailable-source failure.
     inherited.update({key: 'SYNTHETIC-STALE' for key in BROKER_KEYS})
     with patch.dict(os.environ, inherited, clear=True), \
@@ -103,7 +105,8 @@ def loader_fixture(loader, directory, generation=1, failure=None):
         ensure(text == 'DEGIRO credential loading failed; details suppressed.\n')
         return None
     ensure(status is None and len(captured) == 1 and not text)
-    ensure(all(captured[0].get(key) == body[key] for key in SECRET_KEYS))
+    ensure(all(captured[0].get(key) == body[key] for key in body))
+    ensure(set(captured[0]) & set(GHOST_KEYS) == {ghost_key})
     return captured[0]
 
 
@@ -183,8 +186,10 @@ def remove_owned(identity, name, project):
 
 
 def check_container(image, directory, project, record, resources, environment, generation, cron):
+    ghost_key = 'GHOST_ACCESS_TOKEN' if 'GHOST_ACCESS_TOKEN' in environment else 'GHOST_TOKEN'
+    values = synthetic_values(generation, ghost_key)
     probe = directory / f'probe-{generation}-{int(cron)}.py'
-    probe.write_text(probe_source(synthetic_values(generation), generation))
+    probe.write_text(probe_source(values, generation))
     probe.chmod(0o644)
     name = project + '-' + str(len(resources))
     resources[name] = None
@@ -209,7 +214,7 @@ def check_container(image, directory, project, record, resources, environment, g
             time.sleep(.5)
         else:
             raise RuntimeError('Synthetic credential cron did not run in bounded window')
-    ensure(not any(value in output for value in synthetic_values(generation).values()))
+    ensure(not any(value in output for value in values.values()))
     remove_owned(identity, name, project)
     del resources[name]
     save_record(record, project, resources)
@@ -236,12 +241,13 @@ def main():
             for failure in ('missing', 'locked', 'timeout', 'unreadable', 'empty', 'unexpected-key'):
                 loader_fixture(args.loader, directory, failure=failure)
             print('PASS unavailable/invalid synthetic source never starts a child; private diagnostics', flush=True)
-            for generation in (1, 2):
-                environment = loader_fixture(args.loader, directory, generation)
-                for cron in (False, True):
-                    check_container(args.image, directory, project, record, resources,
-                                    environment, generation, cron)
-                print(f'PASS run-once and real cron generation {generation}; recreate reloads environment', flush=True)
+            for ghost_key in GHOST_KEYS:
+                for generation in (1, 2):
+                    environment = loader_fixture(args.loader, directory, generation, ghost_key=ghost_key)
+                    for cron in (False, True):
+                        check_container(args.image, directory, project, record, resources,
+                                        environment, generation, cron)
+                    print(f'PASS {ghost_key} run-once and cron generation {generation}; recreate reloads environment', flush=True)
     finally:
         primary = sys.exc_info()[1]
         mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
