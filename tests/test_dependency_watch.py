@@ -179,17 +179,16 @@ def test_pins_are_read_from_requirements_and_dockerfile(tmp_path):
     (tmp_path / "requirements.txt").write_text(
         "# comment\nRequests == 2.34.2\n    # via x\n\npyyaml==6.0.3 ; python_version >= '3.8'  # yaml\n")
     (tmp_path / "Dockerfile").write_text("FROM python\nARG SUPERCRONIC_VERSION=v0.2.49\n")
-    (tmp_path / "requirements-dev.txt").write_text("-r requirements.txt\npytest==9.1.1\n")
+    (tmp_path / "requirements-dev.txt").write_text(
+        "-r requirements.txt\npip-audit==2.10.1\npytest==9.1.1\n")
     (tmp_path / "Dockerfile").write_text((tmp_path / "Dockerfile").read_text() + "ARG BW_VERSION=2026.9.1\n")
-    (tmp_path / ".github/workflows").mkdir(parents=True)
-    (tmp_path / ".github/workflows/checks.yml").write_text("pip-audit==2.9.0")
     assert watch.read_pins(tmp_path) == [
         {"ecosystem": "pypi", "name": "requests", "version": "2.34.2"},
         {"ecosystem": "pypi", "name": "pyyaml", "version": "6.0.3"},
+        {"ecosystem": "pypi", "name": "pip-audit", "version": "2.10.1"},
         {"ecosystem": "pypi", "name": "pytest", "version": "9.1.1"},
         {"ecosystem": "github", "name": "aptible/supercronic", "version": "0.2.49"},
-        {"ecosystem": "github", "name": "bitwarden/clients", "version": "2026.9.1", "tag_prefix": "cli-v"},
-        {"ecosystem": "pypi", "name": "pip-audit", "version": "2.9.0"}]
+        {"ecosystem": "github", "name": "bitwarden/clients", "version": "2026.9.1", "tag_prefix": "cli-v"}]
 
 
 def test_real_repository_pins_are_readable():

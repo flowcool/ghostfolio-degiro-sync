@@ -69,11 +69,6 @@ def read_pins(root=ROOT):
     if not binary or not STABLE_VERSION.fullmatch(binary[1]):
         raise ValueError("BW_VERSION pin not found in Dockerfile")
     pins.append({"ecosystem": "github", "name": "bitwarden/clients", "version": binary[1], "tag_prefix": "cli-v"})
-    # The audit tool is a CI-only pin; read it from the workflow itself.
-    audit = re.search(r"pip-audit==([0-9.]+)", (root / ".github/workflows/checks.yml").read_text())
-    if not audit:
-        raise ValueError("pip-audit pin not found in workflow")
-    pins.append({"ecosystem": "pypi", "name": "pip-audit", "version": audit[1]})
     return list({(pin["ecosystem"], pin["name"]): pin for pin in pins}.values())
 
 
