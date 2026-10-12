@@ -6,116 +6,103 @@
 
 **Your broker activity. Your portfolio. Your infrastructure.**
 
-Synchronize DEGIRO with your existing [Ghostfolio](https://ghostfol.io) account, using Docker Compose and credentials from Bitwarden or Vaultwarden.
+Synchronize supported DEGIRO trades, dividends, fees and current EUR cash with your existing [Ghostfolio](https://ghostfol.io) account. Docker Compose includes the connector, Bitwarden CLI and scheduler; credentials come from Bitwarden or Vaultwarden.
 
 [![Build and checks](https://github.com/flowcool/ghostfolio-degiro-sync/actions/workflows/checks.yml/badge.svg)](https://github.com/flowcool/ghostfolio-degiro-sync/actions/workflows/checks.yml)
 [![Release](https://img.shields.io/github/v/release/flowcool/ghostfolio-degiro-sync)](https://github.com/flowcool/ghostfolio-degiro-sync/releases)
 [![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](compose.yaml)
 [![License](https://img.shields.io/badge/License-MIT%20NON--AI-64748B)](LICENSE)
 
-[**Get started**](#get-started) · [**Configuration**](#1-prepare-the-configuration) · [**Troubleshooting**](#troubleshooting) · [**Contributing**](CONTRIBUTING.md) · [**Report an issue**](https://github.com/flowcool/ghostfolio-degiro-sync/issues)
+[**Compose**](#docker-compose) · [**Options**](#options-and-recommendations) · [**Simulation**](#review-a-simulation) · [**Troubleshooting**](#troubleshooting)
 
 </div>
 
-## Why use it?
+## Docker Compose
 
-- 📈 **Keep activities together** — supported executions, paid dividends, fees and current EUR cash in Ghostfolio.
-- 🔐 **Fetch credentials from your vault** — a fresh Bitwarden or Vaultwarden login on every broker execution.
-- 🧪 **Review before importing** — simulate and save a private proposal with zero financial writes.
-- 🐳 **Run with Docker Compose** — connector, vault CLI and scheduler included; native amd64 and arm64 images.
-- 🕒 **Choose your rhythm** — run manually or schedule recurring synchronization, with optional Apprise failure alerts.
-- 🛡️ **Stop on uncertainty** — unknown events, ambiguous matches and unresolved imports block dispatch.
+Paste this into a Portainer stack or save it as `compose.yaml`. Supply the variables through Portainer's stack environment or a local `.env` ([template](.env.example)). No clone or local build is needed; the published image supports amd64 and arm64.
 
-> [!IMPORTANT]
-> **Start with a simulation.** `DRY_RUN=1` authenticates and reads, proposes activities and cash, and sends no financial writes. Supported synchronization uses a rolling 90-day window; it does not certify your earlier history or cost basis.
-
-## Get started
-
-| Step | What you will do |
-| --- | --- |
-| [1. Configure](#1-prepare-the-configuration) | Set up the vault, Ghostfolio connection, mapping and private storage |
-| [2. Discover](#2-pull-the-image-and-discover-account-ids) | Pull the image and find your source and destination account IDs |
-| [3. Simulate](#3-run-a-simulation) | Save and review the proposed activities and cash |
-| [4. Schedule](#4-choose-manual-or-scheduled-operation) | Choose manual runs or a daily simulation before enabling writes |
-
-### What you need
-
-- Docker Engine with Docker Compose v2 and a Linux host supporting bind-mount permissions; native amd64 and arm64 images are tested in CI.
-- An existing Ghostfolio account and its **Security Token**, plus the destination account ID. Ghostfolio itself is not installed by this project.
-- A DEGIRO Login item in Bitwarden/Vaultwarden containing username, password and the **TOTP secret** in its authenticator field. A six-digit temporary code is not a secret seed.
-- A personal Bitwarden API key, master password, item UUID and HTTPS vault URL. Use a dedicated vault account containing only the credentials needed by this service.
-- An existing Docker network shared with Ghostfolio, and a verified ISIN-to-Yahoo-symbol mapping for your holdings.
-
-DEGIRO is accessed through an unofficial private API. Supported cash descriptions and relationships are currently characterized for French statements, EUR cash and the contracts in [cash-rules.yaml](cash-rules.yaml). Unknown instruments, categories or ambiguous events stop synchronization. This is not a universal broker-history importer.
-
-## 1. Prepare the configuration
-
-```sh
-git clone https://github.com/flowcool/ghostfolio-degiro-sync.git
-cd ghostfolio-degiro-sync
-cp .env.example .env
-cp mapping.yaml.example mapping.yaml
-mkdir -p state
-chmod 600 .env mapping.yaml
-sudo chown 10001:10001 mapping.yaml state
-sudo chmod 700 state
+```yaml
+# Existing Ghostfolio network; run once by default, CRON is opt-in.
+services:
+  degiro-sync:
+    image: ${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:v0.2.2}
+    restart: "no"
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:rw,nosuid,nodev,size=32m"]
+    environment:
+      BW_SERVER: ${BW_SERVER:-https://vault.bitwarden.com}
+      BW_CLIENTID: ${BW_CLIENTID:-}
+      BW_CLIENTSECRET: ${BW_CLIENTSECRET:-}
+      BW_PASSWORD: ${BW_PASSWORD:-}
+      BW_ITEM_ID: ${BW_ITEM_ID:-}
+      GHOST_TOKEN: ${GHOST_TOKEN:-}
+      GHOST_ACCESS_TOKEN: ${GHOST_ACCESS_TOKEN:-}
+      GHOST_HOST: ${GHOST_HOST:-http://ghostfolio:3333}
+      DEGIRO_ACCOUNT_ID: ${DEGIRO_ACCOUNT_ID:?Set source account}
+      GHOST_ACCOUNT_ID: ${GHOST_ACCOUNT_ID:?Set target account}
+      MAPPING_FILE: /config/mapping.yaml
+      STATE_DIR: /state
+      SYNC_MODE: rolling
+      LOOKBACK_DAYS: "90"
+      DRY_RUN: ${DRY_RUN:-1}
+      TZ: Europe/Zurich
+      CRON: ${CRON:-}
+      APPRISE_URLS: ${APPRISE_URLS:-}
+      APPRISE_TIMEOUT: ${APPRISE_TIMEOUT:-10}
+    volumes:
+      - type: bind
+        source: ${DEGIRO_MAPPING_PATH:-./mapping.yaml}
+        target: /config/mapping.yaml
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${DEGIRO_STATE_PATH:-./state}
+        target: /state
+        bind: {create_host_path: false}
+    networks: [ghostfolio]
+networks:
+  ghostfolio:
+    external: true
+    name: ${GHOST_NETWORK:?Set existing Ghostfolio network}
 ```
 
-Edit `.env` and `mapping.yaml`. Both are ignored by Git. Use single quotes around secrets in `.env` so `$` and `#` remain literal. Your own environment injection can supply the same variables instead. Docker daemon operators can access container environment values; restrict access to the host and its backups.
+Start with `DRY_RUN=1` and an empty `CRON`. You need Docker Compose v2, an existing Ghostfolio instance and a Docker network reaching it, a vault Login item for DEGIRO, and the two bind mounts below. In Portainer, use absolute host paths for both mounts.
 
-### Bitwarden / Vaultwarden
+## Options and recommendations
 
-Create or select the DEGIRO **Login** item. Its `username`, `password` and authenticator/TOTP field must be populated. Supported TOTP is SHA1, six digits, a 30-second interval, with either a Base32 seed or an `otpauth://totp/...` URI. An HOTP counter, a temporary OTP or another algorithm is refused.
+| Option | Role | Default | Recommendation |
+| --- | --- | --- | --- |
+| `BW_SERVER` | Vault HTTPS origin | `https://vault.bitwarden.com` | Use your final origin without a trailing slash; EU cloud: `https://vault.bitwarden.eu` |
+| `BW_CLIENTID` | Personal Bitwarden API-key client ID | Required | Use a dedicated vault account containing only the needed item |
+| `BW_CLIENTSECRET` | Personal API-key secret | Required | Obtain with the client ID from **Security → Keys → API key** |
+| `BW_PASSWORD` | Vault master password | Required | Needed to unlock the encrypted vault |
+| `BW_ITEM_ID` | DEGIRO Login item UUID | Required | Exact UUID, not the display name |
+| `GHOST_HOST` | Ghostfolio origin | `http://ghostfolio:3333` | Prefer the existing Docker hostname on the shared network; no trailing slash |
+| `GHOST_ACCESS_TOKEN` | Ghostfolio Security Token | One credential required | Recommended: exchanged for a fresh bearer on every execution |
+| `GHOST_TOKEN` | Legacy expiring bearer | Unset | Alternative only; configure exactly one Ghostfolio credential |
+| `DEGIRO_ACCOUNT_ID` | Numeric source `intAccount` | Required | Discover below if unknown |
+| `GHOST_ACCOUNT_ID` | Destination account UUID | Required | Select the intended EUR account; discover below if unknown |
+| `GHOST_NETWORK` | Existing Docker network | Required | Must reach the configured Ghostfolio hostname |
+| `DEGIRO_MAPPING_PATH` | Host mapping file | `./mapping.yaml` | Verify every ISIN, Yahoo ticker and quote currency; readable by UID 10001 |
+| `DEGIRO_STATE_PATH` | Persistent journal directory | `./state` | Owned by UID/GID 10001, mode 0700; include in backups |
+| `DRY_RUN` | Financial simulation | `1` | Keep enabled until proposals are reviewed; `0` permits financial writes |
+| `CRON` | Schedule | Empty: run once | After a manual simulation, `'15 6 * * *'` runs daily at 06:15 |
+| `APPRISE_URLS` | Failure alerts | Empty: disabled | Recommended for scheduled runs; JSON list, e.g. `'["ntfy://notification-host/topic"]'` |
+| `APPRISE_TIMEOUT` | Alert deadline | `10` seconds | Keep the default; allowed range 1–30 |
+| `DEGIRO_IMAGE` | Published version or digest | `ghcr.io/flowcool/ghostfolio-degiro-sync:v0.2.2` | Pin a reviewed release or immutable digest for controlled upgrades |
 
-Obtain the personal API key from Bitwarden account settings, **Security → Keys → API key**. Copy the exact item UUID, not its display name. Supply:
+Compose fixes `SYNC_MODE=rolling`, `LOOKBACK_DAYS=90`, `TZ=Europe/Zurich`, `/config/mapping.yaml` and `/state`. Both cron and the broker date boundary use Europe/Zurich. The container runs as UID/GID 10001 with a read-only root filesystem and no Linux capabilities.
 
-| Variable | Required | Meaning |
-| --- | --- | --- |
-| `BW_SERVER` | Yes | `https://vault.bitwarden.com`, `https://vault.bitwarden.eu`, or your Vaultwarden HTTPS origin, without a trailing slash |
-| `BW_CLIENTID` | Yes | Personal API-key client ID |
-| `BW_CLIENTSECRET` | Yes | Personal API-key client secret |
-| `BW_PASSWORD` | Yes | Vault master password; used to unlock the encrypted vault |
-| `BW_ITEM_ID` | Yes | UUID of the DEGIRO Login item |
+Use single quotes around secrets in `.env` to preserve literal `$` and `#`. Restrict access to this file, the Docker host and backups. Environment changes require recreating the container.
 
-**Migrating from direct broker credentials?** Move the DEGIRO username, password and TOTP seed into the vault Login item, configure the `BW_*` values above, and remove `DEGIRO_USERNAME`, `DEGIRO_PASSWORD` and `DEGIRO_TOTP_SECRET` from the container environment. Direct credential variables are explicitly rejected when present (including empty values), even when vault credentials are configured. There is no direct-login fallback.
+## Vault and mapping
 
-<details>
-<summary>How vault sessions are isolated</summary>
+The vault item must be a **Login** containing the DEGIRO username, password and **TOTP secret**, not a temporary code. Supported TOTP uses SHA1, six digits and a 30-second interval, with a Base32 seed or `otpauth://totp/...` URI. Every broker execution opens an isolated vault session; failure blocks login. Remove direct `DEGIRO_USERNAME`, `DEGIRO_PASSWORD` and `DEGIRO_TOTP_SECRET` variables: they are rejected even when empty.
 
-Every broker execution creates private temporary CLI state, authenticates, unlocks, synchronizes the vault and reads this exact item, then logs out and removes the temporary state. Nothing is mounted from another application's vault session. A vault failure blocks broker login; no cached credential fallback is used. No vault credential or item content is printed.
-
-</details>
-
-### Ghostfolio and account settings
-
-| Variable | Required | Meaning / default |
-| --- | --- | --- |
-| `GHOST_HOST` | Yes | Final Ghostfolio origin; default `http://ghostfolio:3333`. HTTPS origins and private/container HTTP are supported; paths, URL credentials, redirects, queries and fragments are refused |
-| `GHOST_ACCESS_TOKEN` | Recommended | Ghostfolio **Security Token**, exchanged for a bearer once per execution; configure exactly one Ghostfolio credential |
-| `GHOST_TOKEN` | Alternative | Legacy expiring bearer; leave unset when using `GHOST_ACCESS_TOKEN` |
-| `GHOST_ACCOUNT_ID` | Yes | Destination account UUID; use the private account discovery below |
-| `DEGIRO_ACCOUNT_ID` | Yes | Numeric DEGIRO source `intAccount`; see discovery below |
-| `GHOST_NETWORK` | Yes | Existing Docker network that reaches Ghostfolio; inspect available names with `docker network ls` |
-
-The hostname in `GHOST_HOST` must resolve from the importer container. For the default, the Ghostfolio service needs the `ghostfolio` alias on the selected network. Another existing service hostname or a private IP can be configured. The image does not provide an HTTP proxy, interactive login or custom TLS bypass.
-
-### Mapping, storage and scheduling
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `DEGIRO_MAPPING_PATH` | `./mapping.yaml` | Existing read-only mapping file; readable by UID 10001 |
-| `DEGIRO_STATE_PATH` | `./state` | Persistent journal directory, writable by UID/GID 10001, mode 0700 |
-| `DRY_RUN` | `1` | `1` simulates; `0` permits financial writes after you review and approve your setup |
-| `CRON` | Empty | Empty runs once; five numeric cron fields enable the scheduler |
-| `APPRISE_URLS` | Empty | Optional JSON list of notification URLs, e.g. `'["ntfy://notification-host/topic"]'` |
-| `APPRISE_TIMEOUT` | `10` | Notification deadline in seconds, 1–30 |
-| `DEGIRO_IMAGE` | `ghcr.io/flowcool/ghostfolio-degiro-sync:v0.2.2` | Published version or immutable `ghcr.io/flowcool/ghostfolio-degiro-sync@sha256:...` digest; amd64/arm64 |
-
-The template sets `SYNC_MODE=rolling`, `LOOKBACK_DAYS=90`, `TZ=Europe/Zurich`, `/config/mapping.yaml` and `/state`. The broker date boundary is Europe/Zurich. The container runs as UID/GID 10001, with a read-only root filesystem and no Linux capabilities. Existing mounts are required; Compose refuses to create missing files silently.
-
-The state directory must belong to the **running UID 10001**, with mode 0700; private lock and journal files use 0600. Keep the mapping readable by that UID (the setup above assigns ownership and mode 0600). On NAS hosts, also check bind-mount ACLs if access fails despite ordinary Unix permissions. Changing the container to root does not fix the required state ownership; keep the supplied `user` setting.
-
-Example mapping; verify both Yahoo symbol and quote currency for **every** instrument:
+Create `mapping.yaml` with an entry for every instrument:
 
 ```yaml
 US0378331005:
@@ -123,142 +110,93 @@ US0378331005:
   currency: USD
 ```
 
-Mapping keys must be valid ISINs. Each entry must contain **exactly** `symbol` and `currency`, with a nonempty symbol and no surrounding whitespace. Supported quote currencies are **EUR, USD and JPY only**; an entry using GBP, CHF or another currency rejects the entire mapping. The same Yahoo symbol cannot have conflicting currencies. Current cash synchronization is limited to EUR.
+Keys must be valid ISINs; entries contain exactly `symbol` and `currency`, without surrounding whitespace. Quote currencies are **EUR, USD and JPY** only. Conflicting currencies for the same symbol reject the mapping. Current cash supports EUR only.
 
-## 2. Pull the image and discover account IDs
+Prepare the mounts, using your configured host paths if different:
 
 ```sh
-docker compose pull
+mkdir -p state
+chmod 600 mapping.yaml
+sudo chown 10001:10001 mapping.yaml state
+sudo chmod 700 state
+# If using a local .env:
+chmod 600 .env
 ```
 
-The published image includes the pinned DEGIRO connector, Bitwarden CLI and scheduler. Docker selects amd64 or arm64 automatically. Version tags are published once; `latest` follows stable releases only. Prefer the explicit version above or a digest for controlled upgrades. Local builds are a contributor workflow.
+Both mounts must already exist; Compose refuses to create missing paths silently. On NAS hosts, also check bind-mount ACLs.
 
-If you do not know `DEGIRO_ACCOUNT_ID`, temporarily leave a nonempty placeholder in `.env` and capture a private read-only snapshot for a recent date interval:
+## Discover account IDs
+
+Skip this if both IDs are known. Use nonempty placeholders for unknown IDs in the Compose environment. For DEGIRO, replace the dates with a recent interval, then read `source_account` from the private capture:
 
 ```sh
 docker compose run --rm degiro-sync --read-only \
   --from-date YYYY-MM-DD --to-date YYYY-MM-DD \
-  --window-days 90 --output /state/account-discovery.json
+  --output /state/account-discovery.json
 ```
 
-Replace the dates. Read `source_account` in the resulting private JSON file and set `DEGIRO_ACCOUNT_ID` to that value. This procedure uses Bitwarden and DEGIRO only, does not contact Ghostfolio and refuses to overwrite a capture. Keep the snapshot private; it contains financial data. Restore a real account ID before running synchronization.
-
-To discover Ghostfolio destination IDs, leave a nonempty temporary `GHOST_ACCOUNT_ID` placeholder and run:
+For Ghostfolio, read the account ID, name and currency from this private output:
 
 ```sh
 docker compose run --rm degiro-sync --ghost-accounts --output /state/ghostfolio-accounts.json
 ```
 
-Read the account ID/name/currency in the private output and set `GHOST_ACCOUNT_ID`. This command authenticates to Ghostfolio and performs one account-list GET; it never contacts DEGIRO and discards balances and extra response fields. Restore both real account IDs before synchronization.
+Set both real IDs before synchronizing. Discovery performs authentication and reads only: the first command contacts the vault and DEGIRO, the second contacts Ghostfolio. Private outputs are never overwritten; use a new name when repeating a capture.
 
-### Command modes and date windows
+## Review a simulation
 
-Compose supplies the account placeholders and environment even for discovery; use nonempty placeholders where an ID is still unknown.
-
-| Mode | Required arguments | Scope |
-| --- | --- | --- |
-| `--read-only` | `--from-date`, `--to-date`, `--output` | Broker capture; no Ghostfolio access or financial writes |
-| `--ghost-accounts` | `--output` | Ghostfolio account discovery; no broker access |
-| `--sync` | No additional arguments for the supplied rolling setup | Read and reconcile the configured account pair; financial writes controlled by `DRY_RUN` |
-
-`--window-days` is **optional**, defaults to 90 and accepts an integer from 2 to 366. It controls broker query chunk size, not the overall synchronization lookback. Read-only dates are inclusive ISO dates (`YYYY-MM-DD`); the end must not precede the start. Every `--output` or `--plan-output` destination must be a **new path**; existing files are never overwritten.
-
-The supplied Compose configuration explicitly selects `SYNC_MODE=rolling` and `LOOKBACK_DAYS=90`. Synchronization defaults to the 90 calendar days ending today in Europe/Zurich. An explicit `--to-date` must still be today, and `--from-date` must cover at least that window. An earlier start can cover an outage; see [recovery and stopping](#updates-recovery-and-stopping).
-
-**A saved read-only capture is not a prerequisite for rolling synchronization.** Discovery helps obtain IDs; rolling mode reads and verifies fresh statements, holdings and account evidence on each run, including the first run with an empty state directory. DRY_RUN retains these integrity checks. The CLI requires one explicit command mode; the container entrypoint supplies `--sync` for normal runs. The adapter's default outside Compose is `full_history`, which cannot dispatch without verified complete history. The advanced `prospective` mode requires reviewed cutover evidence; neither is a shortcut around a failed rolling check. See [synchronization contracts](docs/synchronization.md).
-
-
-## 3. Run a simulation
-
-Keep `DRY_RUN=1` and `CRON` empty:
+With `DRY_RUN=1` and an empty `CRON`:
 
 ```sh
-docker compose run --rm degiro-sync --sync --plan-output /state/first-plan.json
+docker compose run --rm degiro-sync --sync
 ```
 
-A successful run reports zero accepted imports and a verified rolling contract. Review `state/first-plan.json` against DEGIRO and your existing Ghostfolio entries. It contains the exact proposed activities and current cash, uses private mode 0600, and refuses overwrites. Choose a new filename for later reviews. Logs contain counts rather than the full activity payload.
+Docker output shows each proposed activity, the cash change and exclusion counts. Example with synthetic values:
 
-Unknown source events, mismatched holdings, incomplete statements, changed canonical activities or unresolved write intents produce a nonzero exit code. Do not enable writes to bypass a failed simulation. The first window may propose missing operations from before installation. Missing older history must be reconciled separately; no opening BUY or invented cash flow is created.
+```text
+INFO: Sync DRY_RUN: 1 proposed activities, 0 accepted
+INFO: [DRY RUN] "2026-10-09T00:00:00Z" "DIVIDEND" "TEST" qty=1 price=12.5 USD fee=1.8
+INFO: [DRY RUN] Ghostfolio cash: EUR 30.00 -> 42.50 (no update sent)
+INFO: [DRY RUN] Candidate exclusions: already_imported=2 manual_match=1 duplicate_candidate=1
+INFO: Rolling 90-day contract verified; historical completeness and basis remain unverified
+```
 
-## 4. Choose manual or scheduled operation
+Review dates, tickers, quantities, prices, fees and cash against DEGIRO and Ghostfolio. `already_imported` counts unchanged canonical activities, `manual_match` matching manual entries, and `duplicate_candidate` repeated normalized candidates. Counts cover activity candidates, not every broker cash row. Zero accepted is expected: no financial write is sent. Logs contain financial details; keep them private.
 
-For manual operation, leave `CRON` empty and use the same `run --rm` command.
+No report is created automatically. Optionally add `--plan-output /state/first-plan.json` for the exact proposal, period, cash before/after and exclusion counts in a private JSON file (mode 0600, no overwrites).
 
-For daily **simulations** at 06:15 Europe/Zurich, use the guarded overlay:
+Unknown events, ambiguous matches, mismatched holdings, incomplete statements or uncertain imports block synchronization. Rolling mode verifies the last 90 days, not earlier history or cost basis. Older holdings and corporate actions need separate reconciliation. Cash relationships are characterized for French statements and EUR cash; the unofficial broker API is not a universal history importer. See [synchronization contracts](docs/synchronization.md) and the [cash-yield accounting policy](docs/interest-compensation-policy.md).
+
+## Scheduled runs and alerts
+
+Set `CRON='15 6 * * *'` and keep `DRY_RUN=1` for daily simulations:
 
 ```sh
-docker compose -f compose.yaml -f compose.dry-run.yaml up -d
-docker compose -f compose.yaml -f compose.dry-run.yaml logs --tail 100 -f
+docker compose up -d
+docker compose logs --tail 100 -f
 ```
 
-The overlay fixes `DRY_RUN=1` and the schedule. Scheduling does not execute an immediate run. To enable financial synchronization after review, stop the simulation service, set `DRY_RUN=0` and your quoted `CRON` in `.env`, then start the base alone:
+Scheduling waits for the first cron tick. The optional [dry-run overlay](compose.dry-run.yaml) fixes both simulation and this schedule. Stop the scheduler before a manual run against the same account state.
 
-```sh
-docker compose -f compose.yaml -f compose.dry-run.yaml stop degiro-sync
-# Edit .env: DRY_RUN=0 and CRON='15 6 * * *'.
-docker compose up -d --force-recreate degiro-sync
-```
+After reviewing a successful simulation and verifying your Ghostfolio backup, set `DRY_RUN=0` and recreate the service to enable imports and cash updates. Existing activities are not automatically corrected or deleted. Preserve state: removing the journal cannot resolve an uncertain import, and image rollback cannot undo financial changes.
 
-Before enabling writes, back up Ghostfolio and verify your restoration procedure. The adapter imports supported BUY/SELL, paid dividends with linked withholding, characterized standalone fees and cash-yield activities, then updates verified current EUR cash. Unknown or ambiguous relevant data blocks the account. Existing entries are not automatically corrected or deleted.
-
-Apprise sends one sanitized alert for a failed scheduled run, including DRY_RUN, and for failed live synchronization. Successful runs, manual simulations and read-only captures are silent. The notification library is included; a separate Apprise server is optional and destinations still need configuration. No delivery retry is performed.
-
-## Updates, recovery and stopping
-
-```sh
-# Record this value privately before upgrading; it is the rollback image.
-docker image inspect "$(docker compose config --images)" --format '{{index .RepoDigests 0}}'
-docker compose stop degiro-sync
-# Set DEGIRO_IMAGE in .env to the reviewed new version or digest.
-docker compose pull
-docker compose up -d --force-recreate degiro-sync
-```
-
-To roll back, stop the scheduler, set `DEGIRO_IMAGE` to the saved previous
-`ghcr.io/flowcool/ghostfolio-degiro-sync@sha256:...` value, then pull and recreate
-with the same commands. Keep the existing mounts and journals; do not reinitialize
-state or replay uncertain imports. Confirm the pulled digest before starting.
-
-Preserve `.env`, `mapping.yaml` and the entire state directory. Credentials are fetched from the vault on the next execution; changing the vault API key or master password in `.env` requires recreating the container. `docker compose restart` retains its old environment. Never run two importers against the same source/destination journal simultaneously.
-
-For an outage beyond saved successful coverage, use an explicit earlier start date while keeping the end date today:
-
-```sh
-docker compose run --rm -e CRON= degiro-sync --sync --from-date YYYY-MM-DD
-```
-
-Stop the existing scheduler first and review the catch-up in DRY_RUN. Interrupted imports are cleared only after exact positive readback; partial or uncertain results remain blocked. See [recovery](docs/recovery.md). Do not delete the journal to force a retry. Image rollback does not undo imported activities or cash changes.
+Apprise sends a sanitized alert for failed scheduled runs, including dry runs, and failed live synchronization. Successful runs and manual simulations are silent. No separate Apprise server is required; configure destinations through `APPRISE_URLS`. See [notifications](docs/notifications.md) and [recovery](docs/recovery.md).
 
 ## Troubleshooting
 
-Failed commands append a stable diagnostic pair, for example `stage=config reason=mapping` or `stage=transactions reason=failed`. Both tokens come from a fixed allowlist; exceptions, credentials, keys, URLs, paths, account IDs and response values are never included in the diagnostic. Malformed CLI arguments return exit code 2 with a fixed message; operational failures return 1. Use `--help` for command syntax.
+Failures return exit code 1 and a stable `stage=... reason=...` diagnostic. Invalid CLI arguments return 2. Diagnostics exclude credentials, raw responses and private exception text.
 
-| Diagnostic | Where to look |
+| Stage | Check |
 | --- | --- |
-| `stage=config` | The named local check: `arguments`, `mode`, `date_range`, `window_days`, `lookback_days`, `report_locale`, `mapping`, `state_dir`, `account`, `sync_mode`, `ghostfolio_credentials`, `direct_credentials` or `broker_credentials` |
-| `stage=vault` | Vault `configuration`, `temporary_state`, `server`, `login`, `unlock`, `sync`, `item` or `logout`; `item` includes Login/TOTP validation |
-| `stage=login` | DEGIRO login; a known fixed auth reason may distinguish timeout, TLS, HTTP refusal or required interactive authentication |
-| `stage=client_discovery`, `transactions`, `account_overview`, `products`, `account_info`, `account_update`, `account_report`, `order_history`, `cutover_destination`, `logout` | The named broker read/cleanup step; `reason=failed` does not echo provider data |
-| `stage=ghostfolio` | Token `authentication`, `transport`, `account_read` or `activities_read` |
-| `stage=output` | Private file `destination` validation or `write` |
-| `stage=broker` | General `read` failure or post-read `api_format` validation |
-| `stage=sync` | `reconciliation` of account evidence, or an unclassified `failed` run |
+| `config` | Required values, exactly one Ghostfolio credential, mapping, account IDs and mount permissions |
+| `vault` / `login` | Personal API key, master password, item UUID and supported TOTP secret |
+| Broker read stages | Broker availability and response compatibility; a generic failure does not prove missing history |
+| `ghostfolio` | Reachable final origin, Docker network, credential and destination account |
+| `sync` | Statement/holdings reconciliation, rolling coverage and unresolved write intent |
+| `output` | New writable private capture/proposal path |
 
-The earliest classified failure is preserved across outer boundaries. A token identifies the failed check, not a root cause or proof that all preceding authentication succeeded. Generic summaries remain private by design; older images may not include diagnostic tokens. Check these local prerequisites first:
+Keep DRY_RUN enabled while resolving failures. Details: [read-only captures](docs/read-only.md), [authentication](docs/ghostfolio-auth.md), [recovery](docs/recovery.md). [Report an issue](https://github.com/flowcool/ghostfolio-degiro-sync/issues) with image version, options, exit code and sanitized diagnostic; redact financial proposal lines and keep credentials and captures private.
 
-| Symptom / check | What to verify |
-| --- | --- |
-| Vault or broker login fails | All required `BW_*` values; exact Login item UUID; username, password and supported TOTP seed; no direct `DEGIRO_*` credential variables |
-| Read-only capture fails | Both ISO dates, end on or after start, a new writable `--output` path, and `--window-days` between 2 and 366 |
-| Mapping is rejected | Valid ISINs, exactly `symbol`/`currency`, EUR/USD/JPY only, no whitespace or currency conflicts; UID 10001 can read the mount |
-| State access fails | Existing directory owned by UID 10001, mode 0700, accessible bind-mount ACLs; preserve existing journals |
-| Rolling synchronization fails | Explicit rolling mode, `LOOKBACK_DAYS=90`, end date today in Europe/Zurich, sufficient start date and no saved coverage gap; then review account/mapping evidence |
-| Ghostfolio access fails | Exactly one credential, final reachable origin without a trailing slash, correct account ID and Docker network; recreate after environment changes |
+## Development and compatibility
 
-If these checks do not resolve the failure, keep DRY_RUN enabled and [report an issue](https://github.com/flowcool/ghostfolio-degiro-sync/issues) with the image version, command options, exit code and sanitized log message. Keep credentials, captures and rendered `docker compose config` private. Do not enable raw connector logging or publish tracebacks containing runtime values. See [read-only captures](docs/read-only.md), [authentication](docs/ghostfolio-auth.md) and [recovery](docs/recovery.md) for the relevant contract.
-
-## Compatibility, upstreams and development
-
-All upstreams and their monitoring are listed in [docs/upstreams.md](docs/upstreams.md). Release notices request a review; they do not prove compatibility or automatically deploy anything. DEGIRO endpoint changes can occur without a connector release and are detected through explicit response validation and regression tests.
-
-The broker-independent core is a byte-preserved projection of the reviewed IBKR source, tracked in [CORE_PROVENANCE.md](CORE_PROVENANCE.md). [CONTRIBUTING.md](CONTRIBUTING.md) covers development and synthetic testing. Host Python execution is not a supported user deployment.
+[CONTRIBUTING.md](CONTRIBUTING.md) covers offline tests and contributor builds. See [architecture](docs/architecture.md) for module contracts and [upstreams](docs/upstreams.md) for compatibility monitoring. Host Python is a developer workflow. Release notices do not deploy or establish compatibility automatically.

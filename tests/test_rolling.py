@@ -170,7 +170,9 @@ def test_matching_manual_sell_prevents_duplicate_and_preserves_holdings(rolling)
     row["date"] = "2026-01-03T00:00:00Z"
     destination["activities"]["activities"].append(row)
     destination["activities"]["count"] += 1
-    assert {a["type"] for a in sync_account(rolling)["proposed"]} == {"DIVIDEND", "FEE"}
+    result = sync_account(rolling)
+    assert {a["type"] for a in result["proposed"]} == {"DIVIDEND", "FEE"}
+    assert result["exclusions"] == {"manual_match": 1, "already_imported": 0, "duplicate_candidate": 0}
 
 
 @pytest.mark.parametrize('credential_mode', ['bearer', 'access'])

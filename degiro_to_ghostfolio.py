@@ -952,7 +952,8 @@ def match_manual_activity(activity, entries):
     return False
 
 
-def pending_activities(activities, existing, target_account, source_account, manual_matching=False):
+def pending_activities(activities, existing, target_account, source_account, manual_matching=False,
+                       exclusions=None):
     """Canonical identities never fall back to proximity or another account."""
     namespace = f"DEGIRO#{broker_identity(source_account)}:"
     known = {}
@@ -981,13 +982,19 @@ def pending_activities(activities, existing, target_account, source_account, man
         if comment in seen:
             if signature != seen[comment]:
                 raise RuntimeError("Conflicting candidate DEGIRO identity")
+            if exclusions is not None:
+                exclusions["duplicate_candidate"] += 1
             continue
         seen[comment] = signature
         if comment in known:
             if signature != activity_signature(known[comment]):
                 raise RuntimeError("Existing DEGIRO identity changed financial evidence")
+            if exclusions is not None:
+                exclusions["already_imported"] += 1
             continue
         if manual_matching and match_manual_activity(activity, manual):
+            if exclusions is not None:
+                exclusions["manual_match"] += 1
             continue
         for row in existing:
             if row.get("accountId") != target_account["id"] or row.get("type") != activity["type"]:
@@ -1258,7 +1265,9 @@ def synchronize_locked(config, snapshot, target_account, existing_body, mapping,
         raise RuntimeError("Future DEGIRO candidate blocks synchronization")
     if rolling and any(datetime.fromisoformat(a["date"]).microsecond % 1000 for a in activities):
         raise RuntimeError("Rolling date precision cannot be represented by Ghostfolio")
-    pending = pending_activities(activities, existing, target_account, source, manual_matching=rolling)
+    exclusions = Counter({"already_imported": 0, "manual_match": 0, "duplicate_candidate": 0})
+    pending = pending_activities(activities, existing, target_account, source, manual_matching=rolling,
+                                 exclusions=exclusions)
     trades = [activity for activity in pending if activity["type"] in ("BUY", "SELL")]
     reconcile_trade_holdings(trades, [row for row in existing if str(row.get("comment") or "").startswith("DEGIRO#")]
                              if rolling else existing, quantities)
@@ -1284,6 +1293,10 @@ def synchronize_locked(config, snapshot, target_account, existing_body, mapping,
         raise RuntimeError("Uncertain prior import blocks account writes")
     if dry_run:
         return {"proposed": pending, "accepted": [], "cash": balance, "dry_run": True,
+                "cash_before": float(financial_decimal(target_account["balance"])),
+                "candidates": len(activities), "exclusions": dict(exclusions),
+                "period": {"from_date": snapshot.get("from_date"), "to_date": snapshot.get("to_date"),
+                           "timezone": "Europe/Zurich"},
                 "history_verified": snapshot.get("history_completeness_verified") is True,
                 "prospective_verified": prospective,
                 "rolling_verified": rolling,
@@ -2369,6 +2382,42 @@ def save_private_snapshot(data, destination, compact=False):
         stream.write(encoded)
 
 
+def simulation_plan(result, start, end):
+    """Publish only the financial proposal and its verification context."""
+    period = result.get("period") or {}
+    return {"generated_at": datetime.now(timezone.utc).isoformat(),
+            "version": os.environ.get("APP_VERSION", "dev"),
+            "period": {"from_date": period.get("from_date") or start.isoformat(),
+                       "to_date": period.get("to_date") or end.isoformat(), "timezone": "Europe/Zurich"},
+            "activities": result["proposed"], "cash": result.get("cash"),
+            "cash_before": result.get("cash_before"), "cash_currency": "EUR",
+            "candidates": result.get("candidates"), "exclusions": result.get("exclusions", {}),
+            "history_verified": result["history_verified"],
+            "rolling_verified": result.get("rolling_verified", False),
+            "prospective_verified": result.get("prospective_verified", False)}
+
+
+def log_simulation(result):
+    """Financial review fields only; never dump raw responses or provenance comments."""
+    for activity in result["proposed"]:
+        # Custom fee/yield symbols embed the source account; retain the category only.
+        symbol = re.sub(r"^GF_DEGIRO_[1-9][0-9]*_", "GF_DEGIRO_", activity.get("symbol") or "")
+        # Quote text to prevent broker or mapping values from injecting log lines.
+        log.info("[DRY RUN] %s %s %s qty=%s price=%s %s fee=%s",
+                 json.dumps(activity.get("date")), json.dumps(activity.get("type")),
+                 json.dumps(symbol), activity.get("quantity"),
+                 activity.get("unitPrice"), activity.get("currency"), activity.get("fee"))
+    if result.get("cash_before") is not None and result.get("cash") is not None:
+        log.info("[DRY RUN] Ghostfolio cash: EUR %.2f -> %.2f (no update sent)",
+                 result["cash_before"], result["cash"])
+    elif result.get("cash") is not None:
+        log.info("[DRY RUN] Proposed Ghostfolio cash: EUR %.2f (no update sent)", result["cash"])
+    exclusions = result.get("exclusions", {})
+    log.info("[DRY RUN] Candidate exclusions: already_imported=%d manual_match=%d duplicate_candidate=%d",
+             exclusions.get("already_imported", 0), exclusions.get("manual_match", 0),
+             exclusions.get("duplicate_candidate", 0))
+
+
 
 NOTIFY_WORKER_FLAG = "--notify-worker"
 NOTIFY_PAYLOAD_MAX = 32 * 1024
@@ -2628,16 +2677,14 @@ def main(argv=None):
             if plan_output is not None:
                 if result.get("dry_run") is not True or result.get("accepted"):
                     raise RuntimeError("Proposal output requires a financial simulation")
+                plan = simulation_plan(result, start, end)
                 with diagnostic_boundary("output", "write"):
-                    save_private_snapshot({"generated_at": datetime.now(timezone.utc).isoformat(),
-                        "activities": result["proposed"], "cash": result["cash"],
-                        "history_verified": result["history_verified"],
-                        "rolling_verified": result.get("rolling_verified", False)}, plan_output)
+                    save_private_snapshot(plan, plan_output)
                 log.info("Private simulation plan saved; no financial writes sent")
             log.info("Sync %s: %d proposed activities, %d accepted", "DRY_RUN" if result["dry_run"] else "live",
                      len(result["proposed"]), len(result["accepted"]))
-            if result["dry_run"] and result.get("prospective_verified") is True:
-                log.info("Proposed Ghostfolio cash balance: EUR %.2f; DRY_RUN, no update sent", result["cash"])
+            if result["dry_run"]:
+                log_simulation(result)
             if result.get("rolling_verified") is True:
                 log.info("Rolling 90-day contract verified; historical completeness and basis remain unverified")
                 return 0

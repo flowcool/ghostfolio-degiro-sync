@@ -386,7 +386,7 @@ def test_dry_run_command_keeps_acquisition_scope_and_read_only_transports(prospe
     # A narrow requested lookback cannot replace the manifest's full replay interval.
     with caplog.at_level('INFO'):
         assert adapter.main(["--sync", "--from-date", now.date().isoformat()]) == 0
-    assert 'Proposed Ghostfolio cash balance: EUR 12.30; DRY_RUN, no update sent' in caplog.text
+    assert '[DRY RUN] Ghostfolio cash: EUR 12.30 -> 12.30 (no update sent)' in caplog.text
     assert acquired[0][0].isoformat() == "2025-12-31"
     assert acquired[0][3] == {"report_locale": ("fr", "fr"), "holdings": True}
     assert len(requests) == 2 and all(url.startswith(config["ghost_host"]) for url in requests)
