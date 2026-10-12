@@ -69,7 +69,7 @@ services:
         read_only: true
         bind: {create_host_path: false}
       - type: bind
-        source: ${LAB_RUNS_PATH:?Set existing UID10001 private runs directory}
+        source: ${LAB_RUNS_PATH:?Set existing UID 10001 private runs directory}
         target: /runs
         bind: {create_host_path: false}
     networks: [lab]

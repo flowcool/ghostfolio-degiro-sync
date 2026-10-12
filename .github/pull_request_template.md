@@ -36,7 +36,7 @@ State whether AI assisted this change and what the author verified.
 
 ## CodeRabbit review
 
-Review triggering is managed externally by the maintainer. Record missing, pending or
+Review triggering is managed externally. Record missing, pending or
 rate-limited coverage as a blocker; this template does not authorize a trigger.
 
 - [ ] Verify that a review completed and covers the final PR head; a walkthrough,
