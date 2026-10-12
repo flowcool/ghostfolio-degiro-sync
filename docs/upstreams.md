@@ -13,7 +13,7 @@ image, merges a dependency PR, deploys a service or accesses financial accounts.
 | [Bitwarden CLI OSS](https://github.com/bitwarden/clients) | Separate runtime executable 2026.9.1 with both architecture SHA256 pins in Dockerfile; GPL/source notice in third_party/bitwarden | Daily dependency watch 07:29 UTC filters cli-v releases; native security/smoke checks |
 | [Supercronic](https://github.com/aptible/supercronic) | Runtime scheduler version and architecture SHA256 pins in Dockerfile | Daily GitHub releases; full-image advisory scan |
 | Python runtime and its complete closure | requirements.txt pins DEGIRO, PyOTP, requests, YAML, Apprise and every transitive package | Daily PyPI releases; weekly Dependabot; pip-audit on PR/release/weekly checks; blocking image scan |
-| Python developer/CI tools | requirements-dev.txt pins pytest; checks.yml pins pip-audit | Daily dependency releases; weekly Dependabot; complete CI environment audit |
+| Python developer/CI tools | requirements-dev.txt pins pip-audit and pytest | Daily dependency releases; weekly Dependabot; complete CI environment audit |
 | Python/Debian base image | Digest-pinned Python 3.12 slim in Dockerfile, OS packages inherited from it | Weekly Docker Dependabot and native image security checks |
 | PostgreSQL/Redis contributor lab | Digest-pinned images in compose.lab.yaml | Weekly Docker Dependabot at root; lab isolated from production |
 | GitHub Actions: checkout/setup-python, CodeQL, dependency-review, Trivy, Docker build/login, artifacts | Exact SHA in workflows | Weekly Actions Dependabot; reviewed CI and native scan gates |

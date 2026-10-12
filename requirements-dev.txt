@@ -1,3 +1,4 @@
 # Dev/CI only: never installed in the Docker image (Dockerfile reads requirements.txt only)
 -r requirements.txt
+pip-audit==2.10.1
 pytest==9.1.1
