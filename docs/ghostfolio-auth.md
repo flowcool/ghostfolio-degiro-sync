@@ -17,6 +17,14 @@ After local configuration and applicable journal checks, the adapter posts the S
 
 Failed authentication stops before broker and financial reads/writes. No token refresh occurs during financial work or after uncertain results. DRY_RUN allows this authentication POST and continues to block imports, cash updates and deletions.
 
+For an approved HTTP origin, authentication exchange and bearer transport each
+emit a fixed warning before use: credentials travel in cleartext without server
+authentication. The warning includes no origin, token or account identifier.
+A single-label hostname can resolve through host DNS/search domains to an
+unintended machine; syntax validation does not prove local network ownership.
+Prefer HTTPS, or restrict HTTP to an isolated trusted container network. The
+Compose default remains supported; redirects and ambient proxies stay disabled.
+
 ## Provenance and recovery
 
 The exchange reuses the reviewed IBKR v2.2.0 protocol at commit `54958ab1035eb97a1f67f9072b79699813ec3800`, outside the immutable core projection. See CORE_PROVENANCE.md for reviewed propagation.
