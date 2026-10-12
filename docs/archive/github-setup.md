@@ -1,3 +1,7 @@
+> Historical bootstrap snapshot; not a current setup procedure.
+> Current build/release guarantees are in [.github/BUILD.md](../../.github/BUILD.md).
+> Do not apply the settings described here to an existing repository.
+
 # GitHub setup
 
 The sibling IBKR repository supplies the Actions SHA pins, merge policy, security

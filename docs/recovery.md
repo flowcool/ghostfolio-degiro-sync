@@ -1,9 +1,12 @@
 # Durable write intent and explicit recovery
 
 Live synchronization requires `STATE_DIR`: an existing persistent directory owned
-by the process UID and mode0700. For a future container deployment this must be a
-private writable persistent mount for UID10001, separate from its read-only app
-and mapping. Full-history DRY_RUN needs no state mount; prospective and rolling DRY_RUN require the private state directory. Missing/unsafe state stops live work
+by the process UID and mode 0700. For the supported Compose deployment, follow the
+[README mount preparation](../README.md#vault-and-mapping), separate from the
+read-only app and mapping. Full-history DRY_RUN requires no application journal,
+but the state bind-mount source directory must still exist to start the Compose
+service, as defined in the README. Prospective and rolling DRY_RUN require the
+private state directory. Missing/unsafe state stops live work
 before broker login. Deleting state, replacing it with tmpfs or changing the
 configured origin can discard recovery evidence; none is a recovery procedure.
 Keep origin/source/target stable and retain the directory in backups.
@@ -20,7 +23,7 @@ The keyed YAML journal contains ownership, one pending intent and resolved-reque
 metadata. Rolling mode additionally stores successful coverage only after full live success, never after DRY_RUN or partial work; see [the rolling contract](prospective-sync.md). Import payloads are keyed by canonical broker comment and contain exact
 activity financial fields; cash payloads contain target and amount. These are
 private financial records, not credentials. Tokens, login data and OTP never enter
-state. Lock/journal files are mode0600; symlinks, shared permissions and malformed
+state. Lock/journal files are mode 0600; symlinks, shared permissions and malformed
 ownership/state are refused. Atomic replacement fsyncs file and directory before
 dispatch. A crash anywhere after preparation preserves a conservative fence,
 including a crash before HTTP actually starts.
@@ -30,7 +33,7 @@ degraded, failed or lost responses retain it. A cash response failure also remai
 pending. A later process refuses all writes while any intent is unresolved. Rolling mode may automatically confirm an import only after complete exact unique positive readback; its DRY_RUN verifies without clearing state. There is no automatic replay or clear-on-empty behavior, and uncertain cash remains fenced. Confirmation retains the
 1,000 most recent resolved-request metadata entries, ordered by their UTC
 confirmation timestamps (request ID breaks ties). Older confirmed audit metadata
-ages out; pending financial intent is never pruned. Journals over1MB still fail
+ages out; pending financial intent is never pruned. Journals over 1MB still fail
 closed rather than truncating financial evidence. No operator compaction command
 is provided.
 
@@ -108,9 +111,9 @@ intents remain fenced and require the separately proved operator procedure.
 Cash intents have no automatic resolver. Matching current balance alone cannot
 prove the old PUT finished or was independently cancelled. Partial/absent import
 results likewise require independent completion/cancellation evidence; do not
-erase state or change namespace to force retry. The approved acceptance issue owns
-that remaining procedure. Production service interruption/compensation requires
-the maintainer's separate authorization.
+erase state or change namespace to force retry. [ADR-0009](adr/0009-uncertain-result-recovery-boundary.md) records this boundary.
+Production service interruption or financial compensation requires separate
+operator authorization.
 
 ## Rollback
 

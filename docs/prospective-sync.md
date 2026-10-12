@@ -2,7 +2,7 @@
 
 ## Approved rolling operating contract
 
-the maintainer confirmed this contract on 2026-10-10. Set `SYNC_MODE=rolling` for
+[ADR-0007](adr/0007-bounded-rolling-and-prospective-policy.md) records the policy. Set `SYNC_MODE=rolling` for
 normal operation: retrieve the 90 calendar days ending on the current
 Europe/Zurich date (`today - 89 days` through today, inclusive). `LOOKBACK_DAYS`
 remains 90. An explicit earlier `--from-date` supports catch-up; `--to-date`
@@ -18,7 +18,7 @@ require separate explicit authorization. No opening BUY, invented cash flow,
 or historical-basis certification is introduced.
 
 Existing exact canonical identities are skipped; changed financial content
-is refused. the maintainer explicitly approved the existing IBKR manual-entry rules:
+is refused. The inherited IBKR manual-entry rules apply:
 BUY/SELL entries of the same account, symbol and side may match within two
 calendar days when quantity differs by less than 0.001; the closest match is
 consumed once. Nearby entries with different quantities refuse processing.
@@ -61,8 +61,8 @@ contain fixed reason/action codes and UTC time, never account identifiers,
 financial amounts, arbitrary exceptions or destination secrets. The worker
 receives destination URLs on stdin, excludes broker/Ghostfolio credentials,
 discards output and has one process-wide deadline. It never retries; delivery
-failure does not change the sync result. Apprise configuration/deployment uses
-the existing infrastructure handoff; no live notification is sent by tests.
+failure does not change the sync result. Apprise deployment requires operator configuration; no live notification is sent
+by tests.
 
 Rollback: revert the exact rolling implementation commit and restore the prior
 configuration. Preserve journals and captures; code rollback neither cancels
@@ -75,20 +75,20 @@ and use a forward fix or explicitly reviewed state migration rather than deletin
 
 Prospective mode preserves existing Ghostfolio history and synchronizes eligible
 operations after a verified cutover. It does not certify historical accounting,
-cost basis, fees, performance or tax reporting. the maintainer approved prospective
-real-account acceptance on2026-10-10: fresh opening captures must agree on
-holdings, and broker cash must pass independent validation, followed by an actual prospective DRY_RUN with
-zero financial writes. C13 and CSV-transition/recovery preflight evidence remain
+cost basis, fees, performance or tax reporting. Fresh opening captures must agree
+on holdings, and broker cash must pass independent validation, followed by an
+actual prospective DRY_RUN with zero financial writes. Isolated native acceptance
+and CSV-transition/recovery preflight evidence remain
 required. This acceptance scope does not authorize production activation.
 
 ## Opening evidence
 
-A private version1 YAML manifest binds one DEGIRO account, one Ghostfolio account,
+A private version 1 YAML manifest binds one DEGIRO account, one Ghostfolio account,
 a precise aware cutover instant, the verified ISIN-to-Yahoo mapping and two private
 JSON captures through SHA256 digests. `CUTOVER_SHA256` separately pins the manifest:
 changing either the manifest or an attachment requires explicit revalidation.
-Files must be owned regular mode0600 files, without final symlinks or hard links,
-and each attachment is bounded to2MB. Original captures are never overwritten.
+Files must be owned regular mode 0600 files, without final symlinks or hard links,
+and each attachment is bounded to 2MB. Original captures are never overwritten.
 
 The broker capture contains the normal raw snapshot, including every held stock's
 product metadata. The destination capture contains `account`, the complete
@@ -102,14 +102,14 @@ trading or editing the target during baseline establishment. A concurrent event,
 missing bridge or mismatch is a refusal, not a repair suggestion.
 
 Opening source holdings must equal quantities derived from destination history
-by verified instrument mapping. Only the existing STOCK/contract-size1/currency
+by verified instrument mapping. Only the existing STOCK/contract-size 1/currency
 contract is supported. Missing products, ambiguous mappings, incompatible units,
 short positions and unknown instruments block. Opening broker cash must independently
 pass the existing EUR/zero-pending-settlement checks. Destination cash may be
 stale because the operator does not maintain it manually; an opening cash
 difference does not block validation. DRY_RUN displays the independently verified
-broker balance proposed for Ghostfolio and sends no balance update. the maintainer
-approved this behavior on2026-10-10. Actual updates retain separate production authority.
+broker balance proposed for Ghostfolio and sends no balance update. Actual updates
+retain separate production authority.
 The baseline records existing inventory; it creates no opening BUY or cash flow.
 Only `basis_status: unverified` is currently supported. Accurate historical basis
 requires separate evidence and scope; this mode never reconstructs it.
@@ -131,7 +131,7 @@ agreement and publishes a private manifest:
 
 Capture defaults to yesterday through today. If DEGIRO refuses a statement for
 an empty interval, use `--from-date YYYY-MM-DD` to include a recent known cash
-event. The observed2026-10-09/10 empty period returned HTTP500, while2026-10-03/10
+event. The observed2026-10-09/10 empty period returned HTTP 500, while2026-10-03/10
 returned a statement exactly corroborating one cash movement. This selects the
 evidence interval; it does not change the cutover instant. Subsequent DRY_RUNs
 replay the manifest's entire interval, including its protected opening prefix.
@@ -140,7 +140,7 @@ The directory must be new. The command uses existing read-only broker operations
 and Ghostfolio account/activities GETs, then logs out. It sends no financial writes
 and does not activate synchronization. On success it prints `CUTOVER_SHA256`;
 on failure, retained files remain unapproved evidence. Keep the directory at the
-same path. The mapping input must be mode0600, like the private captures.
+same path. The mapping input must be mode 0600, like the private captures.
 
 Existing captures can also be validated offline with `prepare_cutover.py`:
 provide `--broker`, `--destination`, `--mapping` and each corresponding
@@ -160,7 +160,7 @@ export CUTOVER_SHA256=the_verified_manifest_digest
 export DRY_RUN=1
 ```
 
-Provide an existing owned mode0700 `STATE_DIR`, including for prospective DRY_RUN.
+Provide an existing owned mode 0700 `STATE_DIR`, including for prospective DRY_RUN.
 The account lock covers reads and dispatch, and an unresolved durable import or
 cash intent blocks prospective verification. Run the existing command:
 
@@ -178,9 +178,9 @@ processing rather than silently losing an outage interval.
 
 Each run requires raw cash-statement multiset agreement, with exact dates,
 minutes, value dates, ISINs, descriptions, currencies and order references. Amounts
-are exact except for the execution rounding explicitly approved by the maintainer
-on2026-10-10: a unique STOCK execution with contract size1 and a supported
-cent-valued currency may corroborate an API/CSV difference of at most0.01.
+are exact except for the bounded execution rounding in ADR-0007: a unique STOCK
+execution with contract size 1 and a supported
+cent-valued currency may corroborate an API/CSV difference of at most 0.01.
 Both cent-valued cash views and the declared execution total must remain within
 0.01 of one another and of signed unrounded quantity times price; the execution
 total itself may retain subcent precision. Exact matches take priority, and

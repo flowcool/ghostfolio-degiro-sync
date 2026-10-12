@@ -17,6 +17,26 @@ Synchronize supported DEGIRO trades, dividends, fees and current EUR cash with y
 
 </div>
 
+## What the tool does
+
+Imports supported executions, paid dividends, characterized fees and cash yield into one existing Ghostfolio account, then sets independently verified current EUR cash. It preserves broker identities and durable write intent, blocks uncertain results, and offers a financial simulation before enabling writes.
+
+## Prerequisites
+
+- Docker Compose v2, an existing Ghostfolio instance and a Docker network reaching it.
+- A DEGIRO account using **TOTP** and a Bitwarden or Vaultwarden Login item containing its username, password and TOTP seed. App confirmation (`in_app_required`) and captcha (`captcha_required`) are unsupported.
+- Vault API credentials, exactly one Ghostfolio credential, and explicitly selected source and destination accounts.
+- An instrument mapping and a private persistent journal directory; prepare the mounts below before starting.
+
+## Limits
+
+- Quote currencies: **EUR, USD and JPY only**. Current cash: **EUR only**.
+- Cash-statement relationships are characterized for **French (`fr`) statements**; other statement languages are not verified.
+- Normal Compose operation reads a **rolling 90-day window** through the Europe/Zurich date. It reconstructs neither complete history nor historical cost basis.
+- Existing activities are never automatically corrected or deleted. Unknown or ambiguous relevant evidence blocks synchronization.
+
+**Unofficial API:** this project is not affiliated with DEGIRO. Its reverse-engineered API can change without notice. Automated access may conflict with DEGIRO's terms of use and carries an account-blocking risk. Assess that risk before using the connector.
+
 ## Docker Compose
 
 Paste this into a Portainer stack or save it as `compose.yaml`. Supply the variables through Portainer's stack environment or a local `.env` ([template](.env.example)). No clone or local build is needed; the published image supports amd64 and arm64.
@@ -69,7 +89,7 @@ networks:
     name: ${GHOST_NETWORK:?Set existing Ghostfolio network}
 ```
 
-Start with `DRY_RUN=1` and an empty `CRON`. You need Docker Compose v2, an existing Ghostfolio instance and a Docker network reaching it, a vault Login item for DEGIRO, and the two bind mounts below. In Portainer, use absolute host paths for both mounts.
+Start with `DRY_RUN=1` and an empty `CRON`. In Portainer, use absolute host paths for both mounts.
 
 ## Options and recommendations
 
@@ -102,7 +122,7 @@ Use single quotes around secrets in `.env` to preserve literal `$` and `#`. Rest
 
 The vault item must be a **Login** containing the DEGIRO username, password and **TOTP secret**, not a temporary code. Supported TOTP uses SHA1, six digits and a 30-second interval, with a Base32 seed or `otpauth://totp/...` URI. Every broker execution opens an isolated vault session; failure blocks login. Remove direct `DEGIRO_USERNAME`, `DEGIRO_PASSWORD` and `DEGIRO_TOTP_SECRET` variables: they are rejected even when empty.
 
-Create `mapping.yaml` with an entry for every instrument:
+Create `mapping.yaml` from [mapping.yaml.example](mapping.yaml.example), with an entry for every instrument:
 
 ```yaml
 US0378331005:
@@ -169,12 +189,14 @@ Unknown events, ambiguous matches, mismatched holdings, incomplete statements or
 
 ## Scheduled runs and alerts
 
-Set `CRON='15 6 * * *'` and keep `DRY_RUN=1` for daily simulations:
+Set `CRON='15 6 * * *'`, change the service's `restart` to `unless-stopped`, and keep `DRY_RUN=1` for daily simulations:
 
 ```sh
 docker compose up -d
 docker compose logs --tail 100 -f
 ```
+
+Keep `restart: "no"` for run-once operation. With a nonempty `CRON`, use `restart: unless-stopped` so Docker restarts the scheduler after a crash or host reboot, unless you explicitly stopped it. Leaving `restart: "no"` in scheduled mode can silently stop future runs: the failed-run alert cannot execute when the scheduler is absent. A restart policy does not detect missed runs or guarantee scheduler health.
 
 Scheduling waits for the first cron tick. The optional [dry-run overlay](compose.dry-run.yaml) fixes both simulation and this schedule. Stop the scheduler before a manual run against the same account state.
 
@@ -190,6 +212,8 @@ Failures return exit code 1 and a stable `stage=... reason=...` diagnostic. Inva
 | --- | --- |
 | `config` | Required values, exactly one Ghostfolio credential, mapping, account IDs and mount permissions |
 | `vault` / `login` | Personal API key, master password, item UUID and supported TOTP secret |
+| `login` / `in_app_required` | DEGIRO requires app confirmation; this flow is unsupported. Use an account configured for supported TOTP |
+| `login` / `captcha_required` | DEGIRO requires a captcha; automated solving is unsupported. Resolve the broker challenge separately before retrying |
 | Broker read stages | Broker availability and response compatibility; a generic failure does not prove missing history |
 | `ghostfolio` | Reachable final origin, Docker network, credential and destination account |
 | `sync` | Statement/holdings reconciliation, rolling coverage and unresolved write intent |
@@ -199,4 +223,4 @@ Keep DRY_RUN enabled while resolving failures. Details: [read-only captures](doc
 
 ## Development and compatibility
 
-[CONTRIBUTING.md](CONTRIBUTING.md) covers offline tests and contributor builds. See [architecture](docs/architecture.md) for module contracts and [upstreams](docs/upstreams.md) for compatibility monitoring. Host Python is a developer workflow. Release notices do not deploy or establish compatibility automatically.
+[Documentation index](docs/README.md) separates user contracts from contributor material. [CONTRIBUTING.md](CONTRIBUTING.md) covers offline tests and contributor builds. See [architecture](docs/architecture.md) for module contracts and [upstreams](docs/upstreams.md) for compatibility monitoring. Host Python is a developer workflow. Release notices do not deploy or establish compatibility automatically.

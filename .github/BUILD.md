@@ -59,5 +59,5 @@ CodeRabbit billing settings. A CodeRabbit review is not a substitute for CI.
 
 Revert a maintenance merge through a PR and wait for all required checks.
 Repository administrators can temporarily disable a ruleset if a broken required
-workflow prevents its own repair; restore it after the repair passes (see
-`docs/github-setup.md`). No GitHub change deploys anything.
+workflow prevents its own repair. Record prior settings and exact changed fields,
+then restore the ruleset after the repair passes. No GitHub change deploys anything.
