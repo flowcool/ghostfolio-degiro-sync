@@ -45,7 +45,7 @@ Paste this into a Portainer stack or save it as `compose.yaml`. Supply the varia
 # Existing Ghostfolio network; run once by default, CRON is opt-in.
 services:
   degiro-sync:
-    image: ${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:v0.3.0}
+    image: ${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:latest}
     restart: "no"
     user: "10001:10001"
     read_only: true
@@ -112,7 +112,7 @@ Start with `DRY_RUN=1` and an empty `CRON`. In Portainer, use absolute host path
 | `CRON` | Schedule | Empty: run once | After a manual simulation, `'15 6 * * *'` runs daily at 06:15 |
 | `APPRISE_URLS` | Failure alerts | Empty: disabled | Recommended for scheduled runs; JSON list, e.g. `'["ntfy://notification-host/topic"]'` |
 | `APPRISE_TIMEOUT` | Alert deadline | `10` seconds | Keep the default; allowed range 1–30 |
-| `DEGIRO_IMAGE` | Published version or digest | `ghcr.io/flowcool/ghostfolio-degiro-sync:v0.3.0` | Pin a reviewed release or immutable digest for controlled upgrades |
+| `DEGIRO_IMAGE` | Published image tag or digest | `ghcr.io/flowcool/ghostfolio-degiro-sync:latest` | Follow the current stable release, or pin an immutable digest for controlled upgrades |
 
 Compose fixes `SYNC_MODE=rolling`, `LOOKBACK_DAYS=90`, `TZ=Europe/Zurich`, `/config/mapping.yaml` and `/state`. Both cron and the broker date boundary use Europe/Zurich. The container runs as UID/GID 10001 with a read-only root filesystem and no Linux capabilities.
 
@@ -202,7 +202,7 @@ Keep `restart: "no"` for run-once operation. With a nonempty `CRON`, use `restar
 
 Scheduling waits for the first cron tick. The optional [dry-run overlay](compose.dry-run.yaml) fixes both simulation and this schedule. Stop the scheduler before a manual run against the same account state.
 
-Images built from this revision include a local healthcheck; published `v0.3.0` does not include it. The probe verifies that scheduled PID 1 is Supercronic in a running or sleeping state; it detects a stopped process without network or credential access. Docker marks repeated failures `unhealthy`; an exited container already has an exited status. Run-once mode bypasses the probe. Health status does not prove a job ran, detect missed ticks or deliver an alert. Docker restart policies respond to process exit, not `unhealthy`; external monitoring is needed for alerts or successful-run silence detection. A manual command overriding a scheduled container's entrypoint is not a scheduler and may be marked unhealthy if it lasts beyond the probe grace period.
+Images published from `v0.4.0` include a local healthcheck. The probe verifies that scheduled PID 1 is Supercronic in a running or sleeping state; it detects a stopped process without network or credential access. Docker marks repeated failures `unhealthy`; an exited container already has an exited status. Run-once mode bypasses the probe. Health status does not prove a job ran, detect missed ticks or deliver an alert. Docker restart policies respond to process exit, not `unhealthy`; external monitoring is needed for alerts or successful-run silence detection. A manual command overriding a scheduled container's entrypoint is not a scheduler and may be marked unhealthy if it lasts beyond the probe grace period.
 
 After reviewing a successful simulation and verifying your Ghostfolio backup, set `DRY_RUN=0` and recreate the service to enable imports and cash updates. Existing activities are not automatically corrected or deleted. Preserve state: removing the journal cannot resolve an uncertain import, and image rollback cannot undo financial changes.
 

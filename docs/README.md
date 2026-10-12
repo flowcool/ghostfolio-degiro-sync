@@ -12,6 +12,7 @@ The root [README](../README.md) is the single setup and configuration reference.
 
 ## Contributors
 
+- [Project state](../STATE.md): compact maintainer entry point; Git and Beads remain authoritative for mutable state.
 - [Contributing](../CONTRIBUTING.md): offline tests, builds and synthetic labs.
 - [Architecture](architecture.md), [glossary](../GLOSSARY.md) and [decisions](adr/README.md).
 - [Core provenance](../CORE_PROVENANCE.md): immutable projection and propagation.
