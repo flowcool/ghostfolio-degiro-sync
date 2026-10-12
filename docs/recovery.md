@@ -3,7 +3,10 @@
 Live synchronization requires `STATE_DIR`: an existing persistent directory owned
 by the process UID and mode 0700. For the supported Compose deployment, follow the
 [README mount preparation](../README.md#vault-and-mapping), separate from the
-read-only app and mapping. Full-history DRY_RUN needs no state mount; prospective and rolling DRY_RUN require the private state directory. Missing/unsafe state stops live work
+read-only app and mapping. Full-history DRY_RUN requires no application journal,
+but the state bind-mount source directory must still exist to start the Compose
+service, as defined in the README. Prospective and rolling DRY_RUN require the
+private state directory. Missing/unsafe state stops live work
 before broker login. Deleting state, replacing it with tmpfs or changing the
 configured origin can discard recovery evidence; none is a recovery procedure.
 Keep origin/source/target stable and retain the directory in backups.
