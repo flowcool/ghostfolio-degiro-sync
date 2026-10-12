@@ -89,7 +89,20 @@ def test_complete_first_run_and_zero_candidates_on_repeat(snapshot):
 
 def test_identical_pending_duplicates_are_kept_once(snapshot):
     snapshot['transactions'].append(deepcopy(snapshot['transactions'][0]))
-    assert len(run(snapshot)['proposed']) == 3
+    result = run(snapshot)
+    assert len(result['proposed']) == 3
+    # Trade normalization already consolidates repeated raw executions.
+    assert result['candidates'] == 3
+    assert result['exclusions'] == {'duplicate_candidate': 0, 'already_imported': 0, 'manual_match': 0}
+
+
+def test_review_metadata_counts_known_activities_and_keeps_current_cash(snapshot):
+    proposal = run(snapshot)['proposed']
+    stored = [opening_holding(), *[activity_row(a, str(i)) for i, a in enumerate(proposal)]]
+    result = run(snapshot, stored)
+    assert result['proposed'] == [] and result['cash_before'] == TARGET['balance']
+    assert result['cash'] == 12.3
+    assert result['exclusions'] == {'already_imported': 3, 'manual_match': 0, 'duplicate_candidate': 0}
 
 
 @pytest.mark.parametrize('mutation', ['unknown', 'unsupported', 'currency', 'fee', 'history', 'source'])

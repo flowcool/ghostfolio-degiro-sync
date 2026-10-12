@@ -30,7 +30,7 @@ Community Compose pulls a published version or digest. Contributor builds use
 RepoDigest before an upgrade, stop the scheduler, change DEGIRO_IMAGE, pull and
 recreate; restore that saved digest to roll back. Preserve mapping and the complete
 state/journal directory. Source/image rollback never undoes financial records.
-See the root README for operator commands.
+See [recovery](../docs/recovery.md) for interrupted-request handling.
 
 Runtime requirements pin the complete dependency closure. Dependabot proposes
 weekly Python, Actions and Docker updates (a Python release is proposed once 14

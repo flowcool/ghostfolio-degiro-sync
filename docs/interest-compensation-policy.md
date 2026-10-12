@@ -154,8 +154,7 @@ of these movements; native import must not also credit the account balance.
 
 Adopted on 2026-10-09 under the maintainer's delegated accounting arbitration, revised
 following his supplied economic explanation and official framework sources.
-The [README](../README.md#accounting-policy-preserve-cash-yield-and-source-identity)
-states the rationale. No further operator accounting choice is a prerequisite
+The accounting rationale is recorded in this policy. No further operator accounting choice is a prerequisite
 for this bounded representation. The implemented rules admit only zero EUR
 Flatex interest and positive cent-valued EUR compensation. Strict source field
 checks reject unexpected product, order, FX, tax or other financial relationships.

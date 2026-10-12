@@ -2,6 +2,12 @@
 
 User deployment is supported through Docker Compose only; see README.md. The host interpreter commands below are for development and offline verification.
 
+## Architecture context
+
+Read [docs/architecture.md](docs/architecture.md), [GLOSSARY.md](GLOSSARY.md)
+and the relevant [architecture decisions](docs/adr/) before changing module
+responsibilities, financial execution or recovery.
+
 ## Offline checks
 
 ```sh
@@ -53,7 +59,7 @@ docker run --rm --network none --read-only --cap-drop ALL \
   --security-opt no-new-privileges:true --tmpfs /tmp:rw,nosuid,nodev,size=32m \
   --mount type=bind,src="$PWD/scripts/community_journey.py",dst=/journey/community_journey.py,readonly \
   --mount type=bind,src="$PWD/tests/fixtures/degiro_contract.yaml",dst=/journey/degiro_contract.yaml,readonly \
-  ghcr.io/flowcool/ghostfolio-degiro-sync:v0.2.0 python /journey/community_journey.py
+  ghcr.io/flowcool/ghostfolio-degiro-sync:v0.3.0 python /journey/community_journey.py
 ```
 
 Use `ghostfolio-degiro-sync:local` for the contributor build. The runtime image

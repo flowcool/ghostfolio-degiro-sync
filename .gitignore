@@ -35,6 +35,8 @@ htmlcov/
 # Symbol mapping - lists your own holdings by ISIN, so mount it rather than commit it
 mapping.yaml
 !mapping.example.yaml
+# Private account journals and optional proposals (host bind mount)
+state/
 
 # Editors and IDEs
 .idea/
