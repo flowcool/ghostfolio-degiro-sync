@@ -749,6 +749,7 @@ def ghost_exchange_access_token(host, access_token):
     validate_ghost_host(host)
     if not isinstance(access_token, str) or not access_token.strip():
         raise RuntimeError("Invalid Ghostfolio security token")
+    warn_ghost_http(host)
     with private_broker_logs(), requests.Session() as session:
         session.trust_env = False
         try:
@@ -777,6 +778,14 @@ def authenticate_ghostfolio(config):
                 config["ghost_host"], config.pop("ghost_access_token"))
 
 
+def warn_ghost_http(host):
+    """Fixed diagnostic only, after the caller validates the configured origin."""
+    if urlsplit(host).scheme == "http":
+        log.warning("Ghostfolio HTTP sends credentials in cleartext without server authentication; "
+                    "single-label DNS does not guarantee a local destination. "
+                    "Use HTTPS or an isolated trusted network")
+
+
 @contextmanager
 def ghost_transport(config, target_account):
     """Bind immutable core to bounded HTTP for this sequential single-thread run."""
@@ -788,6 +797,7 @@ def ghost_transport(config, target_account):
             or not isinstance(target_account.get("id"), str)
             or not re.fullmatch(r"[A-Za-z0-9_-]+", target_account["id"])):
         raise RuntimeError("Invalid Ghostfolio transport configuration")
+    warn_ghost_http(host)
     session = requests.Session()
     session.trust_env = False
     session.headers.update(core.ghost_headers(token))
