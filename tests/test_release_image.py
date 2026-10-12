@@ -174,6 +174,6 @@ def test_release_manifest_requires_both_native_gates_and_no_pr_publication():
     assert 'releases/latest' in promotion["run"]
     base = yaml.safe_load(Path("compose.yaml").read_text())["services"]["degiro-sync"]
     assert "build" not in base
-    assert base["image"] == "${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:v0.2.2}"
+    assert base["image"] == "${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:v0.3.0}"
     contributor = yaml.safe_load(Path("compose.build.yaml").read_text())["services"]["degiro-sync"]
     assert contributor["build"]["context"] == "." and contributor["pull_policy"] == "build"
