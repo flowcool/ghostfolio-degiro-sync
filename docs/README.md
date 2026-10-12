@@ -20,6 +20,7 @@ The root [README](../README.md) is the single setup and configuration reference.
   [cash yield](interest-compensation-policy.md) and [mode evidence](prospective-sync.md).
 - [Isolated acceptance](isolated-acceptance.md) and [CSV transition](v3-transition.md).
 - [Build and release guarantees](../.github/BUILD.md).
+- [Supply chain](supply-chain.md): binary transport and Python hash-lock evaluation.
 
 Agent guidance lives under `.claude/`; it is not deployment documentation.
 The [archived GitHub bootstrap snapshot](archive/github-setup.md) is historical.

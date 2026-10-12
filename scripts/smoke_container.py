@@ -31,6 +31,7 @@ def main():
             expected[name] = version
     core_hash = hashlib.sha256(Path("ghostfolio_core.py").read_bytes()).hexdigest()
     recovery_hash = hashlib.sha256(Path("scripts/recover_degiro.py").read_bytes()).hexdigest()
+    health_hash = hashlib.sha256(Path("scripts/check_scheduler.py").read_bytes()).hexdigest()
     provenance = Path("docs/connector-provenance.yaml").read_text()
     probe = f'''
 import hashlib, importlib.metadata, json, os
@@ -62,8 +63,11 @@ assert len(files) == provenance["python_module_count"]
 assert tree.hexdigest() == provenance["python_tree_sha256"]
 assert not any(name.startswith(("DEGIRO_", "GHOST_TOKEN")) for name in os.environ)
 assert sorted(p.name for p in Path("/app").iterdir()) == ["cash-rules.yaml", "degiro_to_ghostfolio.py", "entrypoint.sh", "ghostfolio_core.py", "requirements.txt", "scripts"]
-assert sorted(p.name for p in Path("/app/scripts").iterdir()) == ["recover_degiro.py"]
+assert sorted(p.name for p in Path("/app/scripts").iterdir()) == ["check_scheduler.py", "recover_degiro.py"]
 assert hashlib.sha256(Path("/app/scripts/recover_degiro.py").read_bytes()).hexdigest() == {recovery_hash!r}
+assert hashlib.sha256(Path("/app/scripts/check_scheduler.py").read_bytes()).hexdigest() == {health_hash!r}
+from scripts.check_scheduler import check_scheduler
+check_scheduler("")
 print("Runtime UID, dependency closure, source-equivalent connector, immutable core and explicit app file set: PASS")
 '''
     print(run(*options, "-i", args.image, "python", "-", input_text=probe).strip())
@@ -99,7 +103,11 @@ print("Runtime UID, dependency closure, source-equivalent connector, immutable c
                 assert "Running with validated cron schedule" in logs
                 info = json.loads(run("docker", "inspect", name))[0]
                 assert info["State"]["Running"] is True
+                assert info["Config"]["Healthcheck"]["Test"] == [
+                    "CMD", "python", "/app/scripts/check_scheduler.py"]
+                run("docker", "exec", name, "python", "/app/scripts/check_scheduler.py")
                 print("Actual minute cron invokes fail-closed job and remains running: PASS")
+                print("Local scheduler healthcheck accepts actual rootless PID 1: PASS")
                 break
             time.sleep(.25)
         else:

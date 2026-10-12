@@ -202,6 +202,8 @@ Keep `restart: "no"` for run-once operation. With a nonempty `CRON`, use `restar
 
 Scheduling waits for the first cron tick. The optional [dry-run overlay](compose.dry-run.yaml) fixes both simulation and this schedule. Stop the scheduler before a manual run against the same account state.
 
+Images built from this revision include a local healthcheck; published `v0.3.0` does not include it. The probe verifies that scheduled PID 1 is Supercronic in a running or sleeping state; it detects a stopped process without network or credential access. Docker marks repeated failures `unhealthy`; an exited container already has an exited status. Run-once mode bypasses the probe. Health status does not prove a job ran, detect missed ticks or deliver an alert. Docker restart policies respond to process exit, not `unhealthy`; external monitoring is needed for alerts or successful-run silence detection. A manual command overriding a scheduled container's entrypoint is not a scheduler and may be marked unhealthy if it lasts beyond the probe grace period.
+
 After reviewing a successful simulation and verifying your Ghostfolio backup, set `DRY_RUN=0` and recreate the service to enable imports and cash updates. Existing activities are not automatically corrected or deleted. Preserve state: removing the journal cannot resolve an uncertain import, and image rollback cannot undo financial changes.
 
 Apprise sends a sanitized alert for failed scheduled runs, including dry runs, and failed live synchronization. Successful runs and manual simulations are silent. No separate Apprise server is required; configure destinations through `APPRISE_URLS`. See [notifications](docs/notifications.md) and [recovery](docs/recovery.md).

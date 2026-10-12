@@ -9,6 +9,7 @@
 !scripts/
 scripts/**
 !scripts/recover_degiro.py
+!scripts/check_scheduler.py
 !third_party/
 !third_party/bitwarden/
 !third_party/bitwarden/**
