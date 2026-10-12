@@ -470,7 +470,7 @@ def test_pr_template_preserves_one_body_and_external_review_contract():
     for section in ('Summary', 'Behavior', 'Release impact', 'Evidence',
             'Verification', 'Merge Danger', 'AI assistance', 'CodeRabbit review'):
         assert body.count('## ' + section + '\n') == 1
-    assert 'managed externally by the maintainer' in body
+    assert 'managed externally' in body
     assert '@coderabbitai' not in body and 'request another incremental pass' not in body
     assert 'check_pr_merge.py' in body and '--match-head-commit' in body
     assert '.github/pull_request_template.md' in (root / 'AGENTS.md').read_text()

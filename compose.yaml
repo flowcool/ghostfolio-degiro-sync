@@ -1,8 +1,8 @@
 # Existing Ghostfolio network; run once by default, CRON is opt-in.
 services:
   degiro-sync:
-    image: ${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:latest}
-    restart: "no"
+    image: ${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:v0.4.0}
+    restart: ${RESTART_POLICY:-no}
     user: "10001:10001"
     read_only: true
     cap_drop: [ALL]

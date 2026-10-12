@@ -8,6 +8,6 @@ requests.
 
 Security fixes target the current `main` branch. Older revisions do not receive
 separate backports. Dependency and container checks run on pull requests. Published amd64/arm64
-images are available on GHCR, including `v0.3.0`; see the root README for the
-supported setup and `.github/BUILD.md` for release checks. Publication does not
+images are available on GHCR; see the root README for the supported setup and
+`.github/BUILD.md` for release checks. Publication does not
 deploy the image or authorize financial writes.

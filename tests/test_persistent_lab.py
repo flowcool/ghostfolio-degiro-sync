@@ -194,7 +194,7 @@ def test_compose_reuses_pins_and_separates_runtime_from_lab():
     assert runtime['environment']['SYNC_MODE'] == 'rolling'
     assert runtime['environment']['CRON'] == '${CRON:-}'
     assert runtime['user'] == '10001:10001' and runtime['read_only'] is True
-    assert runtime['restart'] == 'no' and runtime['cap_drop'] == ['ALL']
+    assert runtime['restart'] == '${RESTART_POLICY:-no}' and runtime['cap_drop'] == ['ALL']
     assert runtime['security_opt'] == ['no-new-privileges:true']
     assert production['networks']['ghostfolio']['external'] is True
     assert checker['tmpfs'] == runtime['tmpfs'] == ['/tmp:rw,nosuid,nodev,size=32m']
