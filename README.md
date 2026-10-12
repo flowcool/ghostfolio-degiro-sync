@@ -116,6 +116,8 @@ Start with `DRY_RUN=1` and an empty `CRON`. In Portainer, use absolute host path
 
 Compose fixes `SYNC_MODE=rolling`, `LOOKBACK_DAYS=90`, `TZ=Europe/Zurich`, `/config/mapping.yaml` and `/state`. Both cron and the broker date boundary use Europe/Zurich. The container runs as UID/GID 10001 with a read-only root filesystem and no Linux capabilities.
 
+Synchronization requires an explicit `SYNC_MODE`; absent or blank values fail at configuration before credential loading. The supported Compose definition already supplies `rolling`. Advanced contributor invocations must explicitly select `rolling`, `prospective` or `full_history`; selecting a mode does not bypass its evidence requirements.
+
 Use single quotes around secrets in `.env` to preserve literal `$` and `#`. Restrict access to this file, the Docker host and backups. Environment changes require recreating the container.
 
 ## Vault and mapping

@@ -372,7 +372,8 @@ def configure(monkeypatch, tmp_path, dry_run=None):
     path = tmp_path / 'mapping.yaml'
     path.write_text(yaml.safe_dump({'US0378331005': {'symbol': 'TEST', 'currency': 'USD'}}))
     for name, value in {'GHOST_HOST': 'http://localhost:3333', 'GHOST_TOKEN': 'TOKEN-SENTINEL',
-        'GHOST_ACCOUNT_ID': 'target-a', 'DEGIRO_ACCOUNT_ID': '123', 'MAPPING_FILE': str(path)}.items():
+        'GHOST_ACCOUNT_ID': 'target-a', 'DEGIRO_ACCOUNT_ID': '123', 'MAPPING_FILE': str(path),
+        'SYNC_MODE': 'full_history'}.items():
         monkeypatch.setenv(name, value)
     if dry_run is None:
         monkeypatch.delenv('DRY_RUN', raising=False)
@@ -386,6 +387,31 @@ def test_config_is_env_only_and_defaults_dry_run(monkeypatch, tmp_path):
     config, mapping, quotes = adapter.load_sync_config()
     assert config['dry_run'] is True and config['ghost_token'] == 'TOKEN-SENTINEL'
     assert mapping == MAPPING and quotes == QUOTES
+
+
+@pytest.mark.parametrize('mode', [None, '', '  '])
+def test_missing_sync_mode_refuses_before_credentials_or_broker(monkeypatch, tmp_path, mode):
+    configure(monkeypatch, tmp_path)
+    if mode is None:
+        monkeypatch.delenv('SYNC_MODE', raising=False)
+    else:
+        monkeypatch.setenv('SYNC_MODE', mode)
+    monkeypatch.setattr(adapter, 'load_ghost_credentials',
+                        lambda: pytest.fail('Missing mode loaded credentials'))
+    monkeypatch.setattr(adapter, 'read_degiro',
+                        lambda *args, **kwargs: pytest.fail('Missing mode contacted broker'))
+    with pytest.raises(RuntimeError, match='Set SYNC_MODE explicitly') as failure:
+        adapter.run_sync(NOW.date(), NOW.date())
+    assert adapter.failure_diagnostic(failure.value) == ('config', 'sync_mode')
+
+
+@pytest.mark.parametrize('mode', ['rolling', 'prospective', 'full_history'])
+def test_explicit_sync_modes_are_preserved(monkeypatch, tmp_path, mode):
+    configure(monkeypatch, tmp_path)
+    monkeypatch.setenv('SYNC_MODE', mode)
+    config, mapping, quotes = adapter.load_sync_config()
+    assert config['sync_mode'] == mode
+    assert config['dry_run'] is True
 
 
 @pytest.mark.parametrize('name,value', [('GHOST_HOST', 'http://public.example'),
