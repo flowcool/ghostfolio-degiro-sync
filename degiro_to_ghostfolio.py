@@ -1834,7 +1834,10 @@ def verified_mapping_document(document):
 
 def load_sync_config():
     """Operator configuration only; credentials are read verbatim from environment."""
-    sync_mode = os.environ.get("SYNC_MODE", "full_history")
+    sync_mode = os.environ.get("SYNC_MODE")
+    if sync_mode is None or not sync_mode.strip():
+        raise tag_failure(RuntimeError("Set SYNC_MODE explicitly: rolling, prospective or full_history"),
+                          "config", "sync_mode")
     if sync_mode not in ("full_history", "prospective", "rolling"):
         raise tag_failure(RuntimeError("Invalid synchronization mode"), "config", "sync_mode")
     with diagnostic_boundary("config", "ghostfolio_credentials"):

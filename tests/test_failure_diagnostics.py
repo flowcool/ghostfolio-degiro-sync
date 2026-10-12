@@ -235,7 +235,8 @@ def test_output_write_failure_does_not_render_path(monkeypatch, tmp_path, caplog
 def test_process_stdout_stderr_are_private(arguments, code, token):
     # A minimal synthetic environment guarantees failure before network/CLI use.
     environment = {"PATH": os.environ["PATH"], "GHOST_HOST": "https://portfolio.example",
-                   "GHOST_TOKEN": SECRET, "GHOST_ACCESS_TOKEN": SECRET, "LOOKBACK_DAYS": "90"}
+                   "GHOST_TOKEN": SECRET, "GHOST_ACCESS_TOKEN": SECRET, "LOOKBACK_DAYS": "90",
+                   "SYNC_MODE": "full_history"}
     result = subprocess.run([sys.executable, adapter.__file__, *arguments], env=environment,
                             capture_output=True, text=True, timeout=10, check=False)
     assert result.returncode == code

@@ -217,7 +217,7 @@ completeness and basis remain unverified. Its result separately reports
 sets historical completeness true to pass the old write gate. It proposes eligible
 activities, accepts none and invokes neither financial transport in DRY_RUN.
 Missing/changed evidence, incomplete coverage or uncertainty exits1 with a bounded
-status. `SYNC_MODE=full_history` remains the default and retains its original gate.
+status. `SYNC_MODE` must be explicit; `full_history` retains its original gate.
 
 ## Review, activation and rollback
 
