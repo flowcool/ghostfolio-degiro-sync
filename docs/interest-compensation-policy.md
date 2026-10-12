@@ -40,8 +40,9 @@ links [Participations, dated 2022-03-30](https://www.degiro.fr/data/pdf/fr/PSP_P
 which identifies the funds. Neither inspected document describes compensation
 eligibility or explicitly qualifies the account's credit.
 
-The economic explanation is operator-supplied; the MMF framework, actual credit
-and native representation are independently checked. This is sufficient for an
+The reporting convention distinguishes economic interpretation from proof of
+legal or tax treatment; the MMF framework, actual credit and native representation
+are independently checked. This is sufficient for an
 explicit engineering reporting convention, without presenting the compensation
 as legally or fiscally established interest. Use INTEREST because Ghostfolio can
 record a cash-yield receipt without treating it as an external contribution or
@@ -150,12 +151,10 @@ be forked. Native support alone cannot relax the full-history or unsupported
 category gates. Current cash is a separately validated final snapshot, not a sum
 of these movements; native import must not also credit the account balance.
 
-## Approval, validation and rollback
+## Validation and rollback
 
-Adopted on 2026-10-09 under the maintainer's delegated accounting arbitration, revised
-following his supplied economic explanation and official framework sources.
-The accounting rationale is recorded in this policy. No further operator accounting choice is a prerequisite
-for this bounded representation. The implemented rules admit only zero EUR
+[ADR-0008](adr/0008-bounded-cash-yield-reporting.md) records the dated reporting
+decision; this policy owns its detailed source and validation contract. The implemented rules admit only zero EUR
 Flatex interest and positive cent-valued EUR compensation. Strict source field
 checks reject unexpected product, order, FX, tax or other financial relationships.
 Whole-account rejection regressions continue for every uncharacterized case.
@@ -167,7 +166,7 @@ acceptance and private source/CSV reconciliation. Selected private annual/split
 conversion signatures agree for all 17 events (16 zero interest and one positive
 compensation); the complete CSV independently matches their date/minute, value
 date, description, currency and amount multiset. This selected-event proof does
-not establish full-account C13-C14 acceptance. Legacy NAV
+not establish full-account native and read-only reconciliation acceptance. Legacy NAV
 identity and CSV-transition completeness remain separately enforced.
 
 Observed adapter acceptance on 2026-10-09 using the pinned Ghostfolio image

@@ -12,7 +12,7 @@ urllib3==2.8.0
     # via requests
 
 # DEGIRO connector and complete additional dependency closure.
-# Wheel modules match inspected source 22691b5; see plan source contract.
+# Wheel modules match inspected source 22691b5; see docs/connector-provenance.yaml and docs/source-contract.md.
 annotated-types==0.8.0
 degiro-connector==3.0.36
 isodate==0.7.2

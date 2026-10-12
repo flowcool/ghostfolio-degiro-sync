@@ -3,15 +3,15 @@
 The external CSV converter is a separate backfill tool, not the adapter's
 accounting implementation or a completeness oracle. An actual synthetic run on
 2026-10-09 (Europe/Zurich) used its unchanged
-[V3 source at9e35bd602f054f563b8c728bcb36dc5eb2bbcaa5](https://github.com/dickwolff/Export-To-Ghostfolio/blob/9e35bd602f054f563b8c728bcb36dc5eb2bbcaa5/src/converters/degiroConverterV3.ts).
+[V3 source at 9e35bd602f054f563b8c728bcb36dc5eb2bbcaa5](https://github.com/dickwolff/Export-To-Ghostfolio/blob/9e35bd602f054f563b8c728bcb36dc5eb2bbcaa5/src/converters/degiroConverterV3.ts).
 The public fixture [degiro_v3_transition.yaml](../tests/fixtures/degiro_v3_transition.yaml)
 records all three input CSVs, captured output, producer/lock hashes, Node image
 digest and timezone. It contains no private account or broker data.
 
 | Synthetic input | Actual unchanged V3 output | Adapter consequence |
 | --- | --- | --- |
-| SELL2 TEST/USD for20, commission0.15EUR with same order ID | One SELL with fee0.15 in USD; no commission-currency conversion | API fixture with gross FX1.1 produces fee0.165USD. Existing CSV activity blocks import/cash; numeric proximity cannot adopt it |
-| Same ISIN, two paid dividends10 and20USD at10:00 and14:00 on the same day, withholding1.5 and3USD | Only first dividend10/fee1.5 survives the day-based comment dedup | API payment identities preserve both; existing CSV row requires explicit reconciliation |
+| SELL 2 TEST/USD for 20, commission 0.15 EUR with same order ID | One SELL with fee 0.15 in USD; no commission-currency conversion | API fixture with gross FX 1.1 produces fee 0.165 USD. Existing CSV activity blocks import/cash; numeric proximity cannot adopt it |
+| Same ISIN, two paid dividends 10 and 20 USD at 10:00 and 14:00 on the same day, withholding 1.5 and 3 USD | Only first dividend 10/fee 1.5 survives the day-based comment dedup | API payment identities preserve both; existing CSV row requires explicit reconciliation |
 | Flatex interest and monetary-fund compensation | No activities | These source categories continue to block the entire adapter account; empty converter output is no proof that nothing happened |
 
 The producer hard-codes `meta.version` to `v0`. It is not an immutable revision.
@@ -35,7 +35,7 @@ and temporary files are removed afterward; shared image layers remain cached.
 
 Use the already inspected scratch checkout at the exact recorded commit. Copy its
 source, package manifest and lock into disposable scratch state, leaving that
-checkout unchanged. Use the recorded Node22 image; the local Node20 does not meet
+checkout unchanged. Use the recorded Node 22 image; the local Node 20 does not meet
 the producer's engine requirement. Install using `npm ci --ignore-scripts
 --no-audit --no-fund` during image build. Dependencies are confined to the bench,
 not this Python runtime or its offline test environment.
