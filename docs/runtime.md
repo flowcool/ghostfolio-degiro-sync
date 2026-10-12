@@ -14,6 +14,16 @@ Runtime Python dependencies are pinned in requirements.txt. Supercronic and the 
 
 [README scheduling](../README.md#scheduled-runs-and-alerts) owns CRON, timezone and restart-policy configuration. The scheduler waits for its first tick and the image includes tzdata. Sentry settings are removed from the managed scheduler environment so inherited settings cannot activate its HTTP delivery paths. Real native-architecture smoke tests verify run-once, cron execution and timezone data with synthetic inputs.
 
+## Scheduler health
+
+The image healthcheck reads only `/proc/1/status` when CRON is nonempty. It expects
+the Supercronic process name and a live state, rejecting stopped/traced, zombie,
+dead or malformed status. It opens no listener, sends no request and reads no
+environment credentials, financial journal or process command line. Process
+liveness cannot establish progress: blocked I/O or missed executions can remain
+healthy. See [README scheduling](../README.md#scheduled-runs-and-alerts) for probe
+scope, restart behavior and monitoring limitations.
+
 ## Updates and rollback
 
 Stop the importer, preserve mapping/journals, pull/select the reviewed image and recreate the service. Restart alone retains its environment. API-key/master-password changes require recreation; DEGIRO item changes are fetched on the next execution. Source rollback uses a scoped Git revert; it does not reverse account activities or cash. An older version may reject a newer journal: use a reviewed forward fix or explicit migration instead of deleting state.

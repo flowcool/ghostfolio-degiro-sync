@@ -37,9 +37,12 @@ ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION} DRY_RUN=1 PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 COPY degiro_to_ghostfolio.py ghostfolio_core.py cash-rules.yaml entrypoint.sh ./
 COPY scripts/recover_degiro.py ./scripts/recover_degiro.py
+COPY scripts/check_scheduler.py ./scripts/check_scheduler.py
 COPY third_party/bitwarden/ /usr/local/share/bitwarden/
 RUN chmod 755 /app/entrypoint.sh \
     && groupadd --gid 10001 appuser \
     && useradd --uid 10001 --gid appuser --no-create-home --system appuser
 USER 10001:10001
+HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
+    CMD ["python", "/app/scripts/check_scheduler.py"]
 ENTRYPOINT ["/app/entrypoint.sh"]
