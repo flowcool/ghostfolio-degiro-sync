@@ -230,6 +230,27 @@ def test_quoted_policy_is_not_a_review_status_notice(github, comment, fence):
     assert preflight.check_merge(24)['ready']
 
 
+@pytest.mark.parametrize('comment', [False, True])
+@pytest.mark.parametrize('fence', ['```', '~~~~'])
+@pytest.mark.parametrize('notice', [None, 'Review skipped', 'Review paused',
+    'Review in progress', 'Rate limit exceeded'])
+def test_new_policy_quote_preserves_real_notices_in_same_fence(github, comment, fence, notice):
+    policy = 'pending, skipped or rate-limited review is not evidence.'
+    body = fence + 'text\n' + policy + (' ' + notice if notice else '') + '\n' + fence
+    if comment:
+        github['reviews'][None]['nodes'].clear()
+        row = coverage_comment()
+        row['body'] += '\n' + body
+        github['comments'][None]['nodes'] = [row]
+    else:
+        github['reviews'][None]['nodes'][0]['body'] = body
+    if notice:
+        with pytest.raises(RuntimeError, match='not evidence'):
+            preflight.check_merge(24)
+    else:
+        assert preflight.check_merge(24)['ready']
+
+
 @pytest.mark.parametrize('notice', ['Review skipped', 'Review paused',
     'Review in progress', 'Rate limit exceeded'])
 def test_actual_notice_is_not_hidden_by_context_quotation(github, notice):
