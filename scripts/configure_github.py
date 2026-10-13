@@ -9,6 +9,10 @@ import subprocess
 
 SOURCE = "repos/flowcool/ghostfolio-ibkr-sync"
 TARGET = "repos/flowcool/ghostfolio-degiro-sync"
+NATIVE_CONTAINER_CHECKS = (
+    "container-check (ubuntu-24.04, amd64)",
+    "container-check (ubuntu-24.04-arm, arm64)",
+)
 
 
 def api(endpoint, method="GET", payload=None):
@@ -58,7 +62,12 @@ def configure(apply=False, snapshot=None):
                 params["do_not_enforce_on_create"] = True
                 params["required_status_checks"] = [
                     check for check in params["required_status_checks"]
-                    if not check["context"].startswith("container-check")]
+                    if not check["context"].startswith("container-check")
+                    and check["context"] != "core-integrity"]
+                # Native DEGIRO matrix names differ from the sibling's names.
+                params["required_status_checks"].extend(
+                    {"context": context, "integration_id": 15368}
+                    for context in NATIVE_CONTAINER_CHECKS)
                 params["required_status_checks"].append(
                     {"context": "core-integrity", "integration_id": 15368})
         rules.append(rule)

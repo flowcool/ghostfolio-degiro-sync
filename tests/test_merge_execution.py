@@ -18,6 +18,7 @@ PROOF = {'ready': True, 'head': HEAD, 'required_checks': 6,
 def calls(monkeypatch):
     calls = []
     monkeypatch.setattr(merge, 'check_merge', lambda number: dict(PROOF))
+    monkeypatch.setattr(merge, 'check_merge_method', lambda number, method, head: 'main')
 
     def run(command, **kwargs):
         calls.append((command, kwargs))
@@ -57,7 +58,8 @@ def test_missing_proof_makes_zero_merge_calls(calls, monkeypatch, proof):
 
 
 def test_merge_uses_only_live_proven_head_and_bounded_command(calls):
-    assert merge.merge_pr(29) == dict(PROOF, merge_command_succeeded=True)
+    assert merge.merge_pr(29) == dict(PROOF, method='merge', base='main',
+        merge_command_succeeded=True)
     command, kwargs = calls[0]
     assert command == ['gh', 'pr', 'merge', '29', '--repo', 'github.com/' + merge.REPOSITORY,
         '--merge', '--match-head-commit', HEAD]
@@ -94,4 +96,30 @@ def test_invalid_number_never_reaches_preflight(calls, monkeypatch, number):
     monkeypatch.setattr(merge, 'check_merge', lambda number: pytest.fail('Invalid number queried'))
     with pytest.raises(RuntimeError):
         merge.merge_pr(number)
+    assert calls == []
+
+
+@pytest.mark.parametrize('method', ['merge', 'squash', 'rebase'])
+def test_selected_method_keeps_final_head_pin(calls, method):
+    result = merge.merge_pr(29, method)
+    assert result['method'] == method and result['base'] == 'main'
+    command = calls[0][0]
+    assert command[-3:] == ['--' + method, '--match-head-commit', HEAD]
+
+
+@pytest.mark.parametrize('method', ['auto', 'admin', '--squash', None, True])
+def test_invalid_method_never_reaches_preflight(calls, monkeypatch, method):
+    monkeypatch.setattr(merge, 'check_merge', lambda number: pytest.fail('Invalid method queried'))
+    with pytest.raises(RuntimeError, match='Invalid merge method'):
+        merge.merge_pr(29, method)
+    assert calls == []
+
+
+def test_failed_method_policy_makes_zero_merge_calls(calls, monkeypatch):
+    def failed(number, method, head):
+        raise RuntimeError('Merge method squash is disabled')
+
+    monkeypatch.setattr(merge, 'check_merge_method', failed)
+    with pytest.raises(RuntimeError, match='disabled'):
+        merge.merge_pr(29, 'squash')
     assert calls == []

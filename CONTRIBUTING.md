@@ -47,6 +47,18 @@ Read docs/upstreams.md. Scheduled watches create public compatibility notices wi
 
 Use the pull-request template. CI and completed CodeRabbit coverage must apply to the final head before the guarded scripts/merge_pr.py command. Keep personal paths, hostnames, operator names, captures and private issue references out of public artifacts.
 
+The guarded command defaults to a merge commit. Select another method explicitly:
+
+```sh
+.venv/bin/python scripts/merge_pr.py <number> --method squash
+# --method accepts merge, squash or rebase.
+```
+
+The selected method must be enabled by both repository settings and every
+effective rule on the PR's base branch. A failed or incomplete policy lookup
+blocks the command. Every method keeps the verified final-head review/CI checks
+and `--match-head-commit` pin; there is no auto-merge or administrator bypass.
+
 ## Complete community journey in a disposable container
 
 The public synthetic harness uses the real connector, vault retrieval and sync
