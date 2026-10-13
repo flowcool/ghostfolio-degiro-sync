@@ -64,7 +64,7 @@ mode permits one Ghostfolio login POST before the financial GET-only readback.
 
 Recovery is currently exercised in
 offline regressions and the [disposable full-server delayed-result/restart
-scenario](isolated-acceptance.md). Production completion/cancellation proof
+scenario](https://github.com/flowcool/ghostfolio-degiro-sync/blob/15d595f/docs/isolated-acceptance.md), recorded before the contributor lab was removed. Production completion/cancellation proof
 remains separate.
 
 ## Operator preflight and local confirmation
@@ -123,3 +123,23 @@ retain the private journal plus exact readback; reverting code does not undo
 activities or cancel requests already running at the server. The disposable lab
 owns its isolated reset/teardown. No live DELETE or broad cleanup is provided by
 this recovery boundary.
+
+## Cleanup and rollback preflight
+
+`scripts/cleanup_degiro.py` consumes a private complete activities JSON plus a
+private YAML expected manifest containing source_account, target_account and
+activities keyed by canonical broker comment. Each expected DTO has exactly the
+10 canonical fields. It creates a new mode 0600 proposal with exact created IDs
+and a digest of the input snapshot; it refuses overwrite. Missing, changed,
+duplicate, foreign-owned, redacted or unproved identities stop selection.
+
+```sh
+.venv/bin/python scripts/cleanup_degiro.py \
+  --snapshot private-activities.json --manifest private-expected.yaml \
+  --output private-cleanup-proposal.yaml
+```
+
+This offline utility has no HTTP/delete path and provides no deletion permission.
+A later authorized executor would still need fresh exact readback, unchanged
+ownership, bounded-ID confirmation and an independently tested rollback. Deleting
+rows alone does not restore asset profiles/market data or cancel old requests.

@@ -20,45 +20,11 @@ or broker locale. No source policy was changed or inferred from the converter.
 
 ## Reproduction boundary
 
-From this repository, with Docker available and the already inspected checkout:
-
-```sh
-.venv/bin/python scripts/check_v3_transition.py --source /path/to/Export-To-Ghostfolio
-```
-
-This optional operator bench is separate from offline pytest and production.
-It reads the pinned Git blob, verifies both source hashes, extracts only source
-and package manifests into disposable scratch state, and never edits the external
-checkout. Its dependency installation may contact the package registry while
-building. Converter execution is network-disabled. The exact UUID-tagged image
-and temporary files are removed afterward; shared image layers remain cached.
-
-Use the already inspected scratch checkout at the exact recorded commit. Copy its
-source, package manifest and lock into disposable scratch state, leaving that
-checkout unchanged. Use the recorded Node 22 image; the local Node 20 does not meet
-the producer's engine requirement. Install using `npm ci --ignore-scripts
---no-audit --no-fund` during image build. Dependencies are confined to the bench,
-not this Python runtime or its offline test environment.
-
-For execution, load each fixture `input_csv` into the native
-`DeGiroConverterV3.processFileContents` callback boundary. Substitute only its
-injected security lookup: reject every ISIN except the fixture's public
-`US0378331005` and return symbol TEST. Set `GHOSTFOLIO_ACCOUNT_ID` to
-`synthetic-csv-target`, omit tag IDs, and use `TZ=Europe/Zurich`. Serialize the
-native activities unchanged. Exclude only the nondeterministic generation date
-from captured metadata; retain its native version.
-
-Run the built converter container non-root with `--network none`, `--read-only`,
-a bounded tmpfs, no credentials, no production mounts, dropped capabilities and
-no-new-privileges. No Yahoo call, broker authentication or Ghostfolio request is
-needed to characterize the converter. Compare decoded output to each fixture's
-`output`. The fixture's producer and package-lock hashes must match before rerun.
-
-The [isolated native acceptance harness](isolated-acceptance.md) separately seeds
-the actual captured SELL in its owned Ghostfolio instance, changing only the
-synthetic account ID. It verifies exact native financial readback, then proves
-that the API candidate's mismatched fee cannot bypass CSV-overlap blocking.
-Offline regressions also cover distinct payments and full-ledger category gates.
+The fixture was produced by an optional Docker bench, `scripts/check_v3_transition.py`,
+removed with the contributor lab on 2026-10-13
+([source and full procedure at removal](https://github.com/flowcool/ghostfolio-degiro-sync/blob/15d595f/docs/v3-transition.md#reproduction-boundary)).
+Offline regressions in `tests/test_degiro_v3_transition.py` still compare the
+pinned output with the adapter; they need no Docker or network.
 
 ## Limits and rollback
 
@@ -70,7 +36,5 @@ not community compatibility evidence. Source seconds may be truncated in old
 converter output; matching a subset of destination rows does not certify history.
 No production acceptance follows.
 
-All bench state is disposable. Teardown the exact owned converter container and
-Ghostfolio UUID project only; keep shared caches and other containers intact.
-Roll back fixture/tests/harness/documentation with a scoped Git revert. The
+Roll back fixture, tests and documentation with a scoped Git revert. The
 external converter and immutable Ghostfolio core remain untouched.

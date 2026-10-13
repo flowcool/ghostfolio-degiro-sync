@@ -17,7 +17,7 @@ Automatic replay, deletion, journal erasure and cash resolution from balance
 alone are rejected. Production cancellation requires an independently proved,
 request-bound procedure and separate operator authorization.
 
-The [isolated acceptance evidence](../isolated-acceptance.md) demonstrates delayed
+The [isolated acceptance evidence](https://github.com/flowcool/ghostfolio-degiro-sync/blob/15d595f/docs/isolated-acceptance.md) demonstrates delayed
 completion and owned-server quiescence only in disposable synthetic instances.
 It does not prove production topology or grant authority to interrupt a shared
 service. The [recovery contract](../recovery.md) owns commands, evidence and
