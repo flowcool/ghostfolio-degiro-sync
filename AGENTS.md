@@ -12,9 +12,40 @@ The supported user deployment is Docker Compose. README.md owns the complete set
 - Read docs/ghostfolio-auth.md before changing authentication or transport. Keep exact credential exclusivity, one token exchange per execution, strict origins, no redirects and no raw response logging.
 - DRY_RUN permits authentication and reads while blocking financial writes. Unknown or ambiguous relevant account data blocks dispatch. Preserve all accounting, identity, coverage and uncertain-result recovery guards.
 
+## Working mode: fast-track
+
+This mode replaces the global per-step ceremony. The invariants above still apply.
+
+- **Spec first.** `openspec/specs/` describes current behavior. No behavior change
+  without an OpenSpec change approved by the operator. When reality contradicts
+  the spec, stop and report; never amend the spec silently.
+- **OpenSpec to work items.** After approval, one parent item for the change and
+  one self-contained item per task (spec path, requirement, scenario, acceptance
+  command, files to touch). Closing an item ticks its task in `tasks.md`; archive
+  the change when every item is closed.
+- **One item = one fresh session.** Claim, implement, prove, close, stop. Do not
+  start the next item or arm a goal across items. Budget about 150 tool calls;
+  above that, stop and report the state.
+- **Generated OpenSpec skills.** These rules override them. `openspec-apply-change`
+  implements one task per session, not every task until done. Change names are
+  lowercase kebab-case; stop before any shell command if a selected change name
+  is not, and pass values read from OpenSpec output as quoted arguments, never
+  as shell source.
+- **Done = the item's scenario replayed for real** (command and observed output in
+  the closing note). Green offline tests alone are not done.
+- **Tests:** offline pytest for adapter logic on synthetic or anonymized fixtures.
+  No tests for contributor tooling, docs or CI. No full-suite rerun for prose edits.
+- **Notes:** one closing note with evidence per item; no per-step findings.
+- **Docs:** README and user docs required by the spec only. No new plan, review
+  or contract files.
+- **Subagents:** only on the operator's explicit request.
+- **Ask the operator only for:** a DEGIRO fact missing from the spec, a real broker
+  login, a Ghostfolio write, a scope change. One question at a time, in plain
+  French, with your recommended answer.
+
 ## Validation and delivery
 
-See CONTRIBUTING.md for developer commands. Run the full offline suite, core integrity, semantic diff, numstat and whitespace checks before committing. Synthetic tests and lab checks use disposable state without real vault, broker or production credentials.
+See CONTRIBUTING.md for developer commands. Before committing code, run the full offline suite and core integrity; for every commit, check semantic diff, numstat and whitespace. Synthetic tests use disposable state without real vault, broker or production credentials.
 
 Public bug reports and compatibility notices use GitHub Issues. Existing local work-tracker policy is supplied by the execution environment; do not publish private tracker IDs or paths.
 

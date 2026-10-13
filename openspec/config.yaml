@@ -1,0 +1,32 @@
+schema: spec-driven
+
+context: |
+  Community Docker connector: DEGIRO account activities -> one existing Ghostfolio account.
+  Docker-first, every setting through ENV, unattended run with `docker compose up -d`
+  and an optional CRON. Python, functional style, no classes, no type hints.
+  Sibling contract shared with ../ghostfolio-ibkr-sync and ../ghostfolio-boursedirect-sync:
+  CRON, DRY_RUN, APPRISE_URLS, additive deduplicated import, ENV only.
+  ghostfolio_core.py is an immutable projection of the IBKR sibling (CORE_PROVENANCE.md).
+  Broker credentials come only from a Bitwarden/Vaultwarden item; direct credential
+  variables are rejected. Unknown or ambiguous relevant data blocks the run.
+  The supported Compose path uses SYNC_MODE=rolling over 90 days; prospective and
+  full_history exist in code for advanced contributors only.
+  The product already runs; specs describe observed behavior before any change.
+  Readers: the operator (infrastructure expert, not a developer) and community users.
+  A changed decision is applied to proposal, specs, design and tasks before commit.
+
+rules:
+  proposal:
+    - Max 400 words. Plain English, no internal jargon.
+    - Include an in-scope / out-of-scope table that lists every DEGIRO event type considered.
+    - Build that table from saved real data of the chosen source; when the source changes, rebuild it.
+    - Include a "Non-goals" section.
+  specs:
+    - Every requirement has at least one WHEN/THEN scenario that a person can check by running one command and reading its output.
+    - A baseline requirement describes behavior observed in production dry-run logs, the README or an existing offline test; cite which.
+    - Never state DEGIRO API behavior that is not observed; mark unknowns as open questions.
+  design:
+    - Max 400 words. Name the sibling file or mechanism reused for each part.
+  tasks:
+    - One task = one vertical slice that ends with a runnable check, about one hour of work.
+    - No task for internal tooling, lab proofs or process automation; docs tasks only for README or user docs the spec requires.
