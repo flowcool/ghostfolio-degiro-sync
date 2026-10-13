@@ -17,7 +17,7 @@ updates:
     open-pull-requests-limit: 0
 
   - package-ecosystem: "docker"
-    directories: ["/", "/lab"]
+    directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 0

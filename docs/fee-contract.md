@@ -2,7 +2,7 @@
 
 ## Target-version evidence
 
-The reviewed Ghostfolio lab version is `3.81.0`, pinned in `lab/Dockerfile`.
+The reviewed Ghostfolio lab version was `3.81.0`, pinned in `lab/Dockerfile` (removed with the contributor lab; see [source at removal](https://github.com/flowcool/ghostfolio-degiro-sync/blob/15d595f/lab/Dockerfile)).
 The source was inspected in an
 existing scratch checkout at tag `3.81.0`, commit
 `920d0787541a8568920fc11f978aa01e5a52c581`:
