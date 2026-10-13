@@ -15,7 +15,6 @@ image, merges a dependency PR, deploys a service or accesses financial accounts.
 | Python runtime and its complete closure | requirements.txt pins DEGIRO, PyOTP, requests, YAML, Apprise and every transitive package | Daily PyPI releases; weekly grouped Renovate proposals; pip-audit on PR/release/weekly checks; blocking image scan |
 | Python developer/CI tools | requirements-dev.txt pins pip-audit and pytest | Daily dependency releases; weekly grouped Renovate proposals; complete CI environment audit |
 | Python/Debian base image | Digest-pinned Python 3.12 slim in Dockerfile, OS packages inherited from it | Weekly Renovate proposals within Python 3.12; native image security checks |
-| PostgreSQL/Redis contributor lab | Digest-pinned images in compose.lab.yaml | Weekly Renovate proposals require approval; lab isolated from production |
 | GitHub Actions: checkout/setup-python, CodeQL, dependency-review, Trivy, Docker build/login, artifacts | Exact SHA in workflows | Weekly grouped Renovate proposals; reviewed CI and native scan gates |
 
 The optional operator notification destinations, Docker Engine/Compose, existing

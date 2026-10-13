@@ -12,13 +12,13 @@ The root [README](../README.md) is the single setup and configuration reference.
 
 ## Contributors
 
-- [Contributing](../CONTRIBUTING.md): offline tests, builds and synthetic labs.
+- [Contributing](../CONTRIBUTING.md): offline tests and builds.
 - [Architecture](architecture.md), [glossary](../GLOSSARY.md) and [decisions](adr/README.md).
 - [Core provenance](../CORE_PROVENANCE.md): immutable projection and propagation.
 - [Upstreams](upstreams.md), [runtime](runtime.md) and [Compose definitions](compose.md).
 - [Source contract](source-contract.md), [fees](fee-contract.md),
   [cash yield](interest-compensation-policy.md) and [mode evidence](prospective-sync.md).
-- [Isolated acceptance](isolated-acceptance.md) and [CSV transition](v3-transition.md).
+- [CSV transition](v3-transition.md).
 - [Build and release guarantees](../.github/BUILD.md).
 - [Supply chain](supply-chain.md): binary transport and Python hash-lock evaluation.
 
