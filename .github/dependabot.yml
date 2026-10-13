@@ -1,9 +1,7 @@
 version: 2
 updates:
-  # Renovate owns version and security-update PRs. Keep the dependency graph
-  # and Dependabot alerts enabled. Zero disables version PRs only; the separate
-  # GitHub automatic-security-update setting must also be disabled after the
-  # Renovate handover checks in docs/upstreams.md have passed.
+  # Dependabot owns security updates; Renovate owns ordinary version PRs.
+  # Zero disables Dependabot version PRs while its security updates stay enabled.
   - package-ecosystem: "pip"
     directory: "/"
     schedule:

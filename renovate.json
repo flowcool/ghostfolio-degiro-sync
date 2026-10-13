@@ -3,9 +3,9 @@
   "extends": [
     "config:recommended"
   ],
-  "enabledManagers": ["pip_requirements", "github-actions", "dockerfile", "docker-compose"],
-  "timezone": "Etc/UTC",
-  "schedule": ["* * * * 1"],
+  "enabledManagers": ["pip_requirements", "npm", "github-actions", "dockerfile", "docker-compose"],
+  "timezone": "Europe/Zurich",
+  "schedule": ["* 0-8 * * 1"],
   "prConcurrentLimit": 3,
   "prHourlyLimit": 2,
   "automerge": false,
@@ -22,15 +22,37 @@
       "rangeStrategy": "pin"
     },
     {
+      "description": "Keep npm updates behind the review window.",
+      "matchManagers": ["npm"],
+      "minimumReleaseAge": "14 days"
+    },
+    {
       "matchManagers": ["pip_requirements"],
+      "matchFileNames": ["requirements.txt"],
       "matchUpdateTypes": ["minor", "patch"],
-      "groupName": "python-minor-patch"
+      "groupName": "python-runtime-minor-patch"
+    },
+    {
+      "matchManagers": ["pip_requirements"],
+      "matchFileNames": ["requirements-dev.txt"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "python-dev-minor-patch"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "npm-minor-patch"
     },
     {
       "description": "Preserve the review window for image and CI changes.",
       "matchManagers": ["github-actions", "dockerfile", "docker-compose"],
       "minimumReleaseAge": "3 days",
       "pinDigests": true
+    },
+    {
+      "matchManagers": ["dockerfile", "docker-compose"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
+      "groupName": "images"
     },
     {
       "matchManagers": ["github-actions"],
@@ -55,19 +77,13 @@
       "dependencyDashboardApproval": true
     },
     {
-      "description": "Broker provenance and native lab contracts need explicit compatibility review.",
-      "matchPackageNames": ["degiro-connector", "ghostfolio/ghostfolio", "postgres", "redis"],
+      "description": "Connector provenance needs explicit compatibility review.",
+      "matchPackageNames": ["degiro-connector"],
       "dependencyDashboardApproval": true
     }
   ],
+  "osvVulnerabilityAlerts": false,
   "vulnerabilityAlerts": {
-    "enabled": true,
-    "automerge": false,
-    "schedule": [],
-    "minimumReleaseAge": null,
-    "dependencyDashboardApproval": false,
-    "prCreation": "immediate",
-    "rangeStrategy": "pin",
-    "vulnerabilityFixStrategy": "lowest"
+    "enabled": false
   }
 }
