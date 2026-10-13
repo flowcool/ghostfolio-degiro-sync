@@ -39,7 +39,14 @@ This mode replaces the global per-step ceremony. The invariants above still appl
 - **Notes:** one closing note with evidence per item; no per-step findings.
 - **Docs:** README and user docs required by the spec only. No new plan, review
   or contract files.
-- **Subagents:** only on the operator's explicit request.
+- **Subagents:** only on the operator's explicit request, except the PR lifecycle:
+  after the code is proven and pushed, one cheaper subagent without history
+  creates the PR, waits with `pr-gate`, answers minor comments, resolves threads,
+  writes the bead close note and merges with `scripts/merge_pr.py` when allowed. It never edits code and
+  returns only the verdict and the threads that need a code change (global
+  Delegation rule).
+  Wait with `~/.agents/bin/pr-gate <n> --repo flowcool/ghostfolio-degiro-sync`;
+  `merge_pr.py` still requires a completed CodeRabbit review, docs-only included.
 - **Ask the operator only for:** a DEGIRO fact missing from the spec, a real broker
   login, a Ghostfolio write, a scope change. One question at a time, in plain
   French, with your recommended answer.
