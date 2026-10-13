@@ -1,6 +1,8 @@
 > Historical bootstrap snapshot; not a current setup procedure.
 > Current build/release guarantees are in [.github/BUILD.md](../../.github/BUILD.md).
 > Do not apply the settings described here to an existing repository.
+> Dependency PR ownership now follows [docs/upstreams.md](../upstreams.md);
+> the bootstrap helper preserves the local automatic-security-update setting.
 
 # GitHub setup
 

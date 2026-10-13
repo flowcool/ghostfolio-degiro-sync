@@ -30,7 +30,10 @@ def configure(apply=False, snapshot=None):
     settings = {key: source[key] for key in fields}
     if api(TARGET)["size"]:
         settings["default_branch"] = "main"
-    settings["security_and_analysis"] = source["security_and_analysis"]
+    # Dependency PR ownership is local; never restore the sibling's PR bot.
+    settings["security_and_analysis"] = {
+        key: value for key, value in source["security_and_analysis"].items()
+        if key != "dependabot_security_updates"}
     changes = [(TARGET, "PATCH", settings)]
     for suffix in ("actions/permissions", "actions/permissions/workflow"):
         changes.append((f"{TARGET}/{suffix}", "PUT", api(f"{SOURCE}/{suffix}")))
@@ -41,7 +44,6 @@ def configure(apply=False, snapshot=None):
     suffix = "actions/permissions/fork-pr-contributor-approval"
     changes.append((f"{TARGET}/{suffix}", "PUT", api(f"{SOURCE}/{suffix}")))
     changes += [(f"{TARGET}/vulnerability-alerts", "PUT", None),
-                (f"{TARGET}/automated-security-fixes", "PUT", None),
                 (f"{TARGET}/private-vulnerability-reporting", "PUT", None)]
     existing = {row["name"]: row["id"] for row in api(f"{TARGET}/rulesets")}
     rules = []
