@@ -2,7 +2,7 @@ name: Dependency release watch
 
 # Opens one review issue per new stable release of a pinned dependency
 # (requirements.txt on PyPI, supercronic on GitHub) so breaking changes are
-# checked before Dependabot proposes the bump. Never changes pins or builds.
+# checked before Renovate proposes the bump. Never changes pins or builds.
 on:
   schedule:
     - cron: "29 7 * * *"

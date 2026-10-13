@@ -1,9 +1,9 @@
 """Open one deduplicated review issue per new release of a pinned dependency.
 
 Watches the runtime closure pinned in requirements.txt (PyPI) and the
-supercronic binary pinned in the Dockerfile (GitHub releases, which Dependabot
-does not track). Every stable release newer than the current pin gets an issue
-so breaking changes are reviewed before Dependabot proposes the bump.
+supercronic binary pinned in the Dockerfile (GitHub releases, updated manually).
+Every stable release newer than the current pin gets an issue
+so breaking changes are reviewed before Renovate proposes the bump.
 """
 
 import json
@@ -147,7 +147,7 @@ def notice_body(pin, release, links):
         "Review:",
         "- [ ] Read the release notes / changelog for removals, renamed options and behaviour changes.",
         "- [ ] Check whether this sync or the notification worker uses anything that changed.",
-        "- [ ] Decide: adopt (Dependabot proposes the bump after its 14-day cooldown; security fixes come at once) or hold, and record why.",
+        "- [ ] Decide: adopt (Renovate proposes Python bumps after its 14-day cooldown; security fixes bypass the delay; binary bumps are manual) or hold, and record why.",
         "",
         "This notice does not change any pin, build or deployment.",
         "Closing it acknowledges the review; the watcher never reopens or duplicates it.",

@@ -32,14 +32,17 @@ recreate; restore that saved digest to roll back. Preserve mapping and the compl
 state/journal directory. Source/image rollback never undoes financial records.
 See [recovery](../docs/recovery.md) for interrupted-request handling.
 
-Runtime requirements pin the complete dependency closure. Dependabot proposes
-weekly Python, Actions and Docker updates (a Python release is proposed once 14
-days old; security updates ignore the cooldown). Supercronic is a separate
-upstream binary: updating its version also requires both architecture checksums.
-`ghostfolio_core.py` is never edited by hand and never bumped by Dependabot;
-repin it deliberately with `scripts/check_core.py --write` after reading the
-IBKR release notes. Never auto-merge dependency changes without the required
-checks.
+Runtime requirements pin the complete dependency closure. Dependabot supplies
+GitHub alerts; Renovate proposes ordinary and security updates after the staged
+handover in [docs/upstreams.md](../docs/upstreams.md). Ordinary proposals are
+weekly: Python releases wait 14 days, Actions and images three days. Python
+minor/patch changes are grouped; security corrections bypass ordinary delays.
+Python stays on 3.12. Major, connector and lab proposals require prior dashboard
+approval; security urgency still requires provenance and compatibility evidence.
+Supercronic and Bitwarden versions require both architecture checksums and remain
+outside automatic updates. `ghostfolio_core.py` is never edited by hand or bumped
+by either bot; repin it deliberately with `scripts/check_core.py --write` after
+reading the IBKR release notes. Dependency PRs never auto-merge.
 
 ## Release notes
 
