@@ -29,4 +29,4 @@ rules:
     - Max 400 words. Name the sibling file or mechanism reused for each part.
   tasks:
     - One task = one vertical slice that ends with a runnable check, about one hour of work.
-    - No task for internal tooling, lab proofs, process automation or docs beyond README.
+    - No task for internal tooling, lab proofs or process automation; docs tasks only for README or user docs the spec requires.

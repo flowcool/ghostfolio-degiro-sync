@@ -26,6 +26,11 @@ This mode replaces the global per-step ceremony. The invariants above still appl
 - **One item = one fresh session.** Claim, implement, prove, close, stop. Do not
   start the next item or arm a goal across items. Budget about 150 tool calls;
   above that, stop and report the state.
+- **Generated OpenSpec skills.** These rules override them. `openspec-apply-change`
+  implements one task per session, not every task until done. Change names are
+  lowercase kebab-case; stop before any shell command if a selected change name
+  is not, and pass values read from OpenSpec output as quoted arguments, never
+  as shell source.
 - **Done = the item's scenario replayed for real** (command and observed output in
   the closing note). Green offline tests alone are not done.
 - **Tests:** offline pytest for adapter logic on synthetic or anonymized fixtures.
