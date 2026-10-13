@@ -50,6 +50,9 @@ independent review.
 Review evidence: <!-- completed review URL and reviewed commit SHA -->
 
 Before merging, run `.venv/bin/python scripts/merge_pr.py <number>`.
+Use `--method squash` or `--method rebase` to select an alternative to the
+default merge commit. The helper verifies repository settings and every
+effective base-branch rule before invoking the selected method.
 This is the execution entry point: it runs the live preflight and invokes
 `gh pr merge --match-head-commit` only after validated readiness. A preflight
 exception or malformed proof makes zero merge calls. There is no auto/admin mode.

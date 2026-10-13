@@ -47,7 +47,10 @@ def test_preview_never_mutates_and_rules_require_only_available_checks(monkeypat
     params = rules[0]["rules"][0]["parameters"]
     assert params["do_not_enforce_on_create"] is True
     assert [row["context"] for row in params["required_status_checks"]] == [
-        "test", "core-integrity"]
+        "test", "container-check (ubuntu-24.04, amd64)",
+        "container-check (ubuntu-24.04-arm, arm64)", "core-integrity"]
+    assert all(row["integration_id"] == 15368
+               for row in params["required_status_checks"][1:])
     assert all(method == "GET" for _, method, _ in calls)
 
 

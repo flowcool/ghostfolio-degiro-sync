@@ -9,6 +9,9 @@ the core-integrity check (`scripts/check_core.py`, also weekly) that
 CodeQL analyzes Python independently. Dependency Review rejects newly introduced
 moderate or worse dependency vulnerabilities, including development scope.
 Required checks must pass before merging.
+Both native container matrix checks are required on `main`.
+`scripts/configure_github.py` adapts the sibling's check names to this native
+matrix and preserves these requirements when configuring the repository.
 
 PR builds never log in to a registry or publish images. `release-image.yml`
 publishes only a published semantic-version GitHub Release whose tag is on main.
