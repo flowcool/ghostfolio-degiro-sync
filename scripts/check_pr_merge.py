@@ -139,7 +139,7 @@ def unique_coverage_fields(pairs):
 
 def review_notice_text(body):
     # Bot reviews include repository policy in fenced context quotations.
-    # Exclude only the known quoted policy sentence, never other notices.
+    # Exclude only the known quoted policy sentences, never other notices.
     lines, prose, quoted, fence = body.splitlines(keepends=True), [], [], None
     for line in lines:
         marker = re.match(r'^ {0,3}(`{3,}|~{3,})([^\r\n]*)', line)
@@ -153,7 +153,8 @@ def review_notice_text(body):
             quoted.append(line)
             if (marker and marker.group(1)[0] == fence[0]
                     and len(marker.group(1)) >= len(fence) and not marker.group(2).strip()):
-                prose.append(re.sub(r'Skipped, pending or\s+rate-limited reviews are not evidence\.',
+                prose.append(re.sub(r'Skipped, pending or\s+rate-limited reviews are not evidence\.'
+                    r'|pending, skipped or\s+rate-limited review is not evidence\.',
                     '', ''.join(quoted)))
                 fence, quoted = None, []
     return ''.join(prose + quoted)

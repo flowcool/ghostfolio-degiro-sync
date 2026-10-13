@@ -55,7 +55,8 @@ def sequence_post(monkeypatch, responses):
     sent = []
     it = iter(responses)
 
-    def _post(url, headers, json, timeout):
+    def _post(url, headers, json, timeout, allow_redirects):
+        assert allow_redirects is False
         sent.append(json["activities"])
         return next(it)
     monkeypatch.setattr(m.requests, "post", _post)
@@ -163,7 +164,11 @@ def test_cash_balance_payload_is_the_five_whitelisted_fields(monkeypatch):
     monkeypatch.setattr(m.requests, "get", lambda *a, **k: Resp(
         {"id": "9", "currency": "EUR", "name": "IBKR", "platformId": "p1", "comment": "x",
          "isExcluded": False, "balance": 1, "value": 5}))
-    monkeypatch.setattr(m.requests, "put", lambda url, headers, json, timeout: sent.update(json) or Resp({}, 200))
+    def put(url, headers, json, timeout, allow_redirects):
+        assert allow_redirects is False
+        sent.update(json)
+        return Resp({}, 200)
+    monkeypatch.setattr(m.requests, "put", put)
     assert m.ghost_update_cash_balance(CFG, "9", 123.456) is True
     assert sent == {"balance": 123.456, "currency": "EUR", "id": "9", "name": "IBKR", "platformId": "p1"}
 
@@ -172,6 +177,46 @@ def test_cash_balance_payload_is_the_five_whitelisted_fields(monkeypatch):
 def test_cash_balance_dry_run_does_not_touch_the_api(monkeypatch):
     monkeypatch.setattr(m.requests, "get", lambda *a, **k: pytest.fail("no API call in dry run"))
     assert m.ghost_update_cash_balance({**CFG, "dry_run": True}, "9", 1.0) is True
+
+
+@pytest.mark.parametrize("status", [300, 301, 302, 303, 307, 308, 399])
+@pytest.mark.parametrize("operation", ["accounts", "import", "cash_get", "cash_put"])
+def test_core_rejects_redirects_before_reading_body_or_retrying(monkeypatch, caplog,
+                                                              operation, status):
+    calls = []
+    cfg = {**CFG}
+
+    def send(method, url, **options):
+        assert options["allow_redirects"] is False
+        calls.append((method, url))
+        if operation == "cash_put" and method == "GET":
+            return Resp({"id": "9", "currency": "EUR", "name": "Synthetic"})
+        # No body/status methods: redirects must be refused before either is read.
+        return SimpleNamespace(status_code=status)
+
+    monkeypatch.setattr(m.requests, "get", lambda url, **kw: send("GET", url, **kw))
+    monkeypatch.setattr(m.requests, "post", lambda url, **kw: send("POST", url, **kw))
+    monkeypatch.setattr(m.requests, "put", lambda url, **kw: send("PUT", url, **kw))
+
+    if operation == "accounts":
+        with pytest.raises(RuntimeError, match="Ghostfolio request redirected"):
+            m.ghost_get_accounts(cfg)
+        expected = [("GET", CFG["ghost_host"] + "/api/v1/account")]
+    elif operation == "import":
+        assert m.ghost_import_activities(cfg, [import_candidate()]) == ([], False)
+        assert cfg["_uncertain_import_accounts"] == {"synthetic"}
+        assert "Ghostfolio request redirected" in caplog.text
+        expected = [("POST", CFG["ghost_host"] + "/api/v1/import")]
+    else:
+        expected = [("GET", CFG["ghost_host"] + "/api/v1/account/9")]
+        if operation == "cash_get":
+            with pytest.raises(RuntimeError, match="Ghostfolio request redirected"):
+                m.ghost_update_cash_balance(cfg, "9", 1.0)
+        else:
+            assert m.ghost_update_cash_balance(cfg, "9", 1.0) is False
+            assert "Ghostfolio request redirected" in caplog.text
+            expected.append(("PUT", CFG["ghost_host"] + "/api/v1/account/9"))
+    assert calls == expected
 
 
 
