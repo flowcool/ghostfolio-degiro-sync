@@ -3,26 +3,28 @@
 This document is the single authoritative provenance record. The YAML block is
 read by the checker; do not maintain a second pin in a workflow or generated file.
 The selected function list below defines the maintained broker-agnostic boundary.
-The source pin tracks the reviewed v2.2.0 release. This project never modifies
+The source pin tracks the reviewed IBKR main commit below. This project never modifies
 the IBKR sibling; propagation remains explicit and human-controlled.
 
 ```yaml
 format: 1
 repository: https://github.com/flowcool/ghostfolio-ibkr-sync.git
-commit: 54958ab1035eb97a1f67f9072b79699813ec3800
+commit: 5e43c60a5c617bfe8d97afaa947b47802375152f
 source_path: ibkr_to_ghostfolio.py
-source_sha256: 9717927fd7102401359dcdc44c6080da5211aac298afa1442dbf17e36cf15096
+source_sha256: 3c86824e643b2b21bcb3af16d61c5b66a14cab2902227ecae47aa4a65bfb88ff
 imports:
   - import logging
   - import re
   - from datetime import datetime, timezone
-  - from math import isfinite
+  - from math import ceil, isfinite
   - import requests
 constants:
   - log
   - _UNRESOLVED_SYMBOL_RE
+  - GHOST_REDIRECT_ERROR
 functions:
   - ghost_headers
+  - ghost_response_is_redirect
   - activity_date_is_current
   - activity_is_active
   - ghost_get_accounts

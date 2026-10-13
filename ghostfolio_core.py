@@ -7,7 +7,7 @@ import re
 from datetime import datetime, timezone
 
 
-from math import isfinite
+from math import ceil, isfinite
 
 
 import requests
@@ -22,6 +22,14 @@ def ghost_headers(token):
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
+
+
+GHOST_REDIRECT_ERROR = "Ghostfolio request redirected"
+
+
+def ghost_response_is_redirect(resp):
+    """Return whether a Ghostfolio response is a redirect."""
+    return 300 <= resp.status_code < 400
 
 
 def activity_date_is_current(activity):
@@ -62,7 +70,10 @@ def activity_is_active(activity):
 def ghost_get_accounts(config):
     """Fetch all accounts from Ghostfolio."""
     url = f"{config['ghost_host']}/api/v1/account"
-    resp = requests.get(url, headers=ghost_headers(config["ghost_token"]), timeout=30)
+    resp = requests.get(url, headers=ghost_headers(config["ghost_token"]), timeout=30,
+                        allow_redirects=False)
+    if ghost_response_is_redirect(resp):
+        raise RuntimeError(GHOST_REDIRECT_ERROR)
     resp.raise_for_status()
     return resp.json()
 
@@ -208,10 +219,16 @@ def ghost_import_activities(config, activities):
     for _ in range(max_attempts):
         try:
             resp = requests.post(url, headers=ghost_headers(config["ghost_token"]),
-                                 json={"activities": remaining}, timeout=60)
+                                 json={"activities": remaining}, timeout=60,
+                                 allow_redirects=False)
         except requests.RequestException as exc:
             log.error("Import request failed: %s", exc)
             mark_import_uncertain(config, remaining)
+            return [], False
+
+        if ghost_response_is_redirect(resp):
+            mark_import_uncertain(config, remaining)
+            log.error(GHOST_REDIRECT_ERROR)
             return [], False
 
         try:
@@ -280,7 +297,10 @@ def ghost_update_cash_balance(config, account_id, balance):
                  account_id, balance)
         return True
     url = f"{config['ghost_host']}/api/v1/account/{account_id}"
-    resp = requests.get(url, headers=ghost_headers(config["ghost_token"]), timeout=30)
+    resp = requests.get(url, headers=ghost_headers(config["ghost_token"]), timeout=30,
+                        allow_redirects=False)
+    if ghost_response_is_redirect(resp):
+        raise RuntimeError(GHOST_REDIRECT_ERROR)
     resp.raise_for_status()
     account_data = resp.json()
 
@@ -292,7 +312,10 @@ def ghost_update_cash_balance(config, account_id, balance):
         "platformId": account_data.get("platformId") or config.get("ghost_platform_id") or None,
     }
     resp = requests.put(url, headers=ghost_headers(config["ghost_token"]),
-                        json=payload, timeout=30)
+                        json=payload, timeout=30, allow_redirects=False)
+    if ghost_response_is_redirect(resp):
+        log.error(GHOST_REDIRECT_ERROR)
+        return False
     if resp.status_code >= 400:
         log.error("Failed to update cash balance (%d): %s", resp.status_code, resp.text)
         return False
