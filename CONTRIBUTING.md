@@ -35,12 +35,6 @@ docker build --build-arg TARGETARCH=amd64 -t degiro-smoke:local .
 
 Use arm64 on an arm64 host. The smoke has no broker or vault access. Account credentials and encrypted provider-specific loaders are not developer fixtures.
 
-## Optional synthetic Ghostfolio lab
-
-compose.lab.yaml is a separate project with an internal network and dedicated database volume. It uses reviewed Ghostfolio/Postgres/Redis pins and public synthetic broker fixtures. Its quote/profile seam replaces remote quote lookup only; native import/readback and database behavior remain intact. Configure lab-only environment variables and private mounts, then use scripts/prepare_lab.py and scripts/run_compose_lab.py with their `--help` descriptions. These are contributor tools, not another supported deployment mode.
-
-Never connect the lab to a production network or provide real vault/broker credentials. Preserve its volume until the positively owned resources are explicitly removed. Normal stop/restart keeps data; resetting it is a separate destructive operation. Native scenario evidence is in docs/isolated-acceptance.md.
-
 ## Upstream maintenance and review
 
 Read docs/upstreams.md. Scheduled watches create public compatibility notices without changing pins or deployments. Review upstream source, update synthetic contract fixtures and record evidence before adopting changes. Development tools follow functional Python with no custom classes/type annotations.

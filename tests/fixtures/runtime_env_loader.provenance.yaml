@@ -1,4 +1,0 @@
-source: tests/fixtures/runtime_env_loader.py
-sha256: 02ad9a6893aca7a69c64f7db2c15747edf4b7331025410d04146a486afae9d16
-purpose: Synthetic provider boundary; all input, subprocess and child operations substituted.
-policy: Offline tests only; never execute against real credentials.

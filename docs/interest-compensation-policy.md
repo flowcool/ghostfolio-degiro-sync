@@ -73,13 +73,9 @@ These are source findings, not a claim that upstream tests were executed here.
 
 ## Disposable native proof
 
-Run the separate operator characterization, never pytest against a real server:
-
-```sh
-.venv/bin/python scripts/check_interest_contract.py
-```
-
-The script accepts no target URL or operator credentials. It creates a UUID-owned
+This characterization ran once with `scripts/check_interest_contract.py`, removed
+with the contributor lab on 2026-10-13 ([source at removal](https://github.com/flowcool/ghostfolio-degiro-sync/blob/15d595f/scripts/check_interest_contract.py)).
+The script accepted no target URL or operator credentials. It creates a UUID-owned
 Compose project using the pinned Ghostfolio/Postgres/Redis images from the existing
 isolated acceptance harness. It requires pre-existing images (`--pull never`), an
 internal network, no published ports or host binds and a fresh tmpfs database.
@@ -103,7 +99,7 @@ Observed on 2026-10-09 at Ghostfolio image digest
 Both successful and failed runs attempt independent bounded cleanup of owned
 containers and the internal network. Failed teardown retains a private nonsecret
 ownership record for explicit recovery; catchable termination uses the same path.
-SIGKILL cannot guarantee cleanup. See the [lab recovery procedure](isolated-acceptance.md#cleanup-and-rollback-preflight).
+SIGKILL cannot guarantee cleanup.
 The database is temporary; no shared image is deleted. Offline tests verify
 changed financial readback and aggregate rejection, credential-log privacy,
 explicit EUR aggregate context and rejection of foreign/exposed container state.
@@ -188,9 +184,6 @@ above and the owned runtime image manifest
   uncertainty scenarios passed. Owned containers, network and fixture images were
   removed; no production endpoint, credential or database was used.
 
-Rollback of this characterization is a scoped Git revert. Lab rollback uses
-`scripts/lab_cleanup.py --recover <private-ownership-record>` when automatic
-teardown is incomplete. The temporary authentication manifest is removed;
-recovery independently revalidates exact resource IDs and UUID project labels. Keep broker archives
+Rollback of this characterization is a scoped Git revert. Keep broker archives
 and unresolved write journals intact. No live financial rollback, production
 interruption or deployment is part of this proposal.
