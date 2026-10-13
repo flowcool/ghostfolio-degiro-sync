@@ -2,39 +2,38 @@
 
 ## Why
 
-Record demonstrated behavior before future changes, without changing execution.
+Record what the connector does today, before any change. Runtime behavior does not change.
 
 ## What Changes
 
-Document all three modes and their agreed evidence boundaries.
+Describe the three sync modes, accounting, safety checks and deployment as observed.
 
-Inventory: retained French API capture, 2026-10-09; three SELL executions, 88 cash rows, twelve configured categories. BUY is demonstrated offline. Absent cases are marked separately.
+Evidence: a read-only French DEGIRO capture of one year (2025-10-08 to 2026-10-08, saved 2026-10-09) with three SELL executions, 88 cash rows and all twelve rules of `cash-rules.yaml`. A real read-only rolling DRY_RUN on 2026-10-10 covered 90 days only: one SELL, 15 cash rows, nine of the twelve rules. BUY is proven by offline tests only.
 
-| DEGIRO event considered | In scope: current treatment | Out of scope |
+| DEGIRO event considered | Treatment today | Out of scope |
 | --- | --- | --- |
-| Executed BUY / SELL | BUY / SELL activities | Unsupported instruments or units |
-| Paid dividend | Gross DIVIDEND | Unpaid announcements |
-| Dividend withholding | Unique linked dividend fee | Unproved association |
-| Brokerage | Execution fee | Separate duplicate FEE |
-| AutoFX execution cost | Execution fee | Unproved conversion |
-| Exchange connection charge | Standalone FEE | Other uncharacterized charges |
-| FX debit | Cash-only control | Separate activity |
-| FX credit | Cash-only control | Separate activity |
-| Bank withdrawal | Cash-only control | Separate activity |
-| Sweep annotation | Nonfinancial notice | Notice with an amount |
-| Sweep transfer | Cash-only control | Separate activity |
-| Execution cash row | Corroborates execution | Second trade |
-| Zero EUR Flatex interest | Zero INTEREST | Nonzero interest |
-| Positive EUR fund compensation | Distinct INTEREST | Zero/negative compensation |
-| Legacy fund NAV/transactions; corporate actions; deposits; security transfers; unknown events, absent from selected capture | Refusal when relevant | Import support |
+| Executed BUY / SELL | BUY / SELL activity | Other instrument types or units |
+| Paid dividend | Gross DIVIDEND | Announced, unpaid dividend |
+| Dividend tax | Fee on its one matching dividend | Tax without exactly one dividend |
+| Brokerage fee | Fee on its execution | Separate FEE activity |
+| Currency conversion cost (execution field, no cash row) | Fee on its execution | Cost without its execution |
+| Exchange connection charge | FEE activity | Other unknown charges |
+| Currency exchange debit / credit | Cash check only | Activity |
+| Bank withdrawal | Cash check only | Activity |
+| Cash sweep transfer | Cash check only | Activity |
+| Cash sweep text without amount | Ignored notice | Same text with an amount |
+| Execution cash row | Confirms its execution | Second trade |
+| Flatex interest, EUR, zero | INTEREST of zero | Interest above zero |
+| Money market fund compensation, EUR, positive | Separate INTEREST | Zero or negative amount |
+| Not in the capture: old fund history, corporate actions, deposits, security transfers, unknown events | Run stops when present | Import |
 
-EUR cash is independently verified. Quotes: EUR/USD/JPY. Statement relationships: French.
+Current EUR cash comes from DEGIRO and must match the statement; a one-cent difference is accepted only when its execution confirms it. Price currencies: EUR, USD, JPY. Statement text: French.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `degiro-synchronization`: reference for existing modes, accounting, safeguards and deployment.
+- `degiro-synchronization`: reference for existing modes, accounting, safety checks and deployment.
 
 ### Modified Capabilities
 
@@ -46,4 +45,4 @@ OpenSpec artifacts only; no runtime changes.
 
 ## Non-goals
 
-Exhaustive history, certified cost basis, unsupported events, correction/deletion, deployment or activation. Exhaustive `full_history` requires a separate change.
+Exhaustive history, certified cost basis, unsupported events, correction or deletion, deployment or activation. Exhaustive `full_history` needs a separate change.
