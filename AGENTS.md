@@ -51,6 +51,8 @@ This mode replaces the global per-step ceremony. The invariants above still appl
   writes the bead close note and merges with `scripts/merge_pr.py` when allowed. It never edits code and
   returns only the verdict and the threads that need a code change (global
   Delegation rule).
+  In Claude Code the implementing agent runs this lifecycle itself, without a
+  subagent: a nested PR subagent stops right after creating the PR.
   Wait with `~/.agents/bin/pr-gate <n> --repo flowcool/ghostfolio-degiro-sync`;
   `merge_pr.py` applies the same docs-only rule: a PR changing only `openspec/`, `docs/`
   or `*.md` files needs no CodeRabbit evidence; every other PR still does.
