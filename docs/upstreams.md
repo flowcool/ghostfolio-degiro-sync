@@ -8,12 +8,12 @@ image, merges a dependency PR, deploys a service or accesses financial accounts.
 | --- | --- | --- |
 | [Ghostfolio](https://github.com/ghostfolio/ghostfolio) | Destination API; compatibility evidence records 3.81.0; actual operator version is independent | Daily release watch 07:17 UTC, baseline 3.81.0 included |
 | [IBKR sync](https://github.com/flowcool/ghostfolio-ibkr-sync) | Immutable core byte projection, commit in CORE_PROVENANCE.md | Daily source watch 07:41 UTC plus weekly core-integrity check |
-| [degiro-connector](https://github.com/Chavithra/degiro-connector) | Runtime 3.0.36; exact wheel/tree/source in docs/connector-provenance.yaml | Daily PyPI releases and daily source watch; Renovate proposals require provenance review; audit |
+| [degiro-connector](https://github.com/Chavithra/degiro-connector) | Runtime 3.0.36; exact wheel/tree/source in docs/connector-provenance.yaml | Daily source watch; Renovate proposals require provenance review; audit |
 | [Export-To-Ghostfolio](https://github.com/dickwolff/Export-To-Ghostfolio) | Contributor-only native CSV converter reference, pinned in tests/fixtures/degiro_v3_transition.yaml; Node image recorded there | Daily default-branch source watch; recorded Node image digest also has a daily Docker Hub metadata watch; regenerate after review |
 | [Bitwarden CLI OSS](https://github.com/bitwarden/clients) | Separate runtime executable 2026.9.1 with both architecture SHA256 pins in Dockerfile; GPL/source notice in third_party/bitwarden | Daily dependency watch 07:29 UTC filters cli-v releases; native security/smoke checks |
-| [Supercronic](https://github.com/aptible/supercronic) | Runtime scheduler version and architecture SHA256 pins in Dockerfile | Daily GitHub releases; full-image advisory scan |
-| Python runtime and its complete closure | requirements.txt pins DEGIRO, PyOTP, requests, YAML, Apprise and every transitive package | Daily PyPI releases; weekly grouped Renovate proposals; pip-audit on PR/release/weekly checks; blocking image scan |
-| Python developer/CI tools | requirements-dev.txt pins pip-audit and pytest | Daily dependency releases; weekly grouped Renovate proposals; complete CI environment audit |
+| [Supercronic](https://github.com/aptible/supercronic) | Runtime scheduler version and architecture SHA256 pins in Dockerfile | Daily dependency watch 07:29 UTC; full-image advisory scan |
+| Python runtime and its complete closure | requirements.txt pins DEGIRO, PyOTP, requests, YAML, Apprise and every transitive package | Weekly grouped Renovate proposals; pip-audit on PR/release/weekly checks; blocking image scan |
+| Python developer/CI tools | requirements-dev.txt pins pip-audit and pytest | Weekly grouped Renovate proposals; complete CI environment audit |
 | Python/Debian base image | Digest-pinned Python 3.12 slim in Dockerfile, OS packages inherited from it | Weekly Renovate proposals within Python 3.12; native image security checks |
 | GitHub Actions: checkout/setup-python, CodeQL, dependency-review, Trivy, Docker build/login, artifacts | Exact SHA in workflows | Weekly grouped Renovate proposals; reviewed CI and native scan gates |
 
@@ -36,7 +36,10 @@ have deadlines, refuse redirects, disable ambient proxies and hide response data
 The Ghostfolio checklist covers account listing, activity identity/pagination,
 imports and deduplication, balances/body whitelist, and Security Token exchange.
 The recorded compatibility baseline is 3.81.0; it does not claim every newer
-version works. Dependency notices flag major/minor/patch changes. Source notices
+version works. Dependency notices cover only Supercronic and Bitwarden CLI, whose version
+updates require architecture-checksum review. They flag major/minor/patch changes.
+Python and npm packages produce no release-watch notices; Renovate owns their
+ordinary update proposals. Source notices
 link exact pinned and observed revisions. Review consumed behavior, add offline
 fixtures, and validate changes through a tested PR. Immutable core regeneration
 remains deliberate under CORE_PROVENANCE.md. Financial semantics and unknown-data
