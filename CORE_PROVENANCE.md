@@ -9,9 +9,9 @@ the IBKR sibling; propagation remains explicit and human-controlled.
 ```yaml
 format: 1
 repository: https://github.com/flowcool/ghostfolio-ibkr-sync.git
-commit: 5e43c60a5c617bfe8d97afaa947b47802375152f
+commit: 5749146ff297133a6a85d9006bba60b65d9f7cde
 source_path: ibkr_to_ghostfolio.py
-source_sha256: 3c86824e643b2b21bcb3af16d61c5b66a14cab2902227ecae47aa4a65bfb88ff
+source_sha256: 638fbd77c6cb36bd6a5d60d86c6587a0570df282dade1161f47d30424dfc169a
 imports:
   - import logging
   - import re
