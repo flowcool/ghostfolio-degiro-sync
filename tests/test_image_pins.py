@@ -6,7 +6,7 @@ import pytest
 
 IMAGE = "ghcr.io/flowcool/ghostfolio-degiro-sync"
 # The tag is optional so a bare reference (implicit tag) is caught and rejected.
-PIN = re.compile(re.escape(IMAGE) + r"(?![\w.-])(?::([^\s}`'\"|]+))?")
+PIN = re.compile(re.escape(IMAGE) + r"(?![\w./-])(?::([^\s}`'\"|]+))?")
 STABLE = re.compile(r"v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\Z")
 
 
@@ -36,3 +36,7 @@ def test_prerelease_pin_fails():
 def test_bare_reference_fails():
     with pytest.raises(AssertionError):
         single_stable_pin([f"image: {IMAGE}\n"])
+
+
+def test_sub_path_image_is_ignored():
+    assert single_stable_pin([f"image: {IMAGE}:v0.4.1\n", f"image: {IMAGE}/sidecar:v1\n"]) == "v0.4.1"
