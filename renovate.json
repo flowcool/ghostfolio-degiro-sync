@@ -3,7 +3,7 @@
   "extends": [
     "config:recommended"
   ],
-  "enabledManagers": ["pip_requirements", "npm", "github-actions", "dockerfile", "docker-compose"],
+  "enabledManagers": ["pip_requirements", "npm", "github-actions", "dockerfile", "docker-compose", "custom.regex"],
   "timezone": "Europe/Zurich",
   "schedule": ["* 0-8 * * 1"],
   "prConcurrentLimit": 3,
@@ -13,7 +13,7 @@
   "dependencyDashboard": true,
   "ignoreUnstable": true,
   "minimumReleaseAgeBehaviour": "timestamp-required",
-  "ignoreDeps": ["ghcr.io/flowcool/ghostfolio-degiro-sync", "ghostfolio-degiro-sync"],
+  "ignoreDeps": ["ghostfolio-degiro-sync"],
   "packageRules": [
     {
       "description": "Keep the complete pinned Python dependency closure together after the review window.",
@@ -80,6 +80,31 @@
       "description": "Connector provenance needs explicit compatibility review.",
       "matchPackageNames": ["degiro-connector"],
       "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Own image: one bump PR per stable release, automerged only when required checks pass (tests/test_image_pins.py keeps pins equal).",
+      "matchManagers": ["custom.regex"],
+      "matchPackageNames": ["ghcr.io/flowcool/ghostfolio-degiro-sync"],
+      "groupName": "own image",
+      "schedule": ["at any time"],
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "description": "The regex manager owns the own-image pins; no second update path.",
+      "matchManagers": ["docker-compose"],
+      "matchPackageNames": ["ghcr.io/flowcool/ghostfolio-degiro-sync"],
+      "enabled": false
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Own published image pins in compose.yaml and README.md.",
+      "managerFilePatterns": ["/^compose\\.yaml$/", "/^README\\.md$/"],
+      "matchStrings": ["ghcr\\.io/flowcool/ghostfolio-degiro-sync:(?<currentValue>v\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "ghcr.io/flowcool/ghostfolio-degiro-sync",
+      "datasourceTemplate": "docker"
     }
   ],
   "osvVulnerabilityAlerts": false,
