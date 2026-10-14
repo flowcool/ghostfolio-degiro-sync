@@ -3,6 +3,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 import requests
@@ -558,7 +559,18 @@ def test_prior_uncertainty_fences_all_callbacks(snapshot):
         run(snapshot, config=config)
 
 
-def test_cron_default_dates_are_bounded_utc_lookback(monkeypatch):
+@pytest.mark.parametrize('instant, expected_end', [
+    ('2026-10-13T21:30:00+00:00', '2026-10-13'),
+    ('2026-10-13T22:30:00+00:00', '2026-10-14'),
+    ('2026-10-13T23:30:00+00:00', '2026-10-14'),
+    ('2026-12-13T22:30:00+00:00', '2026-12-13'),
+    ('2026-12-13T23:30:00+00:00', '2026-12-14'),
+])
+def test_cron_default_dates_are_bounded_zurich_lookback(monkeypatch, instant, expected_end):
+    frozen = datetime.fromisoformat(instant)
+    clock = Mock(wraps=datetime)
+    clock.now.side_effect = lambda tz: frozen.astimezone(tz)
+    monkeypatch.setattr(adapter, 'datetime', clock)
     monkeypatch.setenv('LOOKBACK_DAYS', '90')
     calls = []
     monkeypatch.setattr(adapter, 'run_sync', lambda start, end, window:
@@ -566,7 +578,7 @@ def test_cron_default_dates_are_bounded_utc_lookback(monkeypatch):
             'accepted': [], 'history_verified': True})
     assert adapter.main(['--sync']) == 0
     start, end, window = calls[0]
-    assert end == datetime.now(timezone.utc).date()
+    assert end.isoformat() == expected_end
     assert (end - start).days == 89 and window == 90
 
 
