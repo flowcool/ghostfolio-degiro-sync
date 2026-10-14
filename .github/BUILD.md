@@ -35,13 +35,15 @@ recreate; restore that saved digest to roll back. Preserve mapping and the compl
 state/journal directory. Source/image rollback never undoes financial records.
 See [recovery](../docs/recovery.md) for interrupted-request handling.
 
-Runtime requirements pin the complete dependency closure. Dependabot supplies
-GitHub alerts; Renovate proposes ordinary and security updates after the staged
-handover in [docs/upstreams.md](../docs/upstreams.md). Ordinary proposals are
-weekly: Python releases wait 14 days, Actions and images three days. Python
-minor/patch changes are grouped; security corrections bypass ordinary delays.
-Python stays on 3.12. Major, connector and lab proposals require prior dashboard
-approval; security urgency still requires provenance and compatibility evidence.
+Runtime requirements pin the complete dependency closure. Dependabot owns
+security updates; Renovate proposes ordinary dependency updates. Renovate's
+vulnerability and OSV alert managers are disabled. Ordinary proposals run on
+Mondays before 09:00 Europe/Zurich, with at most three open PRs and two new PRs
+per hour. Python and npm releases wait 14 days; Actions and images wait three
+days. Runtime Python, developer Python, npm, Actions and image changes use
+separate groups. Dependabot version PR limits are zero while its security
+updates remain enabled. Python stays on 3.12. Major updates require prior
+dashboard approval, and connector updates require provenance review.
 Supercronic and Bitwarden versions require both architecture checksums and remain
 outside automatic updates. `ghostfolio_core.py` is never edited by hand or bumped
 by either bot; repin it deliberately with `scripts/check_core.py --write` after
