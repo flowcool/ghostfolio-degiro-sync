@@ -45,7 +45,7 @@ Paste this into a Portainer stack or save it as `compose.yaml`. Supply the varia
 # Existing Ghostfolio network; run once by default, CRON is opt-in.
 services:
   degiro-sync:
-    image: ${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:v0.4.0}
+    image: ${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:v0.4.1}
     restart: ${RESTART_POLICY:-no}
     user: "10001:10001"
     read_only: true
@@ -113,7 +113,7 @@ Start with `DRY_RUN=1` and an empty `CRON`. In Portainer, use absolute host path
 | `RESTART_POLICY` | Docker restart policy | `no` | With `CRON`, set `unless-stopped` to restart the scheduler after a crash or host reboot |
 | `APPRISE_URLS` | Failure alerts | Empty: disabled | Recommended for scheduled runs; JSON list, e.g. `'["ntfy://notification-host/topic"]'` |
 | `APPRISE_TIMEOUT` | Alert deadline | `10` seconds | Keep the default; allowed range 1–30 |
-| `DEGIRO_IMAGE` | Published image tag or digest | `ghcr.io/flowcool/ghostfolio-degiro-sync:v0.4.0` | Follow a reviewed release, pin an immutable digest for controlled upgrades, or explicitly choose `:latest` |
+| `DEGIRO_IMAGE` | Published image tag or digest | `ghcr.io/flowcool/ghostfolio-degiro-sync:v0.4.1` | Follow a reviewed release, pin an immutable digest for controlled upgrades, or explicitly choose `:latest` |
 
 Compose fixes `SYNC_MODE=rolling`, `LOOKBACK_DAYS=90`, `TZ=Europe/Zurich`, `/config/mapping.yaml` and `/state`. Both cron and the broker date boundary use Europe/Zurich. The container runs as UID/GID 10001 with a read-only root filesystem and no Linux capabilities.
 
