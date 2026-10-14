@@ -75,5 +75,9 @@ new reviewer update before merging. GitHub pins the head at merge, but the
 review/check snapshots and merge are separate operations. If the merge command
 fails or times out, inspect the actual GitHub state before retrying; the helper
 reports command success, not independently verified merged state.
-There is no review-reuse exception or bypass flag. Roll back this
+A PR that changes only `openspec/`, `docs/` or `*.md` files needs no CodeRabbit
+evidence (the CodeRabbit status is ignored); required checks, resolved threads and
+clean GitHub eligibility still apply. After a branch-update merge commit, a successful
+CodeRabbit status on the head plus a completed review of its first parent is accepted.
+There is no other review-reuse exception or bypass flag. Roll back this
 evidence-format support with a scoped Git revert; no production action is needed.

@@ -75,10 +75,11 @@ def merge_pr(number, method='merge'):
     require(isinstance(proof, dict) and proof.get('ready') is True,
         'Merge preflight did not return readiness')
     head, url, checks = proof.get('head'), proof.get('review_url'), proof.get('required_checks')
+    docs_only = proof.get('docs_only') is True
     require(isinstance(head, str) and re.fullmatch(r'[0-9a-f]{40}', head)
-        and type(checks) is int and checks > 0 and isinstance(url, str)
+        and type(checks) is int and checks > 0 and (url is None if docs_only else isinstance(url, str)
         and re.fullmatch(r'https://github\.com/' + re.escape(REPOSITORY)
-            + '/pull/' + str(number) + r'#(?:pullrequestreview|issuecomment)-[0-9]+', url),
+            + '/pull/' + str(number) + r'#(?:pullrequestreview|issuecomment)-[0-9]+', url)),
         'Merge preflight returned malformed evidence')
     base = check_merge_method(number, method, head)
     # No shell, auto-merge, admin bypass, stored proof or caller-selected SHA.

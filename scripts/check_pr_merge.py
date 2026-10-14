@@ -12,6 +12,8 @@ import time
 REPOSITORY = 'flowcool/ghostfolio-degiro-sync'
 PR_FIELDS = 'headRefOid state isDraft mergeable mergeStateStatus'
 PAGE = 'pageInfo { hasNextPage endCursor }'
+DOC_PREFIXES = ('openspec/', 'docs/')
+PARENTS = 'commits(last:1) { nodes { commit { oid parents(first:3) { nodes { oid } } } } }'
 CONNECTIONS = {
     'reviews': 'reviews(first:100, after:$cursor) { nodes { id author { login } '
         'state commit { oid } body url submittedAt } ' + PAGE + ' }',
@@ -19,6 +21,7 @@ CONNECTIONS = {
         'author { login __typename } body url createdAt updatedAt } ' + PAGE + ' }',
     'threads': 'reviewThreads(first:100, after:$cursor) { nodes { id isResolved } '
         + PAGE + ' }',
+    'files': 'files(first:100, after:$cursor) { nodes { path } ' + PAGE + ' }',
     'checks': 'commits(last:1) { nodes { commit { oid statusCheckRollup { '
         'contexts(first:100, after:$cursor) { nodes { __typename '
         '... on CheckRun { id name status conclusion isRequired(pullRequestNumber:$number) } '
@@ -84,8 +87,9 @@ def connection_page(pr, connection, head):
         require(isinstance(nodes, list) and isinstance(info, dict)
             and type(info.get('hasNextPage')) is bool,
             'Incomplete GitHub connection metadata')
-        require(all(isinstance(node, dict) and isinstance(node.get('id'), str)
-            and node['id'] for node in nodes), 'Malformed GitHub connection records')
+        key = 'path' if connection == 'files' else 'id'
+        require(all(isinstance(node, dict) and isinstance(node.get(key), str)
+            and node[key] for node in nodes), 'Malformed GitHub connection records')
         if info['hasNextPage']:
             require(nodes and isinstance(info.get('endCursor'), str) and info['endCursor'],
                 'GitHub connection pagination incomplete')
@@ -102,8 +106,9 @@ def read_connection(connection, number, head, deadline):
         require(pr_head(pr) == head, 'Pull request head changed during preflight')
         nodes, info = connection_page(pr, connection, head)
         for node in nodes:
-            require(node['id'] not in seen_ids, 'Repeated GitHub connection record')
-            seen_ids.add(node['id'])
+            key = node['path' if connection == 'files' else 'id']
+            require(key not in seen_ids, 'Repeated GitHub connection record')
+            seen_ids.add(key)
             records.append(node)
         if not info['hasNextPage']:
             return records
@@ -241,7 +246,33 @@ def completed_review(reviews, head, number, comments=()):
     return url
 
 
-def passing_checks(checks):
+def is_docs_only(files):
+    # Same rule as pr-gate: non-empty and every path is openspec/, docs/ or *.md.
+    paths = [file['path'] for file in files]
+    return bool(paths) and all(path.startswith(DOC_PREFIXES) or path.endswith('.md')
+        for path in paths)
+
+
+def update_parent(number, head, deadline):
+    # A branch-update merge commit has two parents; the first is the reviewed branch head.
+    pr = gh_query('query($number:Int!) { repository(owner:"flowcool", '
+        'name:"ghostfolio-degiro-sync") { pullRequest(number:$number) { headRefOid '
+        + PARENTS + ' } } }', number, deadline)
+    require(pr_head(pr) == head, 'Pull request head changed during preflight')
+    try:
+        commits = pr['commits']['nodes']
+        require(isinstance(commits, list) and len(commits) == 1
+            and commits[0]['commit']['oid'] == head, 'Exact-head parent metadata unavailable')
+        parents = [node['oid'] for node in commits[0]['commit']['parents']['nodes']]
+    except (KeyError, TypeError):
+        raise RuntimeError('Exact-head parent metadata malformed') from None
+    require(len(parents) == 2 and all(isinstance(oid, str)
+        and re.fullmatch(r'[0-9a-f]{40}', oid) for oid in parents),
+        'Completed CodeRabbit review of final head missing')
+    return parents[0]
+
+
+def passing_checks(checks, docs_only=False):
     required, rabbit = 0, 0
     for check in checks:
         require(type(check.get('isRequired')) is bool, 'Required-check metadata unavailable')
@@ -255,6 +286,8 @@ def passing_checks(checks):
         else:
             raise RuntimeError('Unknown GitHub check metadata')
         require(isinstance(name, str) and name, 'Malformed GitHub check name')
+        if docs_only and name == 'CodeRabbit':
+            continue
         if check['isRequired']:
             required += 1
             require(success, 'Required check is missing, pending or unsuccessful')
@@ -265,7 +298,7 @@ def passing_checks(checks):
                 'CodeRabbit review status is not verified successful')
             rabbit += 1
     require(required > 0, 'Required check collection empty')
-    require(rabbit == 1, 'CodeRabbit review status missing or ambiguous')
+    require(docs_only or rabbit == 1, 'CodeRabbit review status missing or ambiguous')
     return required
 
 
@@ -276,10 +309,22 @@ def check_merge(number):
     head = pr_head(initial)
     require(initial.get('state') == 'OPEN' and initial.get('isDraft') is False,
         'Pull request is closed or draft')
-    reviews = read_connection('reviews', number, head, deadline)
-    comments = [] if exact_head_reviews(reviews, head) else read_connection('comments', number, head, deadline)
-    review_url = completed_review(reviews, head, number, comments)
-    checks = passing_checks(read_connection('checks', number, head, deadline))
+    docs_only = is_docs_only(read_connection('files', number, head, deadline))
+    reviews, comments, review_url = [], [], None
+    if not docs_only:
+        reviews = read_connection('reviews', number, head, deadline)
+        comments = [] if exact_head_reviews(reviews, head) else read_connection('comments', number, head, deadline)
+        try:
+            review_url = completed_review(reviews, head, number, comments)
+        except RuntimeError as error:
+            # A branch-update merge commit carries no review of its own: accept the
+            # CodeRabbit success status on it (checked below) plus a completed formal
+            # review of its first parent, the previously reviewed branch head.
+            if str(error) != 'Completed CodeRabbit review of final head missing':
+                raise
+            review_url = completed_review(reviews, update_parent(number, head, deadline), number)
+            comments = []
+    checks = passing_checks(read_connection('checks', number, head, deadline), docs_only)
     threads = read_connection('threads', number, head, deadline)
     require(all(type(thread.get('isResolved')) is bool for thread in threads),
         'Review conversation metadata incomplete')
@@ -297,7 +342,8 @@ def check_merge(number):
     require(final.get('state') == 'OPEN' and final.get('isDraft') is False
         and final.get('mergeable') == 'MERGEABLE' and final.get('mergeStateStatus') == 'CLEAN',
         'GitHub merge eligibility is not clean')
-    return {'ready': True, 'head': head, 'review_url': review_url, 'required_checks': checks}
+    return {'ready': True, 'head': head, 'review_url': review_url,
+        'required_checks': checks, 'docs_only': docs_only}
 
 
 def main():
