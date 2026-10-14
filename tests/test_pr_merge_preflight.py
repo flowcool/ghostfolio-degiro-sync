@@ -52,15 +52,24 @@ def github(monkeypatch):
                 'isRequired': True, 'status': 'COMPLETED', 'conclusion': 'SUCCESS'},
             {'id': 'rabbit-1', '__typename': 'StatusContext', 'context': 'CodeRabbit',
                 'isRequired': False, 'state': 'SUCCESS', 'creator': {'login': 'coderabbitai'}}])},
-        'threads': {None: page([])}}
+        'threads': {None: page([])},
+        'files': {None: page([{'path': 'scripts/check_pr_merge.py'}])},
+        'parents': ['e' * 40, 'c' * 40], 'base_tip': 'c' * 40,
+        'signature': {'isValid': True, 'signer': {'login': 'web-flow'}}}
 
     def query(query, number, deadline, cursor=None):
         assert number == 24
         assert query.startswith('query(') and 'mutation' not in query
         data['calls'].append((query, cursor))
+        if 'parents(first:' in query:
+            return {'headRefOid': HEAD, 'commits': {'nodes': [{'commit': {'oid': HEAD,
+                'signature': data['signature'],
+                'parents': {'nodes': [{'oid': oid} for oid in data['parents']]}}}]},
+                'baseRef': {'target': {'oid': data['base_tip']}}}
         for connection, fragment in (('reviews', 'reviews(first:'),
                 ('comments', 'comments(first:'),
-                ('threads', 'reviewThreads(first:'), ('checks', 'contexts(first:')):
+                ('threads', 'reviewThreads(first:'), ('checks', 'contexts(first:'),
+                ('files', 'files(first:')):
             if fragment in query:
                 result = {'headRefOid': data.get('connection_head', HEAD)}
                 body = deepcopy(data[connection][cursor])
@@ -68,7 +77,7 @@ def github(monkeypatch):
                     result['commits'] = {'nodes': [{'commit': {'oid': data.get('checks_head', HEAD),
                         'statusCheckRollup': {'contexts': body}}}]}
                 else:
-                    result[{'reviews': 'reviews', 'comments': 'comments',
+                    result[{'reviews': 'reviews', 'comments': 'comments', 'files': 'files',
                         'threads': 'reviewThreads'}[connection]] = body
                 return result
         data['base_calls'] += 1
@@ -211,9 +220,9 @@ def test_comment_proof_changed_during_preflight_is_refused(github, monkeypatch, 
 
 def test_exact_final_review_green_checks_and_complete_threads(github):
     assert preflight.check_merge(24) == {'ready': True, 'head': HEAD,
-        'review_url': URL, 'required_checks': 1}
+        'review_url': URL, 'required_checks': 1, 'docs_only': False}
     assert github['base_calls'] == 2
-    assert len(github['calls']) == 5
+    assert len(github['calls']) == 6
 
 
 @pytest.mark.parametrize('comment', [False, True])
@@ -482,7 +491,109 @@ def test_cli_success_outputs_only_selected_merge_evidence(github, monkeypatch, c
     captured = capsys.readouterr()
     assert not captured.err
     assert json.loads(captured.out) == {'ready': True, 'head': HEAD,
-        'review_url': URL, 'required_checks': 1}
+        'review_url': URL, 'required_checks': 1, 'docs_only': False}
+
+
+def docs_only_pr(github):
+    github['files'][None] = page([{'path': 'docs/a.md'}, {'path': 'openspec/x/spec.txt'},
+        {'path': 'README.md'}])
+    github['reviews'][None]['nodes'] = []
+    github['checks'][None]['nodes'] = github['checks'][None]['nodes'][:1]
+
+
+def test_docs_only_pr_is_ready_without_coderabbit_evidence(github):
+    docs_only_pr(github)
+    assert preflight.check_merge(24) == {'ready': True, 'head': HEAD, 'review_url': None,
+        'required_checks': 1, 'docs_only': True}
+
+
+@pytest.mark.parametrize('state', ['PENDING', 'FAILURE'])
+def test_docs_only_ignores_coderabbit_status_in_any_state(github, state):
+    docs_only_pr(github)
+    github['checks'][None]['nodes'].append({'id': 'rabbit-1', '__typename': 'StatusContext',
+        'context': 'CodeRabbit', 'isRequired': False, 'state': state,
+        'creator': {'login': 'someone'}})
+    assert preflight.check_merge(24)['docs_only'] is True
+
+
+@pytest.mark.parametrize('case', ['thread', 'check'])
+def test_docs_only_still_requires_threads_and_checks(github, case):
+    docs_only_pr(github)
+    if case == 'thread':
+        github['threads'][None]['nodes'].append({'id': 'thread-1', 'isResolved': False})
+    else:
+        github['checks'][None]['nodes'][0]['conclusion'] = 'FAILURE'
+    with pytest.raises(RuntimeError):
+        preflight.check_merge(24)
+
+
+def test_docs_only_with_one_non_doc_path_needs_coderabbit(github):
+    docs_only_pr(github)
+    github['files'][None]['nodes'].append({'path': 'scripts/merge_pr.py'})
+    with pytest.raises(RuntimeError, match='CodeRabbit review of final head missing'):
+        preflight.check_merge(24)
+
+
+def test_empty_file_list_is_not_docs_only(github):
+    docs_only_pr(github)
+    github['files'][None] = page([])
+    with pytest.raises(RuntimeError, match='CodeRabbit'):
+        preflight.check_merge(24)
+
+
+@pytest.mark.parametrize('case', ['missing_cursor', 'repeated_path', 'unpaged_next'])
+def test_incomplete_files_pagination_refuses_even_for_docs(github, case):
+    docs_only_pr(github)
+    first = github['files'][None]
+    if case == 'missing_cursor':
+        first['pageInfo'] = {'hasNextPage': True, 'endCursor': None}
+    elif case == 'repeated_path':
+        first['pageInfo'] = {'hasNextPage': True, 'endCursor': 'next'}
+        github['files']['next'] = page([{'path': 'docs/a.md'}])
+    else:
+        first['pageInfo'] = {'hasNextPage': True, 'endCursor': 'next'}
+        github['files']['next'] = page([{'path': 'src/code.py'}])
+    with pytest.raises(RuntimeError):
+        preflight.check_merge(24)
+
+
+def branch_update_head(github, reviewed=True):
+    github['reviews'][None]['nodes'][0]['commit']['oid'] = 'e' * 40 if reviewed else 'd' * 40
+
+
+def test_branch_update_merge_commit_uses_parent_review_and_head_status(github):
+    branch_update_head(github)
+    proof = preflight.check_merge(24)
+    assert proof['review_url'] == URL and proof['docs_only'] is False
+
+
+def test_branch_update_needs_status_success_on_head(github):
+    branch_update_head(github)
+    github['checks'][None]['nodes'][1]['state'] = 'PENDING'
+    with pytest.raises(RuntimeError, match='CodeRabbit review status'):
+        preflight.check_merge(24)
+
+
+@pytest.mark.parametrize('case', ['unreviewed_parent', 'not_a_merge_commit', 'second_parent_only',
+    'second_parent_not_base_tip', 'unsigned', 'invalid_signature', 'foreign_signer'])
+def test_branch_update_fallback_fails_closed(github, case):
+    branch_update_head(github)
+    if case == 'unreviewed_parent':
+        branch_update_head(github, reviewed=False)
+    elif case == 'not_a_merge_commit':
+        github['parents'] = ['e' * 40]
+    elif case == 'second_parent_not_base_tip':
+        github['base_tip'] = 'f' * 40
+    elif case == 'unsigned':
+        github['signature'] = None
+    elif case == 'invalid_signature':
+        github['signature'] = {'isValid': False, 'signer': {'login': 'web-flow'}}
+    elif case == 'foreign_signer':
+        github['signature'] = {'isValid': True, 'signer': {'login': 'someone'}}
+    else:
+        github['parents'] = ['c' * 40, 'e' * 40]
+    with pytest.raises(RuntimeError, match='CodeRabbit review of final head missing'):
+        preflight.check_merge(24)
 
 
 def test_pr_template_preserves_one_body_and_external_review_contract():

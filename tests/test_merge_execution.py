@@ -28,6 +28,20 @@ def calls(monkeypatch):
     return calls
 
 
+def test_docs_only_proof_merges_without_review_url(calls, monkeypatch):
+    monkeypatch.setattr(merge, 'check_merge',
+        lambda number: dict(PROOF, review_url=None, docs_only=True))
+    assert merge.merge_pr(29)['merge_command_succeeded'] is True
+    assert len(calls) == 1
+
+
+def test_non_docs_proof_without_review_url_makes_zero_merge_calls(calls, monkeypatch):
+    monkeypatch.setattr(merge, 'check_merge', lambda number: dict(PROOF, review_url=None))
+    with pytest.raises(RuntimeError):
+        merge.merge_pr(29)
+    assert calls == []
+
+
 def test_failed_preflight_makes_zero_merge_calls(calls, monkeypatch):
     def failed(number):
         raise RuntimeError('GitHub merge eligibility is not clean')

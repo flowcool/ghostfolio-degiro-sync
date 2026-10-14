@@ -52,7 +52,8 @@ This mode replaces the global per-step ceremony. The invariants above still appl
   returns only the verdict and the threads that need a code change (global
   Delegation rule).
   Wait with `~/.agents/bin/pr-gate <n> --repo flowcool/ghostfolio-degiro-sync`;
-  `merge_pr.py` still requires a completed CodeRabbit review, docs-only included.
+  `merge_pr.py` applies the same docs-only rule: a PR changing only `openspec/`, `docs/`
+  or `*.md` files needs no CodeRabbit evidence; every other PR still does.
 - **Ask the operator only for:** a DEGIRO fact missing from the spec, a real broker
   login, a Ghostfolio write, a scope change. One question at a time, in plain
   French, with your recommended answer.
@@ -63,6 +64,6 @@ See CONTRIBUTING.md for developer commands. Before committing code, run the full
 
 Public bug reports and compatibility notices use GitHub Issues. Existing local work-tracker policy is supplied by the execution environment; do not publish private tracker IDs or paths.
 
-For PR descriptions and merge execution, read `.github/pull_request_template.md`; use `scripts/merge_pr.py` for merges. Required CI and a completed CodeRabbit review must cover the exact final head. Review triggering is managed externally by maintainers; pending, skipped or rate-limited review is not evidence. Record the completed review URL and SHA before guarded merge. Source approval never authorizes production deployment or financial mutations.
+For PR descriptions and merge execution, read `.github/pull_request_template.md`; use `scripts/merge_pr.py` for merges. Required CI and a completed CodeRabbit review must cover the exact final head (docs-only PRs need CI only). Review triggering is managed externally by maintainers; pending, skipped or rate-limited review is not evidence. Record the completed review URL and SHA before guarded merge. Source approval never authorizes production deployment or financial mutations.
 
 Rollback source changes with an atomic Git revert. Preserve local journals and private captures. Runtime deployment, financial writes, cleanup and destructive recovery require the operator's explicit authorization.
