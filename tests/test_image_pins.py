@@ -5,7 +5,8 @@ import re
 import pytest
 
 IMAGE = "ghcr.io/flowcool/ghostfolio-degiro-sync"
-PIN = re.compile(re.escape(IMAGE) + r":([^\s}`'\"|]+)")
+# The tag is optional so a bare reference (implicit tag) is caught and rejected.
+PIN = re.compile(re.escape(IMAGE) + r"(?![\w.-])(?::([^\s}`'\"|]+))?")
 STABLE = re.compile(r"v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\Z")
 
 
@@ -30,3 +31,8 @@ def test_mismatched_readme_pin_fails():
 def test_prerelease_pin_fails():
     with pytest.raises(AssertionError, match="not a stable"):
         single_stable_pin([f"image: {IMAGE}:v0.5.0-rc.1\n"])
+
+
+def test_bare_reference_fails():
+    with pytest.raises(AssertionError):
+        single_stable_pin([f"image: {IMAGE}\n"])
