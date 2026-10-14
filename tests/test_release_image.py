@@ -2,6 +2,7 @@
 from contextlib import nullcontext
 import importlib.util
 from pathlib import Path
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -174,7 +175,8 @@ def test_release_manifest_requires_both_native_gates_and_no_pr_publication():
     assert 'releases/latest' in promotion["run"]
     base = yaml.safe_load(Path("compose.yaml").read_text())["services"]["degiro-sync"]
     assert "build" not in base
-    assert base["image"] == "${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:v0.4.1}"
+    # The version itself is Renovate's job; tests/test_image_pins.py keeps every pin equal.
+    assert re.fullmatch(r"\$\{DEGIRO_IMAGE:-ghcr\.io/flowcool/ghostfolio-degiro-sync:v\d+\.\d+\.\d+\}", base["image"])
     assert base["restart"] == "${RESTART_POLICY:-no}"
     contributor = yaml.safe_load(Path("compose.build.yaml").read_text())["services"]["degiro-sync"]
     assert contributor["build"]["context"] == "." and contributor["pull_policy"] == "build"

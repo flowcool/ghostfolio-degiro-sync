@@ -23,6 +23,12 @@ This mode replaces the global per-step ceremony. The invariants above still appl
   one self-contained item per task (spec path, requirement, scenario, acceptance
   command, files to touch). Closing an item ticks its task in `tasks.md`; archive
   the change when every item is closed.
+- **Release.** A change that touches shipped code ends with a release item after
+  its last task: change archived, acceptance replayed on `main`, semver tag from
+  `main` on the operator's go, image published and pullable; the parent item
+  closes only after it. Renovate then opens the image-pin bump PR and automerges
+  it on green required checks; `tests/test_image_pins.py` keeps the Compose
+  default and README pins equal.
 - **One item = one fresh session.** Claim, implement, prove, close, stop. Do not
   start the next item or arm a goal across items. Budget about 150 tool calls;
   above that, stop and report the state.
