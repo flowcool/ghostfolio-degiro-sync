@@ -54,7 +54,8 @@ def github(monkeypatch):
                 'isRequired': False, 'state': 'SUCCESS', 'creator': {'login': 'coderabbitai'}}])},
         'threads': {None: page([])},
         'files': {None: page([{'path': 'scripts/check_pr_merge.py'}])},
-        'parents': ['e' * 40, 'c' * 40]}
+        'parents': ['e' * 40, 'c' * 40], 'base_tip': 'c' * 40,
+        'signature': {'isValid': True, 'signer': {'login': 'web-flow'}}}
 
     def query(query, number, deadline, cursor=None):
         assert number == 24
@@ -62,7 +63,9 @@ def github(monkeypatch):
         data['calls'].append((query, cursor))
         if 'parents(first:' in query:
             return {'headRefOid': HEAD, 'commits': {'nodes': [{'commit': {'oid': HEAD,
-                'parents': {'nodes': [{'oid': oid} for oid in data['parents']]}}}]}}
+                'signature': data['signature'],
+                'parents': {'nodes': [{'oid': oid} for oid in data['parents']]}}}]},
+                'baseRef': {'target': {'oid': data['base_tip']}}}
         for connection, fragment in (('reviews', 'reviews(first:'),
                 ('comments', 'comments(first:'),
                 ('threads', 'reviewThreads(first:'), ('checks', 'contexts(first:'),
@@ -571,13 +574,22 @@ def test_branch_update_needs_status_success_on_head(github):
         preflight.check_merge(24)
 
 
-@pytest.mark.parametrize('case', ['unreviewed_parent', 'not_a_merge_commit', 'second_parent_only'])
+@pytest.mark.parametrize('case', ['unreviewed_parent', 'not_a_merge_commit', 'second_parent_only',
+    'second_parent_not_base_tip', 'unsigned', 'invalid_signature', 'foreign_signer'])
 def test_branch_update_fallback_fails_closed(github, case):
     branch_update_head(github)
     if case == 'unreviewed_parent':
         branch_update_head(github, reviewed=False)
     elif case == 'not_a_merge_commit':
         github['parents'] = ['e' * 40]
+    elif case == 'second_parent_not_base_tip':
+        github['base_tip'] = 'f' * 40
+    elif case == 'unsigned':
+        github['signature'] = None
+    elif case == 'invalid_signature':
+        github['signature'] = {'isValid': False, 'signer': {'login': 'web-flow'}}
+    elif case == 'foreign_signer':
+        github['signature'] = {'isValid': True, 'signer': {'login': 'someone'}}
     else:
         github['parents'] = ['c' * 40, 'e' * 40]
     with pytest.raises(RuntimeError, match='CodeRabbit review of final head missing'):

@@ -78,6 +78,6 @@ reports command success, not independently verified merged state.
 A PR that changes only `openspec/`, `docs/` or `*.md` files needs no CodeRabbit
 evidence (the CodeRabbit status is ignored); required checks, resolved threads and
 clean GitHub eligibility still apply. After a branch-update merge commit, a successful
-CodeRabbit status on the head plus a completed review of its first parent is accepted.
+CodeRabbit status on the head plus a completed review of its first parent is accepted, when the head is a GitHub-signed (web-flow) merge of the current base tip.
 There is no other review-reuse exception or bypass flag. Roll back this
 evidence-format support with a scoped Git revert; no production action is needed.

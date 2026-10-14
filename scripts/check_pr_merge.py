@@ -13,7 +13,8 @@ REPOSITORY = 'flowcool/ghostfolio-degiro-sync'
 PR_FIELDS = 'headRefOid state isDraft mergeable mergeStateStatus'
 PAGE = 'pageInfo { hasNextPage endCursor }'
 DOC_PREFIXES = ('openspec/', 'docs/')
-PARENTS = 'commits(last:1) { nodes { commit { oid parents(first:3) { nodes { oid } } } } }'
+PARENTS = ('baseRef { target { oid } } commits(last:1) { nodes { commit { oid '
+    'signature { isValid signer { login } } parents(first:3) { nodes { oid } } } } }')
 CONNECTIONS = {
     'reviews': 'reviews(first:100, after:$cursor) { nodes { id author { login } '
         'state commit { oid } body url submittedAt } ' + PAGE + ' }',
@@ -254,7 +255,9 @@ def is_docs_only(files):
 
 
 def update_parent(number, head, deadline):
-    # A branch-update merge commit has two parents; the first is the reviewed branch head.
+    # A genuine branch update is a GitHub-signed (web-flow) merge commit of the current base tip
+    # into the branch: first parent = reviewed branch head, second = base tip. GitHub refuses
+    # an update with conflicts, so the commit adds no change of its own.
     pr = gh_query('query($number:Int!) { repository(owner:"flowcool", '
         'name:"ghostfolio-degiro-sync") { pullRequest(number:$number) { headRefOid '
         + PARENTS + ' } } }', number, deadline)
@@ -264,10 +267,16 @@ def update_parent(number, head, deadline):
         require(isinstance(commits, list) and len(commits) == 1
             and commits[0]['commit']['oid'] == head, 'Exact-head parent metadata unavailable')
         parents = [node['oid'] for node in commits[0]['commit']['parents']['nodes']]
+        signature = commits[0]['commit']['signature']
+        base_tip = pr['baseRef']['target']['oid']
     except (KeyError, TypeError):
         raise RuntimeError('Exact-head parent metadata malformed') from None
     require(len(parents) == 2 and all(isinstance(oid, str)
         and re.fullmatch(r'[0-9a-f]{40}', oid) for oid in parents),
+        'Completed CodeRabbit review of final head missing')
+    require(isinstance(signature, dict) and signature.get('isValid') is True
+        and isinstance(signature.get('signer'), dict)
+        and signature['signer'].get('login') == 'web-flow' and parents[1] == base_tip,
         'Completed CodeRabbit review of final head missing')
     return parents[0]
 
