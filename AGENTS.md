@@ -57,6 +57,15 @@ This mode replaces the global per-step ceremony. The invariants above still appl
 - **Ask the operator only for:** a DEGIRO fact missing from the spec, a real broker
   login, a Ghostfolio write, a scope change. One question at a time, in plain
   French, with your recommended answer.
+- **Operation items.** An item labelled `operation` acts on real state (host, container,
+  Ghostfolio, DEGIRO, journal, shared volume).
+  Execute it only from the `Operation plan:` in its design, validated once by
+  the operator: numbered phases, each with exact command, target, expected proof,
+  authorization envelope, stop conditions and rollback. No plan: stop; an
+  offline item labelled `operation-plan` writes it. Live steps run repository
+  code only, versioned and tested, never a `tmp/` script; a missing tool is a
+  code item first. A failed or uncertain step is `HORS CHEMIN`: record the
+  evidence in the item and stop.
 
 ## Validation and delivery
 
