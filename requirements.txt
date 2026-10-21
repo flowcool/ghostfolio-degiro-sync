@@ -1,6 +1,6 @@
 # Runtime dependency closure; all direct and transitive versions are pinned.
 # Renovate proposes updates; validate the complete closure with pip-audit and CI.
-certifi==2026.7.22
+certifi==2026.10.19
     # via requests
 charset-normalizer==3.5.2
     # via requests
