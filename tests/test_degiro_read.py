@@ -11,6 +11,7 @@ import pytest
 import requests
 
 import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import vault as vault_module
 
 
 USERNAME = "USERNAME_SENTINEL_934"
@@ -23,7 +24,7 @@ SEED = "JBSWY3DPEHPK3PXP"
 @pytest.fixture
 def credentials(monkeypatch):
     # Broker action tests isolate the already-tested vault boundary.
-    monkeypatch.setattr(adapter, "vault_broker_credentials", lambda: [USERNAME, PASSWORD, SEED])
+    monkeypatch.setattr(vault_module, "vault_broker_credentials", lambda: [USERNAME, PASSWORD, SEED])
     for key in ("DEGIRO_USERNAME", "DEGIRO_PASSWORD", "DEGIRO_TOTP_SECRET"):
         monkeypatch.delenv(key, raising=False)
     import pyotp

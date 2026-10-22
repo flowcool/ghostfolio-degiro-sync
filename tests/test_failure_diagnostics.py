@@ -9,6 +9,7 @@ import pytest
 import requests
 
 import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import vault as vault_module
 from test_degiro_read import credentials, broker_http, USERNAME, PASSWORD, SESSION, OTP, SEED
 from test_vault_credentials import vault, mock_cli, SECRETS
 
@@ -199,7 +200,7 @@ def test_direct_credentials_are_identified_even_when_empty(credentials, monkeypa
 
 
 def test_invalid_report_locale_is_private(monkeypatch, tmp_path, caplog, capsys):
-    monkeypatch.setattr(adapter, "broker_credentials", lambda: pytest.fail("Vault contacted"))
+    monkeypatch.setattr(vault_module, "broker_credentials", lambda: pytest.fail("Vault contacted"))
     assert adapter.main(read_arguments(tmp_path, "--report-country", SECRET, "--report-language", "fr")) == 1
     assert "stage=config reason=report_locale" in caplog.text
     assert_private(caplog, capsys)

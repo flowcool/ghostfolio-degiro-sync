@@ -8,6 +8,7 @@ import subprocess
 import pytest
 
 import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import vault as vault_module
 
 
 @pytest.mark.parametrize("host", ["https://portfolio.example", "https://vault.example:8443",
@@ -122,7 +123,7 @@ def test_ghost_account_discovery_is_get_only_private_and_without_broker(monkeypa
     monkeypatch.setenv("GHOST_HOST", "https://portfolio.example")
     monkeypatch.setenv("GHOST_TOKEN", "synthetic-bearer")
     monkeypatch.delenv("GHOST_ACCESS_TOKEN", raising=False)
-    monkeypatch.setattr(adapter, "broker_credentials", lambda: pytest.fail("Broker contacted"))
+    monkeypatch.setattr(vault_module, "broker_credentials", lambda: pytest.fail("Broker contacted"))
     calls = []
     def send(self, request, **options):
         calls.append(request)
