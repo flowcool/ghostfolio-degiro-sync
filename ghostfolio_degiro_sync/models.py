@@ -39,6 +39,7 @@ class AccountSelection:
     prospective: bool
     rolling: bool
     context: dict[str, Any] | None
+    profiles: Mapping[str, Any]
 
 
 class Journal(TypedDict):

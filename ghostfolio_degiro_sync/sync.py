@@ -54,11 +54,12 @@ def select_account_activities(config: Any, snapshot: Any, target_account: Any, e
         raise RuntimeError("Ghostfolio target account excluded or redacted")
     prospective = config.get("sync_mode", "full_history") == "prospective"
     rolling = config.get("sync_mode") == "rolling"
+    profiles = dict(journal["document"].get("profiles", {})) if journal is not None else {}
     context: Any = None
     if prospective:
         snapshot, existing, quantities, context = prospective_snapshot(
             config, snapshot, target_account, existing_body, mapping, quote_currencies,
-            evidence=prospective_evidence, now=now)
+            evidence=prospective_evidence, now=now, profiles=profiles)
     else:
         existing, quantities = ghostfolio_module.index_existing_activities(existing_body, target_account, now=now)
     if rolling:
@@ -75,6 +76,9 @@ def select_account_activities(config: Any, snapshot: Any, target_account: Any, e
         raise RuntimeError("Future DEGIRO candidate blocks synchronization")
     if rolling and any(datetime.fromisoformat(a["date"]).microsecond % 1000 for a in activities):
         raise RuntimeError("Rolling date precision cannot be represented by Ghostfolio")
+    existing, profiles = ghostfolio_module.bind_existing_profiles(existing, activities, profiles)
+    if context:
+        profiles.update(context.get("profiles", {}))
     exclusions = Counter({"already_imported": 0, "manual_match": 0, "duplicate_candidate": 0})
     pending = ghostfolio_module.pending_activities(activities, existing, target_account, source, manual_matching=rolling,
                                  exclusions=exclusions)
@@ -106,7 +110,7 @@ def select_account_activities(config: Any, snapshot: Any, target_account: Any, e
         selection=SelectionResult(proposals=tuple(pending), rejected=(), deferred=(),
             holdings=tuple((account, symbol, value) for (account, symbol), value in sorted(quantities.items()))),
         snapshot=snapshot, cash=balance, candidates=len(activities), exclusions=dict(exclusions),
-        prospective=prospective, rolling=rolling, context=context)
+        prospective=prospective, rolling=rolling, context=context, profiles=profiles)
 
 
 def synchronize_locked(config: Any, snapshot: Any, target_account: Any, existing_body: Any, mapping: Any,
@@ -134,6 +138,9 @@ def synchronize_locked(config: Any, snapshot: Any, target_account: Any, existing
                 "rolling_verified": rolling,
                 "cutover": context["cutover"].isoformat() if context else None,
                 "basis_status": context["basis_status"] if context else None}
+    if journal is not None and plan.profiles:
+        journal["document"]["profiles"] = dict(plan.profiles)
+        journal_module.write_journal(journal)
     accepted = []
     for sells in (False, True):
         batch = [activity for activity in pending if (activity["type"] == "SELL") == sells]
@@ -144,16 +151,19 @@ def synchronize_locked(config: Any, snapshot: Any, target_account: Any, existing
         try:
             intent = journal_module.begin_intent(journal, "import", {a["comment"]: a for a in batch})
             created, ok = import_activities(batch)
-            if (ok is not True or not isinstance(created, list)
-                    or len(created) != len(batch)
-                    or {accounting_module.activity_signature(a) for a in created} != {accounting_module.activity_signature(a) for a in batch}):
+            if not isinstance(created, list):
+                raise RuntimeError("Invalid accepted account import evidence")
+            created, profiles = ghostfolio_module.prove_accepted_subset(batch, created)
+            if journal is not None:
+                journal_module.record_confirmed_import(journal, intent, created, profiles)
+            quantities = ghostfolio_module.record_accepted_activities(created, quantities)
+            accepted.extend(created)
+            if ok is not True or len(created) != len(batch):
                 raise RuntimeError("Incomplete accepted account import evidence")
             journal_module.confirm_intent(journal, intent)
         except Exception:
             core.mark_import_uncertain(config, batch)
             raise RuntimeError("Account import uncertain or incomplete; cash blocked") from None
-        quantities = ghostfolio_module.record_accepted_activities(created, quantities)
-        accepted.extend(created)
     def guarded_balance(account: Any, amount: Any) -> Any:
         intent = journal_module.begin_intent(journal, "cash", {"account": account, "balance": amount})
         try:
@@ -404,7 +414,7 @@ def rolling_snapshot(snapshot: Any, journal: Any) -> Any:
 
 
 def prospective_snapshot(config: Any, snapshot: Any, target: Any, existing_body: Any, mapping: Any, quotes: Any,
-                         *, evidence: Any=None, now: datetime | None=None) -> Any:
+                         *, evidence: Any=None, now: datetime | None=None, profiles: Any=None) -> Any:
     """Reconcile a full interval from a fixed cutover; never relabel full history."""
     try:
         if evidence is None:
@@ -472,6 +482,8 @@ def prospective_snapshot(config: Any, snapshot: Any, target: Any, existing_body:
         activities += accounting_module.normalize_cash_yield(result, target["id"])
         if any(datetime.fromisoformat(activity["date"]).microsecond % 1000 for activity in activities):
             raise RuntimeError("Prospective date precision cannot be represented by Ghostfolio")
+        prospective_existing, associations = ghostfolio_module.bind_existing_profiles(prospective_existing, activities, profiles or {})
+        context["profiles"] = associations
         # Every existing post-cutover target row must be evidenced by this full replay.
         ghostfolio_module.pending_activities(activities, prospective_existing, target, config["source_account"])
         known = {identity_module.parse_identity(row["comment"], row["type"]): ghostfolio_module.ownership_signature(row) for row in activities}

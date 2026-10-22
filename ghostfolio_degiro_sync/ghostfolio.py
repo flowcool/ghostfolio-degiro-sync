@@ -370,3 +370,100 @@ def global_ownership_index(rows: list[dict[str, Any]]) -> dict[tuple[str, str, s
 def ownership_signature(activity: dict[str, Any]) -> tuple[Any, ...]:
     return accounting_module.activity_signature({**activity,
         "comment": identity_module.canonical_comment(activity.get("comment"), activity.get("type"))})
+
+
+def profile_fingerprint(activity: dict[str, Any]) -> str:
+    content = []
+    for value in ownership_signature(activity):
+        text = format(value, 'f') if isinstance(value, Decimal) else str(value)
+        content.append(text.rstrip('0').rstrip('.') if isinstance(value, Decimal) and '.' in text else text)
+    return hashlib.sha256(json.dumps(content, separators=(',', ':')).encode()).hexdigest()
+
+
+def manual_uuid(value: object) -> bool:
+    return isinstance(value, str) and re.fullmatch(
+        r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', value) is not None
+
+
+def prove_accepted_subset(submitted: list[dict[str, Any]], created: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Add DEGIRO profile proof to rows already validated by the shared core."""
+    by_key = {(row['accountId'], row['comment']): row for row in submitted}
+    if len(by_key) != len(submitted):
+        raise RuntimeError('Ambiguous submitted account import')
+    accepted, profiles, seen = [], {}, set()
+    for returned in created:
+        key = (returned.get('accountId'), returned.get('comment'))
+        if key not in by_key or key in seen:
+            raise RuntimeError('Unmatched accepted account import')
+        seen.add(key)
+        original = by_key[key]
+        if accounting_module.activity_signature({**returned, 'symbol': original['symbol']}) != accounting_module.activity_signature(original):
+            raise RuntimeError('Accepted account import changed financial evidence')
+        symbol = returned.get('symbol')
+        if symbol != original['symbol']:
+            owner = identity_module.parse_identity(original['comment'], original['type'])
+            if (owner is None or owner[1] not in ('FEE', 'INTEREST', 'COMPENSATION')
+                    or original['dataSource'] != 'MANUAL' or not manual_uuid(symbol)
+                    or not original['symbol'].startswith(f'GF_DEGIRO_{owner[0]}_')):
+                raise RuntimeError('Unproved MANUAL profile association')
+            canonical = identity_module.canonical_comment(original['comment'], original['type'])
+            assert canonical is not None
+            profiles[canonical] = {'requested': original['symbol'], 'returned': symbol,
+                'fingerprint': profile_fingerprint(original)}
+        accepted.append(dict(original))
+    validate_profile_associations(profiles)
+    return accepted, profiles
+
+
+def bind_existing_profiles(rows: list[dict[str, Any]], candidates: list[dict[str, Any]],
+        profiles: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Resolve UUIDs only with full source evidence or a durable exact association."""
+    validate_profile_associations(profiles)
+    by_key = {identity_module.parse_identity(row['comment'], row['type']): row for row in candidates}
+    result, associations = [], dict(profiles)
+    for row in rows:
+        owner = identity_module.parse_identity(row.get('comment'), row.get('type'))
+        if owner is None or row.get('dataSource') != 'MANUAL' or not manual_uuid(row.get('symbol')):
+            result.append(row)
+            continue
+        canonical = identity_module.canonical_comment(row['comment'], row['type'])
+        assert canonical is not None
+        expected = by_key.get(owner)
+        if expected is not None:
+            # Ownership comparisons accept both generations; recovery does not.
+            proposed = {**expected, 'comment': row['comment']}
+            accepted, derived = prove_accepted_subset([proposed], [row])
+            association = derived[canonical]
+            if canonical in associations and association != associations[canonical]:
+                raise RuntimeError('Conflicting MANUAL profile association')
+            associations.update(derived)
+            result.append({**row, 'symbol': accepted[0]['symbol']})
+        else:
+            association = associations.get(canonical)
+            if (not isinstance(association, dict) or set(association) != {'requested', 'returned', 'fingerprint'}
+                    or association['returned'] != row['symbol']
+                    or not isinstance(association['requested'], str)
+                    or not association['requested'].startswith(f'GF_DEGIRO_{owner[0]}_')
+                    or profile_fingerprint({**row, 'symbol': association['requested']}) != association['fingerprint']):
+                raise RuntimeError('Unproved MANUAL profile association')
+            result.append({**row, 'symbol': association['requested']})
+    validate_profile_associations(associations)
+    return result, associations
+
+
+def validate_profile_associations(profiles: dict[str, Any]) -> None:
+    requested: dict[str, str] = {}
+    for canonical, association in profiles.items():
+        owner = identity_module.parse_identity(canonical)
+        if (owner is None or owner[1] not in ('FEE', 'INTEREST', 'COMPENSATION')
+                or not isinstance(association, dict) or set(association) != {'requested', 'returned', 'fingerprint'}
+                or not isinstance(association['requested'], str)
+                or not association['requested'].startswith(f'GF_DEGIRO_{owner[0]}_')
+                or not manual_uuid(association['returned'])
+                or not isinstance(association['fingerprint'], str)
+                or not re.fullmatch(r'[0-9a-f]{64}', association['fingerprint'])):
+            raise RuntimeError('Unproved MANUAL profile association')
+        key = association['requested']
+        if key in requested and requested[key] != association['returned']:
+            raise RuntimeError('Conflicting MANUAL profile association')
+        requested[key] = association['returned']

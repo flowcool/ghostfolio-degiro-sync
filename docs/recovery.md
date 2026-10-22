@@ -149,3 +149,20 @@ This offline utility has no HTTP/delete path and provides no deletion permission
 A later authorized executor would still need fresh exact readback, unchanged
 ownership, bounded-ID confirmation and an independently tested rollback. Deleting
 rows alone does not restore asset profiles/market data or cancel old requests.
+
+Accepted import evidence remains separate from the submitted batch. A valid short
+response records only proven creations in the pending intent's `accepted` list.
+This list never proves that omitted rows were not created. The intent stays
+pending, no later sell batch or cash update runs, and automatic replay remains
+blocked. Exact full positive readback is still required to settle the request.
+A changed legacy/v1 spelling is not an exact pending-request readback.
+
+A MANUAL profile may return a UUID in place of its requested symbol. The adapter
+associates it only with the same source identity, account, timestamp, type, exact
+quantity/price/fee/currency and MANUAL data source. The generated core first proves
+the created row and profile. The adapter keeps the requested source identity and
+stores the returned UUID with an exact financial fingerprint in the private
+journal. Subsequent complete reads use unchanged source evidence or that durable
+association. Unknown or conflicting associations stop the account. Zero fees and
+zero interest remain valid evidence. Simulation can inspect an association but
+cannot certify it in the journal or advance coverage.

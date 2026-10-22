@@ -91,9 +91,10 @@ def account_journal(config: Any) -> Iterator[Journal]:
                     raise RuntimeError("Synchronization journal exceeds state budget")
                 document = yaml.safe_load(source.read())
             if (not isinstance(document, dict) or not {"version", "owner", "pending", "resolved"} <= set(document)
-                    or set(document) - {"version", "owner", "pending", "resolved", "coverage"}
+                    or set(document) - {"version", "owner", "pending", "resolved", "coverage", "profiles"}
                     or type(document["version"]) is not int or document["version"] != 1
                     or document["owner"] != owner or not isinstance(document["resolved"], dict)
+                    or not isinstance(document.get("profiles", {}), dict)
                     or document["pending"] is not None and not isinstance(document["pending"], dict)):
                 raise RuntimeError("Invalid private synchronization journal")
             if "coverage" in document:
@@ -153,17 +154,43 @@ def verify_import_intent(journal: Journal, config: Any, existing_body: Any, expe
     target = {"id": config["target_account"]}
     rows, _ = ghostfolio_module.existing_activity_context(existing_body, target)
     candidates = list(pending["payload"].values())
-    if (any(not isinstance(row, dict) or row.get("comment") != identity
-            for identity, row in pending["payload"].items())
-            or ghostfolio_module.pending_activities(candidates, rows, target, config["source_account"])):
+    if any(not isinstance(row, dict) or row.get("comment") != identity
+            for identity, row in pending["payload"].items()):
         raise RuntimeError("Complete exact positive readback required for recovery")
+    keys = {(row["accountId"], row["comment"]) for row in candidates}
+    selected = [row for row in rows if (row.get("accountId"), row.get("comment")) in keys]
+    try:
+        # The core validates IDs, profiles, exact money/date/type and eligibility.
+        accepted = core.accepted_import_subset(candidates, {"activities": selected})
+        accepted, profiles = ghostfolio_module.prove_accepted_subset(candidates, accepted)
+    except RuntimeError:
+        raise RuntimeError("Complete exact positive readback required for recovery") from None
+    if len(accepted) != len(candidates):
+        raise RuntimeError("Complete exact positive readback required for recovery")
+    if not config.get("dry_run", True):
+        record_confirmed_import(journal, expected_intent_id, accepted, profiles)
     return len(candidates)
+
+
+def record_confirmed_import(journal: Journal, identity: str, accepted: list[dict[str, Any]], profiles: dict[str, Any]) -> None:
+    """Persist proven creations while leaving an incomplete intent fenced."""
+    pending = selected_import_intent(journal, identity)
+    current = dict(journal["document"].get("profiles", {}))
+    for key, value in profiles.items():
+        if key in current and current[key] != value:
+            raise RuntimeError("Conflicting MANUAL profile association")
+        current[key] = value
+    ghostfolio_module.validate_profile_associations(current)
+    if current:
+        journal["document"]["profiles"] = current
+    pending["accepted"] = accepted
+    write_journal(journal)
 
 
 def resolve_import_intent(config: Any, existing_body: Any, *, expected_intent_id: Any) -> Any:
     """Resolve one explicitly selected request using complete positive readback."""
     with account_journal(config) as journal:
-        matched = verify_import_intent(journal, config, existing_body, expected_intent_id)
+        matched = verify_import_intent(journal, {**config, "dry_run": False}, existing_body, expected_intent_id)
         confirm_intent(journal, expected_intent_id)
         return matched
 
@@ -192,7 +219,7 @@ def readback_import_intent(config: Any, *, expected_intent_id: Any, confirm: Any
             if response.status_code != 200:
                 raise RuntimeError("Recovery activity readback failed")
             body = response.json()
-        matched = verify_import_intent(journal, readonly, body, expected_intent_id)
+        matched = verify_import_intent(journal, {**readonly, "dry_run": not confirm}, body, expected_intent_id)
         digest = hashlib.sha256(json.dumps(body, sort_keys=True,
             separators=(",", ":"), allow_nan=False).encode()).hexdigest()
         if confirm:
