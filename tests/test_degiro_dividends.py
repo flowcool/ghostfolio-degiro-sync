@@ -23,7 +23,7 @@ def normalize(snapshot):
 
 def test_gross_payment_and_same_currency_withholding(snapshot):
     activity, = normalize(snapshot)
-    assert activity == {'accountId': 'target-a', 'comment': 'DEGIRO#123:DIVIDEND:101',
+    assert activity == {'accountId': 'target-a', 'comment': 'DEGIRO#v1#123:DIVIDEND:101',
         'currency': 'USD', 'dataSource': 'YAHOO', 'date': '2026-01-03T09:00:00+00:00',
         'fee': 1.5, 'quantity': 1, 'symbol': 'TEST', 'type': 'DIVIDEND', 'unitPrice': 10.}
 
@@ -42,7 +42,7 @@ def test_same_day_distinct_payment_times_remain_distinct(snapshot):
         row['date'] = '2026-01-03T11:00:00+01:00'
     snapshot['cash_movements'].extend(second)
     activities = normalize(snapshot)
-    assert [a['comment'] for a in activities] == ['DEGIRO#123:DIVIDEND:101', 'DEGIRO#123:DIVIDEND:201']
+    assert [a['comment'] for a in activities] == ['DEGIRO#v1#123:DIVIDEND:101', 'DEGIRO#v1#123:DIVIDEND:201']
     assert [a['unitPrice'] for a in activities] == [10, 10]
 
 

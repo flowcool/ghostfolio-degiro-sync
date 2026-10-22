@@ -277,19 +277,22 @@ def cleanup_preflight(existing_body: Any, manifest: Any) -> Any:
     target = manifest["target_account"]
     if not isinstance(target, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", target):
         raise RuntimeError("Invalid cleanup target account")
-    namespace = f"DEGIRO#{source}:"
     activities = list(manifest["activities"].values())
     for identity, activity in manifest["activities"].items():
         if (not isinstance(identity, str) or not isinstance(activity, dict) or set(activity) != set(accounting_module.TRADE_FIELDS)
                 or activity.get("accountId") != target or activity.get("comment") != identity
-                or not re.fullmatch(re.escape(namespace) + r"(TRADE|DIVIDEND|FEE|INTEREST|COMPENSATION):[1-9][0-9]*", identity)):
+                or (owner := identity_module.parse_identity(identity, activity.get("type"))) is None
+                or owner[0] != source):
             raise RuntimeError("Unproved cleanup broker ownership")
         accounting_module.activity_signature(activity)
     rows, _ = existing_activity_context(existing_body, {"id": target})
+    rows, unused_profiles = bind_existing_profiles(rows, activities, {})
     if pending_activities(activities, rows, {"id": target}, source):
         raise RuntimeError("Cleanup requires complete exact positive activity evidence")
     selected = {row["comment"]: row["id"] for row in rows
                 if row.get("accountId") == target and row.get("comment") in manifest["activities"]}
+    if len(selected) != len(activities):
+        raise RuntimeError("Cleanup requires complete exact positive activity evidence")
     snapshot_hash = hashlib.sha256(json.dumps(existing_body, sort_keys=True,
         separators=(",", ":"), allow_nan=False).encode()).hexdigest()
     return {"source_account": source, "target_account": target,

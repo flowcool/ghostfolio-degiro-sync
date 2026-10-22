@@ -29,11 +29,11 @@ def test_distinct_yield_identities_preserve_exact_credit_and_zero_notice(snapsho
     data = yield_snapshot(snapshot)
     activities = accounting_module.normalize_cash_yield(data, TARGET['id'])
     compensation, interest = activities
-    assert compensation == {'accountId': TARGET['id'], 'comment': 'DEGIRO#123:COMPENSATION:601',
+    assert compensation == {'accountId': TARGET['id'], 'comment': 'DEGIRO#v1#123:COMPENSATION:601',
         'currency': 'EUR', 'dataSource': 'MANUAL', 'date': '2025-06-01T10:00:00+00:00',
         'fee': 0, 'quantity': 1, 'symbol': 'GF_DEGIRO_123_MMF_COMPENSATION_EUR',
         'type': 'INTEREST', 'unitPrice': 2.5}
-    assert interest['comment'] == 'DEGIRO#123:INTEREST:602'
+    assert interest['comment'] == 'DEGIRO#v1#123:INTEREST:602'
     assert interest['symbol'] == 'GF_DEGIRO_123_FLATEX_INTEREST_EUR'
     assert interest['quantity'] == 1 and interest['unitPrice'] == interest['fee'] == 0
     assert data['cash_movements'][0]['date'] == '2025-06-01T12:00:00+02:00'
@@ -205,7 +205,7 @@ def test_cleanup_preflight_requires_exact_yield_manifest_and_target_ownership(sn
     manifest = {'source_account': '123', 'target_account': TARGET['id'],
         'activities': {a['comment']: a for a in activities}}
     selected = ghostfolio_module.cleanup_preflight(body, manifest)
-    assert selected['activity_ids'] == {'DEGIRO#123:COMPENSATION:601': '0', 'DEGIRO#123:INTEREST:602': '1'}
+    assert selected['activity_ids'] == {'DEGIRO#v1#123:COMPENSATION:601': '0', 'DEGIRO#v1#123:INTEREST:602': '1'}
     body['activities'][0]['accountId'] = 'foreign'
     with pytest.raises(RuntimeError):
         ghostfolio_module.cleanup_preflight(body, manifest)

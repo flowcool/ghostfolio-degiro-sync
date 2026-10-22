@@ -376,7 +376,7 @@ def normalize_cash_yield(snapshot: dict[str, Any], target_account: Any, rules: A
             if snapshot["account_info"]["baseCurrency"] != "EUR":
                 raise RuntimeError("Unverified DEGIRO cash yield account currency")
             result.append({"accountId": target_account,
-                "comment": f"DEGIRO#{source}:{kind}:{identity_module.broker_identity(row['id'])}",
+                "comment": identity_module.versioned_comment(source, kind, row["id"]),
                 "currency": "EUR", "dataSource": "MANUAL", "date": broker_instant(row["date"]),
                 "fee": 0, "quantity": 1, "symbol": f"GF_DEGIRO_{source}_{label}_EUR",
                 "type": "INTEREST", "unitPrice": float(financial_decimal(row["change"]))})
@@ -437,7 +437,7 @@ def normalize_dividends(snapshot: dict[str, Any], target_account: Any, mapping: 
         if not isfinite(gross) or gross <= 0 or not isfinite(tax) or tax <= 0:
             raise RuntimeError("DEGIRO dividend cannot be represented safely")
         result.append({"accountId": target_account,
-            "comment": f"DEGIRO#{identity_module.broker_identity(snapshot['source_account'])}:DIVIDEND:{identity_module.broker_identity(dividend['id'])}",
+            "comment": identity_module.versioned_comment(snapshot["source_account"], "DIVIDEND", dividend["id"]),
             "currency": currency, "dataSource": "YAHOO", "date": broker_instant(dividend["date"]),
             "fee": tax, "quantity": 1, "symbol": symbol, "type": "DIVIDEND", "unitPrice": gross})
     return sorted(result, key=lambda activity: (activity["date"], activity["comment"]))
@@ -494,7 +494,7 @@ def normalize_fees(snapshot: dict[str, Any], target_account: Any, rules: Any=Non
             if not isfinite(fee) or fee <= 0 or Decimal(str(fee)) != amount:
                 raise RuntimeError("DEGIRO autonomous fee cannot be represented safely")
             result.append({"accountId": target_account,
-                "comment": f"DEGIRO#{source_account}:FEE:{identity_module.broker_identity(row['id'])}",
+                "comment": identity_module.versioned_comment(source_account, "FEE", row["id"]),
                 "currency": "EUR", "dataSource": "MANUAL", "date": broker_instant(row["date"]),
                 "fee": fee, "quantity": 1,
                 "symbol": f"GF_DEGIRO_{source_account}_EXCHANGE_CONNECTION_EUR",

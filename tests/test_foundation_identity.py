@@ -4,7 +4,7 @@ from copy import deepcopy
 import pytest
 
 from ghostfolio_degiro_sync import ghostfolio, identity
-from test_degiro_sync import NOW, TARGET, activity_row
+from test_degiro_sync import NOW, TARGET, activity_row, snapshot
 
 
 def candidate(kind='TRADE', activity_type='BUY', comment=None):
@@ -61,3 +61,56 @@ def test_ascii_comment_length_boundaries(size, valid):
     else:
         with pytest.raises(RuntimeError):
             identity.parse_identity(comment, 'BUY')
+
+
+def test_new_trade_writer_uses_generation_one_without_changing_source_id():
+    assert identity.execution_comment('123', '10') == 'DEGIRO#v1#123:TRADE:10'
+
+
+def test_writer_first_repeat_and_mixed_history_preserve_all_existing_rows(snapshot):
+    from ghostfolio_degiro_sync import sync
+    from test_degiro_sync import MAPPING, QUOTES, opening_holding
+    config = {'source_account': '123', 'target_account': 'target-a', 'dry_run': True}
+    body = {'activities': [opening_holding()], 'count': 1}
+    first = sync.select_account_activities(config, snapshot, TARGET, body, MAPPING, QUOTES, now=NOW)
+    assert all(row['comment'].startswith('DEGIRO#v1#') for row in first.selection.proposals)
+    for index, proposal in enumerate(first.selection.proposals):
+        row = activity_row(dict(proposal), str(index))
+        if index % 2 == 0:
+            row['comment'] = row['comment'].replace('DEGIRO#v1#', 'DEGIRO#')
+        body['activities'].append(row)
+    body['count'] = len(body['activities'])
+    before = deepcopy(body)
+    second = sync.select_account_activities(config, snapshot, TARGET, body, MAPPING, QUOTES, now=NOW)
+    assert second.selection.proposals == () and body == before
+
+
+def test_explicit_live_request_forced_to_simulation_sends_no_mutation(snapshot, monkeypatch, tmp_path):
+    from datetime import datetime, timedelta, timezone
+    import requests
+    from ghostfolio_degiro_sync import degiro, sync
+    from test_degiro_sync import MAPPING, QUOTES, configure, opening_holding, response
+    configure(monkeypatch, tmp_path, '0')
+    monkeypatch.setenv('TZ', 'invalid-zone')
+    now = datetime.now(timezone.utc)
+    snapshot['fetch_started_at'] = (now - timedelta(seconds=2)).isoformat()
+    snapshot['fetched_at'] = now.isoformat()
+    monkeypatch.setattr(degiro, 'read_degiro', lambda *args: snapshot)
+    proposals = sync.select_account_activities({'source_account': '123', 'target_account': 'target-a',
+        'dry_run': True}, snapshot, TARGET, {'activities': [opening_holding()], 'count': 1},
+        MAPPING, QUOTES, now=now).selection.proposals
+    rows = [opening_holding()]
+    for index, proposal in enumerate(proposals):
+        row = activity_row(dict(proposal), str(index))
+        if index == 0:
+            row['comment'] = row['comment'].replace('DEGIRO#v1#', 'DEGIRO#')
+        rows.append(row)
+    calls = []
+    def send(session, request, **kwargs):
+        calls.append(request.method)
+        assert request.method == 'GET'
+        return response(TARGET if request.path_url.endswith('/target-a') else {'activities': rows, 'count': len(rows)})
+    monkeypatch.setattr(requests.Session, 'send', send)
+    result = sync.run_sync(now.date(), now.date())
+    assert result['dry_run'] and result['accepted'] == [] and result['proposed'] == []
+    assert calls == ['GET', 'GET']

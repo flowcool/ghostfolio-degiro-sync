@@ -244,3 +244,10 @@ checked across the complete destination, so changing the target account cannot
 make an old event new. Normal synchronization does not move or rewrite history.
 Source lifetime identity and target-image compatibility require separate
 qualification; see the [source contract](docs/source-contract.md).
+
+New imports write generation 1. Historical comments remain unchanged until an
+explicit, qualified maintenance operation. After any v1 rows exist, safe halt uses
+the exact qualified candidate digest with `DRY_RUN=1` and the existing Compose
+target. If that candidate cannot start, leave writers stopped for a compatible
+repair. A Git revert or comment reversal alone does not qualify an older binary.
+Candidate lab proof and historical conversion require their own authorization.

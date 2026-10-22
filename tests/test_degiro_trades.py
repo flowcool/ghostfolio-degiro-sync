@@ -31,7 +31,7 @@ def buy(snapshot, execution_id=11, quantity='2'):
 
 def test_cross_currency_sell_preserves_cost_and_identity(snapshot):
     activity, = convert(snapshot)
-    assert activity == {'accountId': 'target-a', 'comment': 'DEGIRO#123:TRADE:10',
+    assert activity == {'accountId': 'target-a', 'comment': 'DEGIRO#v1#123:TRADE:10',
         'currency': 'USD', 'dataSource': 'YAHOO', 'date': '2026-01-02T09:00:00+00:00',
         'fee': .165, 'quantity': 2., 'symbol': 'TEST', 'type': 'SELL', 'unitPrice': 10.}
     # Total already includes AutoFX; nettFxRate must never apply it again.

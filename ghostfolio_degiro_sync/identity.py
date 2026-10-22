@@ -4,7 +4,7 @@ import re
 
 
 def execution_comment(source_account: object, execution_id: object) -> str:
-    return f"DEGIRO#{broker_identity(source_account)}:TRADE:{broker_identity(execution_id)}"
+    return versioned_comment(source_account, "TRADE", execution_id)
 
 
 def broker_identity(value: object) -> str:

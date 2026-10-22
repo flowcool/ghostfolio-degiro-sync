@@ -27,7 +27,7 @@ def normalize(snapshot):
 
 
 def test_only_connection_charge_is_a_standalone_fee(snapshot):
-    assert normalize(snapshot) == [{'accountId': 'target-a', 'comment': 'DEGIRO#123:FEE:104',
+    assert normalize(snapshot) == [{'accountId': 'target-a', 'comment': 'DEGIRO#v1#123:FEE:104',
         'currency': 'EUR', 'dataSource': 'MANUAL', 'date': '2025-12-31T23:00:00+00:00',
         'fee': 2.5, 'quantity': 1, 'symbol': 'GF_DEGIRO_123_EXCHANGE_CONNECTION_EUR',
         'type': 'FEE', 'unitPrice': 0}]
@@ -46,7 +46,7 @@ def test_overlap_is_deduplicated_but_separate_fee_rows_remain(snapshot):
     snapshot['cash_movements'].append(duplicate)
     assert len(normalize(snapshot)) == 1
     duplicate['id'] = 204
-    assert [a['comment'] for a in normalize(snapshot)] == ['DEGIRO#123:FEE:104', 'DEGIRO#123:FEE:204']
+    assert [a['comment'] for a in normalize(snapshot)] == ['DEGIRO#v1#123:FEE:104', 'DEGIRO#v1#123:FEE:204']
 
 
 def test_changed_fee_identity_blocks(snapshot):
@@ -124,7 +124,7 @@ def test_source_identity_and_target_are_scoped(snapshot):
     first = normalize(snapshot)[0]
     snapshot['source_account'] = '456'
     second = accounting_module.normalize_fees(snapshot, 'target-b')[0]
-    assert second['comment'] == 'DEGIRO#456:FEE:104'
+    assert second['comment'] == 'DEGIRO#v1#456:FEE:104'
     assert first['symbol'] != second['symbol']
     assert first['accountId'] != second['accountId']
 

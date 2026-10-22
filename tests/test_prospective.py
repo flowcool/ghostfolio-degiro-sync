@@ -567,7 +567,7 @@ def test_distinct_same_minute_source_rows_preserve_multiset(prospective_account)
     result = sync_account(prospective_account)
     assert len(result['proposed']) == 4
     assert {row['comment'] for row in result['proposed'] if row['type'] == 'FEE'} == {
-        'DEGIRO#123:FEE:104', 'DEGIRO#123:FEE:999'}
+        'DEGIRO#v1#123:FEE:104', 'DEGIRO#v1#123:FEE:999'}
     snapshot['account_report_csv'] = cash_statement({**snapshot,
         'cash_movements': snapshot['cash_movements'][:-1]})
     with pytest.raises(RuntimeError, match='coverage'):
