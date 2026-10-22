@@ -56,6 +56,7 @@ def bounded_broker_session() -> Any:
     session.trust_env = False
     diagnostics: dict[str, str] = {}
     session.degiro_diagnostics = diagnostics
+    session.degiro_evidence = []
     original_send = session.send
 
     def send(request: Any, **kwargs: Any) -> Any:
@@ -103,6 +104,16 @@ def bounded_broker_session() -> Any:
                 raise RuntimeError("DEGIRO CSV is not valid UTF-8") from None
             # The real export omits charset; requests otherwise selects Latin-1.
             response.encoding = "utf-8-sig"
+        if parts.path in ("/portfolio-reports/secure/v4/transactions",
+                "/portfolio-reports/secure/v6/accountoverview", "/product_search/secure/v5/products/info"):
+            content = getattr(response, "content", None)
+            if isinstance(content, bytes) and content:
+                try:
+                    wire = content.decode("utf-8")
+                except UnicodeError:
+                    wire = ""
+                if wire:
+                    session.degiro_evidence.append({"path": parts.path, "body": wire})
         return response
 
     session.send = send
@@ -323,6 +334,9 @@ def read_degiro(from_date: date, to_date: date, window_days: int=90, report_loca
                         or report.lstrip().startswith("<")):
                     raise RuntimeError("Invalid DEGIRO CSV report response")
                 data["account_report_csv"] = report
+            wire = getattr(session, "degiro_evidence", None)
+            if wire:
+                data["_diagnostic_wire"] = list(wire)
             if cutover_target_reader is not None:
                 stage = "cutover_destination"
                 data["opening_destination"] = cutover_target_reader()

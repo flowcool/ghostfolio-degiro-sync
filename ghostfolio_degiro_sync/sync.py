@@ -120,6 +120,7 @@ def synchronize_locked(config: Any, snapshot: Any, target_account: Any, existing
     now = datetime.now(UTC) if now is None else now
     evidence = (journal_module.load_prospective_evidence(config["cutover_manifest"], config["cutover_sha256"])
         if config.get("sync_mode") == "prospective" else None)
+    diagnostic_snapshot = snapshot
     plan = select_account_activities(config, snapshot, target_account, existing_body, mapping,
         quote_currencies, now=now, journal=journal, prospective_evidence=evidence)
     pending = [dict(row) for row in plan.selection.proposals]
@@ -128,7 +129,8 @@ def synchronize_locked(config: Any, snapshot: Any, target_account: Any, existing
     prospective, rolling = plan.prospective, plan.rolling
     dry_run, source = config.get("dry_run", True), config["source_account"]
     if dry_run:
-        return {"proposed": pending, "accepted": [], "cash": balance, "dry_run": True,
+        reconciliation = diagnostics_module.snapshot_reconciliation(diagnostic_snapshot, existing_body, target_account["id"], mapping, quote_currencies)
+        return {"reconciliation": reconciliation, "proposed": pending, "accepted": [], "cash": balance, "dry_run": True,
                 "cash_before": float(accounting_module.financial_decimal(target_account["balance"])),
                 "candidates": plan.candidates, "exclusions": dict(plan.exclusions),
                 "period": {"from_date": snapshot.get("from_date"), "to_date": snapshot.get("to_date"),
@@ -555,6 +557,12 @@ def run_sync_locked(config: Any, mapping: Any, quotes: Any, from_date: Any, to_d
             response = session.get(f"{config['ghost_host']}/api/v1/activities")
             response.raise_for_status()
             existing = response.json()
+            wire = getattr(response, "content", None)
+            if config.get("dry_run") and isinstance(existing, dict) and isinstance(wire, bytes):
+                try:
+                    existing = {**existing, "_diagnostic_wire": wire.decode("utf-8")}
+                except UnicodeError:
+                    pass
         with diagnostics_module.diagnostic_boundary("sync", "reconciliation"):
             if config.get("sync_mode") == "rolling":
                 journal_module.recover_confirmed_import(journal, config, existing)

@@ -251,3 +251,12 @@ the exact qualified candidate digest with `DRY_RUN=1` and the existing Compose
 target. If that candidate cannot start, leave writers stopped for a compatible
 repair. A Git revert or comment reversal alone does not qualify an older binary.
 Candidate lab proof and historical conversion require their own authorization.
+
+Simulation reconciliation compares source events with owned destination rows before
+import deduplication. It uses the original JSON decimals when both read phases
+provide them. Missing wire evidence, ownership contention or unsupported units
+remain uncertain; no amount threshold hides a difference. Dividend activity
+quantity `1` does not prove a security quantity. The report adds no reads or
+writes and does not change import selection, exit status or notifications. Private
+captures may retain original financial JSON for this comparison; protect them as
+financial data. They are not source lifetime-coverage proof.
