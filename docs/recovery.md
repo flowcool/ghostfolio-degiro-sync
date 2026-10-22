@@ -166,3 +166,45 @@ journal. Subsequent complete reads use unchanged source evidence or that durable
 association. Unknown or conflicting associations stop the account. Zero fees and
 zero interest remain valid evidence. Simulation can inspect an association but
 cannot certify it in the journal or advance coverage.
+
+## Historical identity preview
+
+The maintenance command stays outside the runtime image. It never runs from
+CRON. Preview reads saved files only. It does not load credentials or honor an
+inherited live mode:
+
+```sh
+.venv/bin/python scripts/migrate_degiro_identity.py preview --inputs /private/inputs.yaml --output /private/new-review
+```
+
+Use schema `degiro-migration-inputs-v1` in keyed YAML. Supply `tool_commit` as
+an exact 40-character source commit, `clock` as an aware fixed ISO timestamp,
+`inventory_complete: true`, and `accounts` keyed by each configured numeric
+source account. Each account value is the saved Ghostfolio target account.
+`mapping` references a YAML file containing `symbols` (ISIN to symbol) and
+`quote_currencies` (symbol to currency). File references have `path` (relative
+to inputs) and `sha256`. `reports` keys each saved DEGIRO source snapshot with
+its `source_account`; `replay_order` lists every report key exactly once.
+Source snapshots need actual `from_date`/`to_date` and the original financial
+JSON in `_diagnostic_wire`, as acquired by the private read command. Missing
+exact source evidence leaves rows unproven. Do not recreate wire decimals from
+rounded payloads.
+
+`snapshot` references a complete Ghostfolio activity response and declares
+`complete: true`, `unredacted: true`, exact `count`, `capture_ref`,
+`captured_at`, `destination_version` and `destination_image` (`sha256:...`).
+Every row needs its ID, comment (including null), exact quantity/price/fee,
+account/currency, date/type, `isDraft`, tags and profile context. Acquisition
+of real source/destination evidence retains its own authority.
+
+The new private directory contains deterministic `manifest.yaml` and its
+SHA256. It inventories every activity ID, including inactive and old history.
+Rows have one decision and a reason. Eligible rows require unique ownership,
+exact source association and unchanged complete runtime selection, holdings
+and failure behavior under the fixed clock. Missing proof removes replacements.
+Inputs remain byte-identical; duplicate YAML keys, aliases, incomplete snapshots,
+symlinks and output overlap are rejected. The manifest binds input, mapping,
+implementation and destination hashes. Source windows do not prove lifetime
+broker coverage. Target DTO, zero/MANUAL/UUID, background effects, pacing,
+source lifetime and reversal qualifications remain explicit pending gates.
+Preview does not authorize conversion, database restore or old-binary restart.
