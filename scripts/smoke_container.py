@@ -38,7 +38,7 @@ import annotationlib, inspect, hashlib, importlib.metadata, importlib.util, json
 from pathlib import Path
 import yaml
 import degiro_connector
-import degiro_to_ghostfolio
+from ghostfolio_degiro_sync import accounting
 import ghostfolio_core
 import ghostfolio_degiro_sync
 from importlib.resources import files
@@ -56,7 +56,7 @@ for value in vars(ghostfolio_core).values():
         annotationlib.get_annotations(value, format=annotationlib.Format.VALUE)
 assert hashlib.sha256(Path(ghostfolio_core.__file__).read_bytes()).hexdigest() == {core_hash!r}
 assert yaml.safe_load(files("ghostfolio_degiro_sync").joinpath("cash-rules.yaml").read_text())["format"] == 1
-assert degiro_to_ghostfolio.load_cash_rules()
+assert accounting.load_cash_rules()
 assert orjson.loads(orjson.dumps({{"value": 1}})) == {{"value": 1}}
 assert pydantic_core.SchemaValidator({{"type": "int"}}).validate_python(1) == 1
 assert wrapt.ObjectProxy(1) + 1 == 2
@@ -79,7 +79,7 @@ for path in files:
 assert len(files) == provenance["python_module_count"]
 assert tree.hexdigest() == provenance["python_tree_sha256"]
 assert not any(name.startswith(("DEGIRO_", "GHOST_TOKEN")) for name in os.environ)
-assert sorted(p.name for p in Path("/app").iterdir()) == ["degiro_to_ghostfolio.py", "entrypoint.sh", "ghostfolio_core.py", "ghostfolio_degiro_sync", "pyproject.toml", "requirements.txt", "scripts"]
+assert sorted(p.name for p in Path("/app").iterdir()) == ["entrypoint.sh", "ghostfolio_core.py", "ghostfolio_degiro_sync", "pyproject.toml", "requirements.txt", "scripts"]
 assert sorted(p.name for p in Path("/app/scripts").iterdir()) == ["check_scheduler.py", "recover_degiro.py"]
 assert hashlib.sha256(Path("/app/scripts/recover_degiro.py").read_bytes()).hexdigest() == {recovery_hash!r}
 assert hashlib.sha256(Path("/app/scripts/check_scheduler.py").read_bytes()).hexdigest() == {health_hash!r}

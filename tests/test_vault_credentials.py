@@ -7,7 +7,8 @@ import traceback
 
 import pytest
 
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
+import time
 
 from ghostfolio_degiro_sync import degiro as degiro_module
 from ghostfolio_degiro_sync import vault as vault_module
@@ -143,7 +144,7 @@ def test_invalid_cli_results_fail_closed_and_remove_state(vault, monkeypatch, fa
     monkeypatch.setattr(subprocess, "run", run)
     if failure == "deadline":
         ticks = iter([0, 121])
-        monkeypatch.setattr(adapter.time, "monotonic", lambda: next(ticks, 121))
+        monkeypatch.setattr(time, "monotonic", lambda: next(ticks, 121))
     with pytest.raises(RuntimeError, match="Bitwarden credential retrieval failed"):
         vault_module.broker_credentials()
     assert not any(p.exists() for p in directories)

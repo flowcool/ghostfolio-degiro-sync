@@ -86,7 +86,7 @@ def test_invalid_simulation_value_never_echoes_input():
 
 @pytest.mark.parametrize('failed', [False, True])
 def test_forced_preview_sends_one_summary_with_failure_precedence(monkeypatch, failed):
-    import degiro_to_ghostfolio as command
+    from ghostfolio_degiro_sync import app as command
     from ghostfolio_degiro_sync import notify, sync
     monkeypatch.setenv('DRY_RUN', '0')
     monkeypatch.delenv('TZ', raising=False)
@@ -107,7 +107,7 @@ def test_forced_preview_sends_one_summary_with_failure_precedence(monkeypatch, f
 
 
 def test_blank_mode_warns_once_even_if_configuration_fails(monkeypatch, caplog):
-    import degiro_to_ghostfolio as command
+    from ghostfolio_degiro_sync import app as command
     monkeypatch.setenv('DRY_RUN', '  ')
     monkeypatch.delenv('GHOST_HOST', raising=False)
     monkeypatch.setenv('APPRISE_URLS', '')

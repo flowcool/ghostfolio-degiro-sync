@@ -2,7 +2,6 @@
 **
 !Dockerfile
 !requirements.txt
-!degiro_to_ghostfolio.py
 !ghostfolio_core.py
 !pyproject.toml
 !ghostfolio_degiro_sync/

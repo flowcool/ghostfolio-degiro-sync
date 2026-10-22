@@ -2,6 +2,7 @@
 import io
 import json
 import subprocess
+import requests
 import sys
 import time
 import types
@@ -9,7 +10,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import degiro_to_ghostfolio as m
+from ghostfolio_degiro_sync import app as m
+import logging
+import re
 from ghostfolio_degiro_sync import notify as notify_module
 
 from ghostfolio_degiro_sync import sync as sync_module
@@ -69,7 +72,7 @@ def test_invalid_settings_disable_delivery_with_a_fixed_warning(notify_env, capl
 
 def test_oversized_setting_is_rejected_before_parsing(notify_env, monkeypatch):
     notify_env.setenv("APPRISE_URLS", json.dumps(["x" * 100] * 400))
-    monkeypatch.setattr(m.json, "loads", lambda *a: pytest.fail("must not parse"))
+    monkeypatch.setattr(json, "loads", lambda *a: pytest.fail("must not parse"))
     assert notify_module.load_notification_config() is None
 
 
@@ -82,7 +85,7 @@ def run_worker(monkeypatch, payload, apprise_module):
     try:
         return notify_module.notify_worker()
     finally:
-        m.logging.disable(m.logging.NOTSET)
+        logging.disable(logging.NOTSET)
 
 
 def fake_apprise(add=True, notify=True):
@@ -157,7 +160,7 @@ def track_popen(monkeypatch):
     def popen(*a, **k):
         procs.append(real(*a, **k))
         return procs[-1]
-    monkeypatch.setattr(m.subprocess, "Popen", popen)
+    monkeypatch.setattr(subprocess, "Popen", popen)
     return procs
 
 
@@ -211,7 +214,7 @@ def test_worker_exit_code_maps_to_a_fixed_status(monkeypatch, tmp_path, exit_cod
 
 
 def test_oversized_payload_spawns_nothing(monkeypatch):
-    monkeypatch.setattr(m.subprocess, "Popen", lambda *a, **k: pytest.fail("no spawn"))
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("no spawn"))
     body = "x" * notify_module.NOTIFY_PAYLOAD_MAX
     assert notify_module.send_notification({"urls": URLS, "timeout": 10}, "t", body) == "payload_too_large"
 
@@ -219,7 +222,7 @@ def test_oversized_payload_spawns_nothing(monkeypatch):
 def test_spawn_failure_is_a_status_not_an_exception(monkeypatch):
     def boom(*a, **k):
         raise OSError(URL_SECRET)
-    monkeypatch.setattr(m.subprocess, "Popen", boom)
+    monkeypatch.setattr(subprocess, "Popen", boom)
     assert notify_module.send_notification({"urls": URLS, "timeout": 10}, "t", "b") == "spawn_failed"
 
 
@@ -236,7 +239,7 @@ def test_interrupt_while_waiting_kills_the_worker_and_propagates(monkeypatch, tm
             raise exc
         return types.SimpleNamespace(pid=proc.pid, poll=proc.poll, kill=proc.kill,
                                      wait=proc.wait, communicate=communicate)
-    monkeypatch.setattr(m.subprocess, "Popen", interrupted)
+    monkeypatch.setattr(subprocess, "Popen", interrupted)
     with pytest.raises(exc):
         notify_module.send_notification({"urls": URLS, "timeout": 10}, "t", "b")
     assert procs[0].returncode is not None                       # killed and reaped
@@ -249,24 +252,24 @@ def run_real_apprise_worker(monkeypatch, urls, http):
     def request(*a, **k):
         calls.append(k.get("url", a[1] if len(a) > 1 else None))
         return http()
-    monkeypatch.setattr(m.requests, "request", request)
+    monkeypatch.setattr(requests, "request", request)
     data = json.dumps({"urls": urls, "title": "t", "body": "b"}).encode()
     monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(buffer=io.BytesIO(data)))
     try:
         return notify_module.notify_worker(), calls
     finally:
-        m.logging.disable(m.logging.NOTSET)
+        logging.disable(logging.NOTSET)
 
 
 def ok_response():
-    resp = m.requests.Response()
+    resp = requests.Response()
     resp.status_code = 200
     return resp
 
 
 def test_real_apprise_reports_an_unreachable_destination(monkeypatch):
     def unreachable():
-        raise m.requests.ConnectionError("unreachable")
+        raise requests.ConnectionError("unreachable")
     code, calls = run_real_apprise_worker(monkeypatch, ["json://notify.invalid/hook"], unreachable)
     assert code == 12 and len(calls) == 1
 
@@ -285,7 +288,7 @@ def test_real_apprise_bounds_destinations_expanded_from_one_entry(monkeypatch):
 def test_missing_notification_module_file_refuses_spawn(monkeypatch):
     # A missing module file cannot support an installed worker.
     monkeypatch.setattr(notify_module, "__file__", "<stdin>")
-    monkeypatch.setattr(m.subprocess, "Popen", lambda *a, **k: pytest.fail("no spawn"))
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("no spawn"))
     assert notify_module.send_notification({"urls": URLS, "timeout": 10}, "t", "b") == "spawn_failed"
 
 

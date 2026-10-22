@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 import requests
 
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
 from ghostfolio_degiro_sync import accounting as accounting_module
 from ghostfolio_degiro_sync import degiro as degiro_module
 from ghostfolio_degiro_sync import diagnostics as diagnostics_module

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 import requests
 
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
 from ghostfolio_degiro_sync import config as config_module
 from ghostfolio_degiro_sync import degiro as degiro_module
 from ghostfolio_degiro_sync import ghostfolio as ghostfolio_module
@@ -105,7 +105,7 @@ def test_vault_command_failure_reaches_cli_without_secrets(vault, monkeypatch, t
 
 def test_missing_vault_configuration_is_distinct(vault, monkeypatch, tmp_path, caplog, capsys):
     monkeypatch.delenv("BW_PASSWORD")
-    monkeypatch.setattr(adapter.subprocess, "run", lambda *a, **k: pytest.fail("CLI contacted"))
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("CLI contacted"))
     assert adapter.main(read_arguments(tmp_path)) == 1
     assert "stage=vault reason=configuration" in caplog.text
     assert_private(caplog, capsys)
@@ -242,7 +242,7 @@ def test_process_stdout_stderr_are_private(arguments, code, token):
     environment = {"PATH": os.environ["PATH"], "GHOST_HOST": "https://portfolio.example",
                    "GHOST_TOKEN": SECRET, "GHOST_ACCESS_TOKEN": SECRET, "LOOKBACK_DAYS": "90",
                    "SYNC_MODE": "full_history"}
-    result = subprocess.run([sys.executable, adapter.__file__, *arguments], env=environment,
+    result = subprocess.run([sys.executable, "-m", "ghostfolio_degiro_sync", *arguments], env=environment,
                             capture_output=True, text=True, timeout=10, check=False)
     assert result.returncode == code
     assert token in result.stderr

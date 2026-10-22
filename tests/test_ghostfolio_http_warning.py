@@ -5,7 +5,7 @@ import logging
 import pytest
 import requests
 
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
 from ghostfolio_degiro_sync import diagnostics as diagnostics_module
 from ghostfolio_degiro_sync import ghostfolio as ghostfolio_module
 

@@ -13,7 +13,7 @@ import sys
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
 
 
 from ghostfolio_degiro_sync import accounting as accounting_module

@@ -165,7 +165,7 @@ The account lock covers reads and dispatch, and an unresolved durable import or
 cash intent blocks prospective verification. Run the existing command:
 
 ```sh
-.venv/bin/python degiro_to_ghostfolio.py --sync
+.venv/bin/python -m ghostfolio_degiro_sync --sync
 ```
 
 Prospective mode always rereads the complete interval from the opening capture's

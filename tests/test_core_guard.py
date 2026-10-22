@@ -148,13 +148,14 @@ def test_git_failure_is_closed_and_bounded(monkeypatch, tmp_path):
 
 
 def test_adapter_scaffold_sends_no_calls(monkeypatch):
-    import degiro_to_ghostfolio as adapter
+    from ghostfolio_degiro_sync import app as adapter
+    import ghostfolio_core as core
 
     def forbidden(*args, **kwargs):
         pytest.fail("Scaffold must not call Ghostfolio")
 
     for name in ("get", "post", "put", "delete"):
-        monkeypatch.setattr(adapter.core.requests, name, forbidden)
+        monkeypatch.setattr(core.requests, name, forbidden)
     assert adapter.main() == 1
 
 

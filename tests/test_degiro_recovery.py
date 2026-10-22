@@ -10,7 +10,8 @@ import pytest
 import yaml
 import requests
 
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
+import os
 from ghostfolio_degiro_sync import config as config_module
 from ghostfolio_degiro_sync import degiro as degiro_module
 from ghostfolio_degiro_sync import journal as journal_module
@@ -66,7 +67,8 @@ def test_lost_response_restart_never_dispatches_again(config, snapshot):
     pending_import(config, snapshot)
     script = '''
 import json, sys
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
+import os
 from ghostfolio_degiro_sync import journal as journal_module
 config = json.loads(sys.argv[1])
 with journal_module.account_journal(config) as journal:
@@ -259,7 +261,7 @@ def test_cash_response_loss_also_survives_restart(config, snapshot):
 def test_journal_write_failure_prevents_dispatch(config, snapshot, monkeypatch):
     def fail(*args):
         raise OSError('Synthetic disk failure')
-    monkeypatch.setattr(adapter.os, 'fsync', fail)
+    monkeypatch.setattr(os, 'fsync', fail)
     with pytest.raises(RuntimeError, match='cash blocked'):
         synchronize(config, snapshot, lambda *args: pytest.fail('Unflushed intent dispatched'))
     assert not list(Path(config['state_dir']).glob('.intent-*'))
@@ -303,7 +305,8 @@ def test_resolved_retention_preserves_newest_confirmations_and_pending_fence(con
 def test_lock_refuses_another_process(config, other_source):
     script = '''
 import json, sys
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
+import os
 from ghostfolio_degiro_sync import journal as journal_module
 try:
     with journal_module.account_journal(json.loads(sys.argv[1])):

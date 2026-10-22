@@ -44,7 +44,7 @@ def test_unavailable_window_and_nonfinite_values_emit_no_fabricated_evidence(cap
 
 
 def test_invalid_log_level_stops_before_broker_and_does_not_echo(monkeypatch, caplog):
-    import degiro_to_ghostfolio as command
+    from ghostfolio_degiro_sync import app as command
     monkeypatch.setenv('LOG_LEVEL', 'SECRET')
     monkeypatch.setattr(sync, 'run_sync', lambda *args: pytest.fail('access'))
     assert command.main(['--sync']) == 1

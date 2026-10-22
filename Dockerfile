@@ -37,7 +37,7 @@ RUN python -m pip install --no-cache-dir -r requirements.txt \
 
 ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION} DRY_RUN=1 PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-COPY pyproject.toml degiro_to_ghostfolio.py ghostfolio_core.py entrypoint.sh ./
+COPY pyproject.toml ghostfolio_core.py entrypoint.sh ./
 COPY ghostfolio_degiro_sync/ ./ghostfolio_degiro_sync/
 RUN python -m pip install --no-cache-dir --no-deps . \
     && python -m pip check \

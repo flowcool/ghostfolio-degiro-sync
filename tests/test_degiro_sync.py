@@ -9,7 +9,7 @@ import pytest
 import requests
 import yaml
 
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
 from ghostfolio_degiro_sync import accounting as accounting_module
 from ghostfolio_degiro_sync import config as config_module
 from ghostfolio_degiro_sync import degiro as degiro_module

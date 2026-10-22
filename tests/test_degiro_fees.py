@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
 from ghostfolio_degiro_sync import accounting as accounting_module
 
 import ghostfolio_core as core

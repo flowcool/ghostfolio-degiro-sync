@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
+import ghostfolio_core as core
 from ghostfolio_degiro_sync import accounting as accounting_module
 from ghostfolio_degiro_sync import degiro as degiro_module
 from ghostfolio_degiro_sync import ghostfolio as ghostfolio_module
@@ -235,8 +236,8 @@ def test_actual_command_uses_rolling_today_and_private_read_only_plan(rolling, m
         assert cfg['ghost_token'] == 'synthetic-token' and 'ghost_access_token' not in cfg
         yield SimpleNamespace(get=get)
     monkeypatch.setattr(ghostfolio_module, 'ghost_transport', transport)
-    monkeypatch.setattr(adapter.core, 'ghost_import_activities', lambda *a: pytest.fail('POST'))
-    monkeypatch.setattr(adapter.core, 'ghost_update_cash_balance', lambda *a: pytest.fail('PUT'))
+    monkeypatch.setattr(core, 'ghost_import_activities', lambda *a: pytest.fail('POST'))
+    monkeypatch.setattr(core, 'ghost_update_cash_balance', lambda *a: pytest.fail('PUT'))
     assert adapter.main(['--sync']) == 0
     assert queried == [(snapshot['from_date'], snapshot['to_date'], {'report_locale': ('fr', 'fr'), 'holdings': True})]
     assert len(reads) == 2 and state(config) is None

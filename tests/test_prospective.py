@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
+import ghostfolio_core as core
 
 
 from ghostfolio_degiro_sync import config as config_module
@@ -387,8 +388,8 @@ def test_dry_run_command_keeps_acquisition_scope_and_read_only_transports(prospe
         yield SimpleNamespace(get=get)
     monkeypatch.setattr(degiro_module, "read_degiro", read)
     monkeypatch.setattr(ghostfolio_module, "ghost_transport", transport)
-    monkeypatch.setattr(adapter.core, "ghost_import_activities", lambda *args: pytest.fail("POST"))
-    monkeypatch.setattr(adapter.core, "ghost_update_cash_balance", lambda *args: pytest.fail("PUT"))
+    monkeypatch.setattr(core, "ghost_import_activities", lambda *args: pytest.fail("POST"))
+    monkeypatch.setattr(core, "ghost_update_cash_balance", lambda *args: pytest.fail("PUT"))
     # A narrow requested lookback cannot replace the manifest's full replay interval.
     with caplog.at_level('INFO'):
         assert adapter.main(["--sync", "--from-date", now.date().isoformat()]) == 0
@@ -491,8 +492,8 @@ def test_read_only_capture_publishes_private_candidates_without_financial_writes
         return result
     monkeypatch.setattr(ghostfolio_module, 'ghost_transport', transport)
     monkeypatch.setattr(degiro_module, 'read_degiro', read)
-    monkeypatch.setattr(adapter.core, 'ghost_import_activities', lambda *args: pytest.fail('POST'))
-    monkeypatch.setattr(adapter.core, 'ghost_update_cash_balance', lambda *args: pytest.fail('PUT'))
+    monkeypatch.setattr(core, 'ghost_import_activities', lambda *args: pytest.fail('POST'))
+    monkeypatch.setattr(core, 'ghost_update_cash_balance', lambda *args: pytest.fail('PUT'))
     output = tmp_path / 'capture'
     prepare_cutover.capture(output, config)
     assert len(calls) == 2
