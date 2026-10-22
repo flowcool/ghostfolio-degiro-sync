@@ -1,4 +1,4 @@
-FROM python:3.12-slim@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f
+FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170
 
 WORKDIR /app
 ARG SUPERCRONIC_VERSION=v0.2.49
@@ -31,7 +31,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl unzip tzda
     && apt-get purge -y curl unzip && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN python -m pip install --no-cache-dir -r requirements.txt && python -m pip check
+# pip is build-time only; remove its unused vendored dependencies from runtime.
+RUN python -m pip install --no-cache-dir -r requirements.txt \
+    && python -m pip check \
+    && python -m pip uninstall -y pip
 
 ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION} DRY_RUN=1 PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1

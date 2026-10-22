@@ -11,18 +11,18 @@ responsibilities, financial execution or recovery.
 ## Offline checks
 
 ```sh
-python3 -m venv .venv
+python3.14 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python -m pytest -q
 .venv/bin/python scripts/check_core.py --source ../ghostfolio-ibkr-sync --check-main
 git diff --check
 ```
 
-Pytest forbids network access. Use synthetic credentials and financial fixtures. Never load a real vault, broker account or shared production database into tests. Core integrity reads pinned Git objects without modifying the sibling; CI fetches the canonical source in disposable state. CORE_PROVENANCE.md owns the pin and exact propagation procedure.
+Use Python 3.14 for development, matching the image and CI. Pytest forbids network access. Use synthetic credentials and financial fixtures. Never load a real vault, broker account or shared production database into tests. Core integrity reads pinned Git objects without modifying the sibling; CI fetches the canonical source in disposable state. CORE_PROVENANCE.md owns the pin and exact propagation procedure.
 
 ## Native container validation
 
-CI builds amd64/arm64 images, checks pinned binaries, audits dependencies and runs isolated run-once/cron smoke tests. Local contributors can build and run the same synthetic smoke on their own Docker daemon:
+CI builds amd64/arm64 images, checks pinned binaries, audits dependencies and runs isolated run-once/cron smoke tests. The smoke checks Python 3.14 and native dependency execution on each architecture. The runtime image contains no pip or developer tools. Local contributors can build and run the same synthetic smoke on their own Docker daemon:
 
 ```sh
 # Supply synthetic Compose values first; this overlay is for contributors only.
