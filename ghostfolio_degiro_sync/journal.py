@@ -23,9 +23,10 @@ from ghostfolio_degiro_sync import config as config_module
 from ghostfolio_degiro_sync import diagnostics as diagnostics_module
 from ghostfolio_degiro_sync import ghostfolio as ghostfolio_module
 from ghostfolio_degiro_sync import identity as identity_module
+from ghostfolio_degiro_sync.models import Journal
 
 
-def write_journal(journal: Any) -> Any:
+def write_journal(journal: Journal) -> Any:
     """Replace private state atomically, flushing both file and directory."""
     content = yaml.safe_dump(journal["document"], sort_keys=True)
     if len(content.encode("utf-8")) > 1_000_000:
@@ -55,7 +56,7 @@ def private_state_file(descriptor: Any) -> Any:
 
 
 @contextmanager
-def account_journal(config: Any) -> Iterator[Any]:
+def account_journal(config: Any) -> Iterator[Journal]:
     """Hold one private account lock; unresolved requests survive process exit."""
     directory = config.get("state_dir")
     if not isinstance(directory, str) or not directory:
@@ -109,7 +110,7 @@ def account_journal(config: Any) -> Iterator[Any]:
         os.close(descriptor)
 
 
-def begin_intent(journal: Any, kind: Any, payload: Any) -> Any:
+def begin_intent(journal: Journal, kind: Any, payload: Any) -> Any:
     if journal["document"]["pending"] is not None:
         raise RuntimeError("Unresolved durable write intent blocks account writes")
     identity = uuid.uuid4().hex
@@ -118,7 +119,7 @@ def begin_intent(journal: Any, kind: Any, payload: Any) -> Any:
     return identity
 
 
-def confirm_intent(journal: Any, identity: Any) -> Any:
+def confirm_intent(journal: Journal, identity: Any) -> Any:
     pending = journal["document"]["pending"]
     if not isinstance(pending, dict) or pending.get("id") != identity:
         raise RuntimeError("Synchronization intent identity changed")
@@ -133,7 +134,7 @@ def confirm_intent(journal: Any, identity: Any) -> Any:
     write_journal(journal)
 
 
-def selected_import_intent(journal: Any, expected_intent_id: Any) -> Any:
+def selected_import_intent(journal: Journal, expected_intent_id: Any) -> Any:
     """Select a specific import under its owner lock before obtaining evidence."""
     if (not isinstance(expected_intent_id, str)
             or not re.fullmatch(r"[0-9a-f]{32}", expected_intent_id)):
@@ -147,7 +148,7 @@ def selected_import_intent(journal: Any, expected_intent_id: Any) -> Any:
     return pending
 
 
-def verify_import_intent(journal: Any, config: Any, existing_body: Any, expected_intent_id: Any) -> Any:
+def verify_import_intent(journal: Journal, config: Any, existing_body: Any, expected_intent_id: Any) -> Any:
     pending = selected_import_intent(journal, expected_intent_id)
     target = {"id": config["target_account"]}
     rows, _ = ghostfolio_module.existing_activity_context(existing_body, target)
@@ -285,7 +286,7 @@ def load_prospective_evidence(path: Any, expected_digest: Any) -> Any:
         raise RuntimeError("Malformed prospective evidence") from None
 
 
-def recover_confirmed_import(journal: Any, config: Any, existing_body: Any) -> Any:
+def recover_confirmed_import(journal: Journal, config: Any, existing_body: Any) -> Any:
     """Never infer non-delivery: clear only complete exact positive readback."""
     if type(config.get("dry_run", True)) is not bool:
         raise RuntimeError("Invalid DRY_RUN flag")

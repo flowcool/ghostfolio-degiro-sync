@@ -3,7 +3,7 @@
 import csv
 import io
 from collections import Counter
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -16,6 +16,7 @@ from ghostfolio_degiro_sync import diagnostics as diagnostics_module
 from ghostfolio_degiro_sync import ghostfolio as ghostfolio_module
 from ghostfolio_degiro_sync import identity as identity_module
 from ghostfolio_degiro_sync import journal as journal_module
+from ghostfolio_degiro_sync.models import AccountSelection, SelectionResult
 
 
 def synchronize_account(config: Any, snapshot: Any, target_account: Any, existing_body: Any, mapping: Any,
@@ -33,9 +34,11 @@ def synchronize_account(config: Any, snapshot: Any, target_account: Any, existin
             quote_currencies, import_activities, update_balance, now=now, journal=journal)
 
 
-def synchronize_locked(config: Any, snapshot: Any, target_account: Any, existing_body: Any, mapping: Any,
-                        quote_currencies: Any, import_activities: Any, update_balance: Any, now: Any=None, journal: Any=None) -> Any:
-    """Validate whole account before mutation; accepted evidence alone funds sells."""
+def select_account_activities(config: Any, snapshot: Any, target_account: Any, existing_body: Any, mapping: Any,
+                        quote_currencies: Any, *, now: datetime, journal: Any=None, prospective_evidence: Any=None) -> AccountSelection:
+    """Pure whole-account selection over supplied evidence and a fixed clock."""
+    if now.tzinfo is None:
+        raise RuntimeError("Selection requires an aware clock")
     dry_run = config.get("dry_run", True)
     if type(dry_run) is not bool:
         raise RuntimeError("Invalid DRY_RUN flag")
@@ -54,9 +57,10 @@ def synchronize_locked(config: Any, snapshot: Any, target_account: Any, existing
     context: Any = None
     if prospective:
         snapshot, existing, quantities, context = prospective_snapshot(
-            config, snapshot, target_account, existing_body, mapping, quote_currencies)
+            config, snapshot, target_account, existing_body, mapping, quote_currencies,
+            evidence=prospective_evidence, now=now)
     else:
-        existing, quantities = ghostfolio_module.existing_activity_context(existing_body, target_account)
+        existing, quantities = ghostfolio_module.index_existing_activities(existing_body, target_account, now=now)
     if rolling:
         snapshot = rolling_snapshot(snapshot, journal)
     balance = accounting_module.current_cash_balance(snapshot, target_account, source, now)
@@ -67,7 +71,7 @@ def synchronize_locked(config: Any, snapshot: Any, target_account: Any, existing
         activities += accounting_module.normalize_dividends(snapshot, target_account["id"], mapping, quote_currencies)
         activities += accounting_module.normalize_fees(snapshot, target_account["id"])
         activities += accounting_module.normalize_cash_yield(snapshot, target_account["id"])
-    if any(not core.activity_date_is_current(activity) for activity in activities):
+    if any(not ghostfolio_module.activity_date_is_current(activity, now) for activity in activities):
         raise RuntimeError("Future DEGIRO candidate blocks synchronization")
     if rolling and any(datetime.fromisoformat(a["date"]).microsecond % 1000 for a in activities):
         raise RuntimeError("Rolling date precision cannot be represented by Ghostfolio")
@@ -97,10 +101,31 @@ def synchronize_locked(config: Any, snapshot: Any, target_account: Any, existing
         raise RuntimeError("Unverified DEGIRO history completeness blocks live writes")
     if target_account["id"] in config.get("_uncertain_import_accounts", set()):
         raise RuntimeError("Uncertain prior import blocks account writes")
+    return AccountSelection(
+        selection=SelectionResult(proposals=tuple(pending), rejected=(), deferred=(),
+            holdings=tuple((account, symbol, value) for (account, symbol), value in sorted(quantities.items()))),
+        snapshot=snapshot, cash=balance, candidates=len(activities), exclusions=dict(exclusions),
+        prospective=prospective, rolling=rolling, context=context)
+
+
+def synchronize_locked(config: Any, snapshot: Any, target_account: Any, existing_body: Any, mapping: Any,
+                        quote_currencies: Any, import_activities: Any, update_balance: Any,
+                        now: datetime | None=None, journal: Any=None) -> Any:
+    """Dispatch selected proposals; record holdings only after accepted evidence."""
+    now = datetime.now(UTC) if now is None else now
+    evidence = (journal_module.load_prospective_evidence(config["cutover_manifest"], config["cutover_sha256"])
+        if config.get("sync_mode") == "prospective" else None)
+    plan = select_account_activities(config, snapshot, target_account, existing_body, mapping,
+        quote_currencies, now=now, journal=journal, prospective_evidence=evidence)
+    pending = [dict(row) for row in plan.selection.proposals]
+    quantities = {(account, symbol): value for account, symbol, value in plan.selection.holdings}
+    snapshot, balance, context = plan.snapshot, plan.cash, plan.context
+    prospective, rolling = plan.prospective, plan.rolling
+    dry_run, source = config.get("dry_run", True), config["source_account"]
     if dry_run:
         return {"proposed": pending, "accepted": [], "cash": balance, "dry_run": True,
                 "cash_before": float(accounting_module.financial_decimal(target_account["balance"])),
-                "candidates": len(activities), "exclusions": dict(exclusions),
+                "candidates": plan.candidates, "exclusions": dict(plan.exclusions),
                 "period": {"from_date": snapshot.get("from_date"), "to_date": snapshot.get("to_date"),
                            "timezone": "Europe/Zurich"},
                 "history_verified": snapshot.get("history_completeness_verified") is True,
@@ -126,11 +151,7 @@ def synchronize_locked(config: Any, snapshot: Any, target_account: Any, existing
         except Exception:
             core.mark_import_uncertain(config, batch)
             raise RuntimeError("Account import uncertain or incomplete; cash blocked") from None
-        for activity in created:
-            if activity["type"] in ("BUY", "SELL"):
-                key = (activity["accountId"], activity["symbol"])
-                quantities[key] = quantities.get(key, Decimal(0)) + accounting_module.financial_decimal(activity["quantity"]) * (
-                    1 if activity["type"] == "BUY" else -1)
+        quantities = ghostfolio_module.record_accepted_activities(created, quantities)
         accepted.extend(created)
     def guarded_balance(account: Any, amount: Any) -> Any:
         intent = journal_module.begin_intent(journal, "cash", {"account": account, "balance": amount})
@@ -192,7 +213,7 @@ def nonzero_holdings(quantities: Any) -> Any:
     return {key: value for key, value in quantities.items() if value != 0}
 
 
-def prospective_opening_context(evidence: Any, config: Any, mapping: Any, quote_currencies: Any) -> Any:
+def prospective_opening_context(evidence: Any, config: Any, mapping: Any, quote_currencies: Any, now: datetime | None=None) -> Any:
     """Verify unchanged opening inventory without manufacturing destination rows."""
     try:
         manifest, captures = evidence["manifest"], evidence["captures"]
@@ -215,7 +236,7 @@ def prospective_opening_context(evidence: Any, config: Any, mapping: Any, quote_
             raise RuntimeError("Unproved prospective opening capture interval")
         cash = accounting_module.current_cash_balance(opening, target, config["source_account"], now=fetched)
         accounting_module.financial_decimal(target["balance"])  # Existing cash may be stale; broker cash is authoritative.
-        rows, quantities = ghostfolio_module.existing_activity_context(destination["activities"], target)
+        rows, quantities = ghostfolio_module.index_existing_activities(destination["activities"], target, now=now)
         protected = {}
         for row in rows:
             if row["accountId"] != target["id"]:
@@ -381,11 +402,13 @@ def rolling_snapshot(snapshot: Any, journal: Any) -> Any:
         raise RuntimeError("Incomplete rolling account evidence") from None
 
 
-def prospective_snapshot(config: Any, snapshot: Any, target: Any, existing_body: Any, mapping: Any, quotes: Any) -> Any:
+def prospective_snapshot(config: Any, snapshot: Any, target: Any, existing_body: Any, mapping: Any, quotes: Any,
+                         *, evidence: Any=None, now: datetime | None=None) -> Any:
     """Reconcile a full interval from a fixed cutover; never relabel full history."""
     try:
-        evidence = journal_module.load_prospective_evidence(config["cutover_manifest"], config["cutover_sha256"])
-        context = prospective_opening_context(evidence, config, mapping, quotes)
+        if evidence is None:
+            raise RuntimeError("Prospective selection requires supplied evidence")
+        context = prospective_opening_context(evidence, config, mapping, quotes, now=now)
         cutover, opening = context["cutover"], context["opening"]
         if (identity_module.broker_identity(snapshot["source_account"]) != identity_module.broker_identity(config["source_account"])
                 or target["id"] != config["target_account"]):
@@ -405,7 +428,7 @@ def prospective_snapshot(config: Any, snapshot: Any, target: Any, existing_body:
             accounting_module.merge_history(unique, snapshot[collection], cash=collection == "cash_movements")
             snapshot[collection] = unique
         prospective_statement_matches(snapshot)
-        rows, destination_quantities = ghostfolio_module.existing_activity_context(existing_body, target)
+        rows, destination_quantities = ghostfolio_module.index_existing_activities(existing_body, target, now=now)
         protected = context["protected"]
         present = {}
         prospective_existing = []

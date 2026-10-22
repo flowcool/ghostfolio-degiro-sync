@@ -3,6 +3,8 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
+from pathlib import Path
+from typing import Any, TypedDict
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -25,3 +27,21 @@ class SelectionResult:
     rejected: tuple[str, ...]
     deferred: tuple[str, ...]
     holdings: tuple[tuple[str, str, Decimal], ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AccountSelection:
+    selection: SelectionResult
+    snapshot: dict[str, Any]
+    cash: float
+    candidates: int
+    exclusions: Mapping[str, int]
+    prospective: bool
+    rolling: bool
+    context: dict[str, Any] | None
+
+
+class Journal(TypedDict):
+    directory: Path
+    path: Path
+    document: dict[str, Any]

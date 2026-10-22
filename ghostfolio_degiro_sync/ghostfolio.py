@@ -6,7 +6,7 @@ import logging
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from urllib.parse import urlsplit
@@ -128,10 +128,11 @@ def ghost_transport(config: Any, target_account: Any) -> Iterator[Any]:
         session.close()
 
 
-def existing_activity_context(body: Any, target_account: Any) -> Any:
+def index_existing_activities(body: Any, target_account: Any, *, now: datetime | None=None) -> tuple[list[dict[str, Any]], dict[tuple[str, str], Decimal]]:
     """Complete unredacted list; never discard ownership or inactive target rows."""
     if not isinstance(body, dict) or not isinstance(body.get("activities"), list):
         raise RuntimeError("Invalid Ghostfolio activity list")
+    now = datetime.now(UTC) if now is None else now
     rows = body["activities"]
     if type(body.get("count")) is not int or body["count"] != len(rows):
         raise RuntimeError("Incomplete Ghostfolio activity list")
@@ -168,7 +169,7 @@ def existing_activity_context(body: Any, target_account: Any) -> Any:
                 profile["dataSource"] != "MANUAL" or row.get("currency") != "EUR"
                 or accounting_module.financial_decimal(row["quantity"]) != 1 or accounting_module.financial_decimal(row["fee"]) != 0):
             raise RuntimeError("Unverified target interest representation")
-        if not core.activity_is_active(row) or not core.activity_date_is_current(row):
+        if not core.activity_is_active(row) or not activity_date_is_current(row, now):
             raise RuntimeError("Inactive or future target activity blocks synchronization")
         if row.get("type") in ("BUY", "SELL"):
             if profile["dataSource"] != "YAHOO":
@@ -324,3 +325,28 @@ GHOST_AUTH_TIMEOUT = (10, 30)
 
 
 _HEADER_SAFE_TOKEN_RE = re.compile(r"[\x21-\x7e]+")
+
+
+def activity_date_is_current(activity: dict[str, Any], now: datetime) -> bool:
+    """Validate against the supplied instant, never a second wall-clock read."""
+    try:
+        instant = datetime.fromisoformat(activity["date"].replace("Z", "+00:00"))
+        return instant.tzinfo is not None and now.tzinfo is not None and instant <= now
+    except (KeyError, TypeError, AttributeError, ValueError):
+        return False
+
+
+def record_accepted_activities(accepted: list[dict[str, Any]],
+        holdings: dict[tuple[str, str], Decimal]) -> dict[tuple[str, str], Decimal]:
+    """Project only proven accepted rows; leave the proposal state untouched."""
+    result = dict(holdings)
+    for activity in accepted:
+        if activity["type"] in ("BUY", "SELL"):
+            key = (activity["accountId"], activity["symbol"])
+            result[key] = result.get(key, Decimal(0)) + accounting_module.financial_decimal(activity["quantity"]) * (
+                1 if activity["type"] == "BUY" else -1)
+    return result
+
+
+# Transitional import for existing callers; both names share the pure index.
+existing_activity_context = index_existing_activities
