@@ -33,6 +33,7 @@ import yaml
 
 if sys.argv[1:] != ["--notify-worker"]:
     import ghostfolio_core as core
+    from ghostfolio_degiro_sync import config as config_module
     from ghostfolio_degiro_sync import accounting as accounting_module
     from ghostfolio_degiro_sync import degiro as degiro_module
     from ghostfolio_degiro_sync import diagnostics as diagnostics_module
@@ -267,170 +268,28 @@ def log_simulation(result):
              exclusions.get("duplicate_candidate", 0))
 
 
-NOTIFY_WORKER_FLAG = "--notify-worker"
-NOTIFY_PAYLOAD_MAX = 32 * 1024
-APPRISE_URLS_MAX = 10
-APPRISE_URL_MAX_LEN = 2048
-APPRISE_TIMEOUT_DEFAULT = 10
-APPRISE_TIMEOUT_MAX = 30
-# The worker inherits only what Apprise needs to reach a destination: never the
-# DEGIRO or Ghostfolio credentials.
-NOTIFY_ENV_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR",
-                        "REQUESTS_CA_BUNDLE", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
-                        "http_proxy", "https_proxy", "no_proxy")
-# Worker exit code -> delivery status reported by send_notification.  Kept clear
-# of the interpreter's own codes (1 uncaught error, 2 cannot open the script).
-NOTIFY_EXIT_STATUS = {0: "sent", 10: "invalid_payload", 11: "unavailable", 12: "failed",
-                      13: "invalid_destination"}
+from ghostfolio_degiro_sync import notify as notify_module
+from ghostfolio_degiro_sync.notify import (
+    NOTIFY_WORKER_FLAG,
+    NOTIFY_PAYLOAD_MAX,
+    APPRISE_URLS_MAX,
+    APPRISE_URL_MAX_LEN,
+    APPRISE_TIMEOUT_DEFAULT,
+    APPRISE_TIMEOUT_MAX,
+    NOTIFY_ENV_ALLOWLIST,
+    NOTIFY_EXIT_STATUS,
+    load_notification_config,
+    notify_worker,
+    _notify_worker_argv,
+    _stop_worker,
+    send_notification,
+    NOTIFY_TITLE,
+    NOTIFY_REASONS,
+    finalize_failure,
+)
 
 
-def load_notification_config():
-    """Parse APPRISE_URLS and APPRISE_TIMEOUT; None means notifications are off.
-
-    APPRISE_URLS is a JSON list of Apprise URL strings (blank or [] = off);
-    APPRISE_TIMEOUT an integer number of seconds, 1..30 (default 10).  Never
-    raises: invalid settings only disable delivery, with a fixed warning since
-    the values carry destination credentials.
-    """
-    raw = os.environ.get("APPRISE_URLS", "")
-    if not raw.strip():
-        return None
-    try:
-        urls = json.loads(raw) if len(raw) <= NOTIFY_PAYLOAD_MAX else None
-    except ValueError:
-        urls = None
-    raw_timeout = os.environ.get("APPRISE_TIMEOUT", "").strip()
-    timeout = APPRISE_TIMEOUT_DEFAULT
-    if raw_timeout:
-        timeout = int(raw_timeout) if re.fullmatch(r"[0-9]{1,2}", raw_timeout) else 0
-    if (not isinstance(urls, list) or len(urls) > APPRISE_URLS_MAX
-            or not all(isinstance(u, str) and u.strip() and len(u) <= APPRISE_URL_MAX_LEN
-                       for u in urls)
-            or not 1 <= timeout <= APPRISE_TIMEOUT_MAX):
-        log.warning("APPRISE_URLS or APPRISE_TIMEOUT is invalid: failure notifications disabled")
-        return None
-    if not urls:
-        return None
-    return {"urls": urls, "timeout": timeout}
-
-
-def notify_worker():
-    """Worker process entry: deliver one notification read from stdin.
-
-    Never runs the sync.  Apprise is imported here only, so the sync never
-    loads it.  Exit codes: see NOTIFY_EXIT_STATUS.
-    """
-    logging.disable(logging.CRITICAL)
-    raw = sys.stdin.buffer.read(NOTIFY_PAYLOAD_MAX + 1)
-    try:
-        payload = json.loads(raw) if len(raw) <= NOTIFY_PAYLOAD_MAX else None
-    except ValueError:
-        payload = None
-    if (not isinstance(payload, dict)
-            or not isinstance(payload.get("urls"), list) or not payload["urls"]
-            or not all(isinstance(u, str) for u in payload["urls"])
-            or not isinstance(payload.get("title"), str)
-            or not isinstance(payload.get("body"), str)):
-        return 10
-    try:
-        import apprise
-    except ImportError:
-        return 11
-    notifier = apprise.Apprise()
-    # One entry may hold several space- or comma-separated URLs: bound the
-    # destinations Apprise actually expanded, not the list entries
-    if (not all(notifier.add(url) for url in payload["urls"])
-            or len(notifier) > APPRISE_URLS_MAX):
-        return 13
-    try:
-        sent = notifier.notify(title=payload["title"], body=payload["body"])
-    except Exception:
-        return 12
-    return 0 if sent else 12
-
-
-def _notify_worker_argv():
-    # -I: ignore PYTHON* variables, user site-packages and the current directory
-    return [sys.executable, "-I", os.path.abspath(__file__), NOTIFY_WORKER_FLAG]
-
-
-def _stop_worker(proc):
-    """Kill the worker (and anything it started) if still running, then reap it."""
-    if proc.poll() is None:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except OSError:
-            proc.kill()
-    proc.wait()
-
-
-def send_notification(settings, title, body):
-    """Deliver one notification through an isolated Apprise worker.
-
-    Apprise plugins can block past any library timeout and can print their
-    destination URL.  So the URLs travel on stdin, the worker gets an
-    allowlisted environment and no output channel, and one deadline covers its
-    whole life (import, setup, send, exit); on expiry it is killed and reaped.
-    No retry: a timed-out send may still have been delivered.  Returns a fixed
-    status string; SystemExit/KeyboardInterrupt propagate after the kill.
-    """
-    payload = json.dumps({"urls": settings["urls"], "title": title, "body": body}).encode()
-    if len(payload) > NOTIFY_PAYLOAD_MAX:
-        return "payload_too_large"
-    # The worker re-runs this file: impossible when the script came from stdin
-    if not os.path.isfile(os.path.abspath(__file__)):
-        return "spawn_failed"
-    env = {k: os.environ[k] for k in NOTIFY_ENV_ALLOWLIST if k in os.environ}
-    try:
-        proc = subprocess.Popen(_notify_worker_argv(), stdin=subprocess.PIPE,
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                env=env, close_fds=True, start_new_session=True)
-    except (OSError, ValueError):
-        return "spawn_failed"
-    try:
-        proc.communicate(payload, timeout=settings["timeout"])
-    except subprocess.TimeoutExpired:
-        return "timeout"
-    except Exception:
-        return "failed"
-    finally:
-        _stop_worker(proc)
-    return NOTIFY_EXIT_STATUS.get(proc.returncode, "failed")
-
-
-NOTIFY_TITLE = "ghostfolio-degiro-sync: run failed"
-NOTIFY_REASONS = {
-    "Rolling coverage gap requires explicit catch-up start": "coverage_gap: rerun with an explicit earlier --from-date",
-    "Complete exact positive readback required for recovery": "import_uncertain: inspect persisted import intent",
-    "Unresolved durable write intent blocks account writes": "write_uncertain: inspect persisted write intent",
-    "Existing DEGIRO identity changed financial evidence": "activity_conflict: compare source and destination",
-    "Rolling broker holdings do not reconcile": "holdings_mismatch: compare source and destination",
-    "Ambiguous nearby manual trade quantity": "manual_trade_ambiguous: compare quantities",
-}
-
-
-def finalize_failure(error):
-    """One private alert for live failures or scheduled simulations."""
-    live = os.environ.get("DRY_RUN", "1").strip().lower() in ("0", "false", "no", "off")
-    if not live and not os.environ.get("CRON", "").strip():
-        return
-    try:
-        settings = load_notification_config()
-        if settings is None:
-            return
-        reason = NOTIFY_REASONS.get(str(error), "sync_failed: inspect container log")
-        body = ("Run failed at " + datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC.")
-                + "\n" + reason + "\nDetails are in the container log.")
-        status = send_notification(settings, NOTIFY_TITLE, body)
-        if status == "sent":
-            log.info("Failure notification sent")
-        else:
-            log.warning("Failure notification not delivered: %s", status)
-    except Exception:
-        log.warning("Failure notification could not be sent: internal error")
-
-
-def main(argv=None):
+def _main(argv=None, failures=None):
     """Explicit operator modes; normal sync defaults to DRY_RUN and fails closed."""
     if not argv:
         log.error("DEGIRO sync gates incomplete; use explicit --read-only characterization; stage=config reason=mode")
@@ -480,7 +339,7 @@ def main(argv=None):
                                   "config", "arguments")
             plan_output = None
             if args.plan_output:
-                if os.environ.get("DRY_RUN", "1").strip().lower() not in ("1", "true", "yes", "on"):
+                if os.environ.get("DRY_RUN", "").strip().lower() not in ("", "1", "true", "yes", "on"):
                     raise diagnostics_module.tag_failure(RuntimeError("Proposal output requires DRY_RUN"),
                                       "config", "arguments")
                 with diagnostics_module.diagnostic_boundary("output", "destination"):
@@ -519,8 +378,9 @@ def main(argv=None):
                 log.warning("History completeness is unverified; live writes remain blocked")
                 error = diagnostics_module.tag_failure(RuntimeError("History completeness is unverified"),
                                     "sync", "reconciliation")
+                if failures is not None:
+                    failures.append(error)
                 diagnostics_module.log_failure("History verification failed", error)
-                finalize_failure(error)
                 return 1
             return 0
         if args.plan_output or not args.output or not args.from_date or not args.to_date:
@@ -539,8 +399,9 @@ def main(argv=None):
         with diagnostics_module.diagnostic_boundary("output", "write"):
             save_private_snapshot(data, output)
     except Exception as error:
+        if failures is not None:
+            failures.append(error)
         if args.sync:
-            finalize_failure(error)
             message = str(error)
             diagnostics_module.log_failure(message if message in accounting_module.API_FORMAT_ERRORS.values() or message in PROSPECTIVE_FAILURES
                         or message in ROLLING_FAILURES else
@@ -561,8 +422,29 @@ def main(argv=None):
     return 0
 
 
+def main(argv=None):
+    """Resolve simulation policy before access and finalize one outcome."""
+    if not os.environ.get("DRY_RUN", "").strip():
+        log.warning("DRY_RUN not set: simulation, nothing written")
+    try:
+        unused_dry_run, forced = config_module.simulation_policy(os.environ)
+    except RuntimeError as error:
+        diagnostics_module.log_failure("Invalid synchronization configuration", error)
+        notify_module.finalize_failure(error)
+        return 1
+    if not config_module.valid_timezone(os.environ.get("TZ")):
+        log.warning("Missing or invalid TZ: simulation forced, nothing written")
+    failures = []
+    status = _main(argv, failures)
+    if status:
+        notify_module.finalize_failure(failures[0] if failures else RuntimeError("sync_failed"))
+    elif forced and argv and "--sync" in argv:
+        notify_module.finalize_forced_preview()
+    return status
+
+
 if __name__ == "__main__":
     if sys.argv[1:] == [NOTIFY_WORKER_FLAG]:
-        raise SystemExit(notify_worker())
+        raise SystemExit(notify_module.notify_worker())
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     raise SystemExit(main(sys.argv[1:]))

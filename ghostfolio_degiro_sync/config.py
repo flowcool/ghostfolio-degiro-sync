@@ -7,6 +7,7 @@ from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
@@ -150,6 +151,7 @@ def verified_mapping_document(document: Any) -> Any:
 
 def load_sync_config() -> Any:
     """Operator configuration only; credentials are read verbatim from environment."""
+    dry_run, unused_forced = simulation_policy(os.environ)
     sync_mode = os.environ.get("SYNC_MODE")
     if sync_mode is None or not sync_mode.strip():
         raise diagnostics_module.tag_failure(RuntimeError("Set SYNC_MODE explicitly: rolling, prospective or full_history"),
@@ -161,9 +163,8 @@ def load_sync_config() -> Any:
     target = os.environ.get("GHOST_ACCOUNT_ID")
     with diagnostics_module.diagnostic_boundary("config", "account"):
         source = identity_module.broker_identity(os.environ.get("DEGIRO_ACCOUNT_ID"))
-    mode = os.environ.get("DRY_RUN", "1").strip().lower()
     if (not isinstance(target, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", target)
-            or mode not in ("1", "true", "yes", "on", "0", "false", "no", "off")):
+):
         raise diagnostics_module.tag_failure(RuntimeError("Invalid Ghostfolio sync environment"), "config", "account")
     try:
         document = yaml.safe_load(Path(os.environ.get("MAPPING_FILE", "mapping.yaml")).read_text())
@@ -173,7 +174,27 @@ def load_sync_config() -> Any:
         raise diagnostics_module.tag_failure(RuntimeError("Invalid explicitly verified Yahoo mapping file"),
                           "config", "mapping") from None
     return runtime_config(parse_settings({**credentials, "source_account": source,
-            "target_account": target, "dry_run": mode in ("1", "true", "yes", "on"),
+            "target_account": target, "dry_run": dry_run,
             "state_dir": os.environ.get("STATE_DIR"), "sync_mode": sync_mode,
             "cutover_manifest": os.environ.get("CUTOVER_MANIFEST"),
             "cutover_sha256": os.environ.get("CUTOVER_SHA256")})), mapping, quotes
+
+
+def valid_timezone(value: object) -> bool:
+    if not isinstance(value, str) or not value or value != value.strip():
+        return False
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError):
+        return False
+    return True
+
+
+def simulation_policy(values: Mapping[str, str]) -> tuple[bool, bool]:
+    """Return effective simulation and explicit-live forced-preview status."""
+    mode = values.get("DRY_RUN", "").strip().lower()
+    if mode not in ("", "1", "true", "yes", "on", "0", "false", "no", "off"):
+        raise diagnostics_module.tag_failure(RuntimeError("Invalid DRY_RUN"), "config", "account")
+    requested_live = mode in ("0", "false", "no", "off")
+    forced = requested_live and not valid_timezone(values.get("TZ"))
+    return not requested_live or forced, forced

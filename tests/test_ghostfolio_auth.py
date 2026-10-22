@@ -10,6 +10,7 @@ import requests
 import yaml
 
 import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import notify as notify_module
 from ghostfolio_degiro_sync import config as config_module
 from ghostfolio_degiro_sync import degiro as degiro_module
 from ghostfolio_degiro_sync import ghostfolio as ghostfolio_module
@@ -292,7 +293,7 @@ def test_auth_failure_notification_and_cli_do_not_disclose_secrets(monkeypatch, 
     monkeypatch.setattr(requests.Session, 'send', lambda *a, **kw: response({'secret': ACCESS + BEARER}, 403))
     monkeypatch.setattr(degiro_module, 'read_degiro', lambda *a, **kw: pytest.fail('Broker contacted'))
     notifications = []
-    monkeypatch.setattr(adapter, 'send_notification', lambda settings, title, body: notifications.append(body) or 'sent')
+    monkeypatch.setattr(notify_module, 'send_notification', lambda settings, title, body: notifications.append(body) or 'sent')
     assert adapter.main(['--sync']) == 1
     assert len(notifications) == 1
     assert ACCESS not in caplog.text + notifications[0] and BEARER not in caplog.text + notifications[0]

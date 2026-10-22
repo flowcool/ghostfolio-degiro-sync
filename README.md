@@ -120,6 +120,8 @@ Start with `DRY_RUN=1` and an empty `CRON`. In Portainer, use absolute host path
 | `APPRISE_TIMEOUT` | Alert deadline | `10` seconds | Keep the default; allowed range 1–30 |
 | `DEGIRO_IMAGE` | Published image tag or digest | `ghcr.io/flowcool/ghostfolio-degiro-sync:v0.4.1` | Follow a reviewed release, pin an immutable digest for controlled upgrades, or explicitly choose `:latest` |
 
+**BREAKING:** a valid IANA `TZ` is required for financial writes. Missing or invalid `TZ` forces simulation and emits a fixed warning. Absent or blank `DRY_RUN` also simulates and emits `DRY_RUN not set: simulation, nothing written`. Values are trimmed and case-insensitive: `1`/`true`/`yes`/`on` simulate; `0`/`false`/`no`/`off` request writes. Any other value stops before broker or Ghostfolio access.
+
 Compose fixes `SYNC_MODE=rolling`, `LOOKBACK_DAYS=90`, `TZ=Europe/Zurich`, `/config/mapping.yaml` and `/state`. Both cron and the broker date boundary use Europe/Zurich. The container runs as UID/GID 10001 with a read-only root filesystem and no Linux capabilities.
 
 Synchronization requires an explicit `SYNC_MODE`; absent or blank values fail at configuration before credential loading. The supported Compose definition already supplies `rolling`. Advanced contributor invocations must explicitly select `rolling`, `prospective` or `full_history`; selecting a mode does not bypass its evidence requirements.
@@ -212,7 +214,7 @@ Images published from `v0.4.0` include a local healthcheck. The probe verifies t
 
 After reviewing a successful simulation and verifying your Ghostfolio backup, set `DRY_RUN=0` and recreate the service to enable imports and cash updates. Existing activities are not automatically corrected or deleted. Preserve state: removing the journal cannot resolve an uncertain import, and image rollback cannot undo financial changes.
 
-Apprise sends a sanitized alert for failed scheduled runs, including dry runs, and failed live synchronization. Successful runs and manual simulations are silent. No separate Apprise server is required; configure destinations through `APPRISE_URLS`. See [notifications](docs/notifications.md) and [recovery](docs/recovery.md).
+Apprise sends one sanitized alert for each failed invocation, including manual and scheduled simulations. Successful simulations are silent. An explicit live request forced into simulation by missing or invalid `TZ` sends one summary. A failure takes precedence over that summary. No separate Apprise server is required; configure destinations through `APPRISE_URLS`. See [notifications](docs/notifications.md) and [recovery](docs/recovery.md).
 
 ## Troubleshooting
 

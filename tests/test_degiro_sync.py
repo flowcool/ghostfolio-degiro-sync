@@ -378,6 +378,7 @@ def test_transport_redirect_and_error_logs_do_not_expose_secrets(monkeypatch, ca
 
 
 def configure(monkeypatch, tmp_path, dry_run=None):
+    monkeypatch.setenv('TZ', 'Europe/Zurich')
     path = tmp_path / 'mapping.yaml'
     path.write_text(yaml.safe_dump({'US0378331005': {'symbol': 'TEST', 'currency': 'USD'}}))
     for name, value in {'GHOST_HOST': 'http://localhost:3333', 'GHOST_TOKEN': 'TOKEN-SENTINEL',
