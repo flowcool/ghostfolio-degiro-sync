@@ -9,6 +9,10 @@ the core-integrity check (`scripts/check_core.py`, also weekly) that
 CodeQL analyzes Python independently. Dependency Review rejects newly introduced
 moderate or worse dependency vulnerabilities, including development scope.
 Required checks must pass before merging.
+The image installs the connector package and root core module. Its single
+cash-rules resource ships inside the package. The transitional script remains
+available during extraction. Runtime smoke verifies installed module execution
+and the isolated worker from `/`, without network or credentials.
 Both native container matrix checks are required on `main`.
 `scripts/configure_github.py` adapts the sibling's check names to this native
 matrix and preserves these requirements when configuring the repository.

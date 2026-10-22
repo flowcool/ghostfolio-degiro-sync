@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# Dependency pins live in requirements.txt; APP_VERSION supplies the runtime version.
+name = "ghostfolio-degiro-sync"
+version = "0.0.0"
+requires-python = ">=3.14"
+
+[tool.setuptools]
+packages = ["ghostfolio_degiro_sync"]
+py-modules = ["ghostfolio_core", "degiro_to_ghostfolio"]
+
+[tool.setuptools.package-data]
+ghostfolio_degiro_sync = ["cash-rules.yaml"]

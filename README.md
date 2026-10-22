@@ -23,6 +23,11 @@ Imports supported executions, paid dividends, characterized fees and cash yield 
 
 ## Prerequisites
 
+The Python 3.14 image installs `ghostfolio_degiro_sync`, the pinned core and
+its cash-rules resource. `python -m ghostfolio_degiro_sync` accepts the same
+options as the transitional script command. Both work from any directory in
+the image. Compose continues to select the command and schedule automatically.
+
 - Docker Compose v2, an existing Ghostfolio instance and a Docker network reaching it.
 - A DEGIRO account using **TOTP** and a Bitwarden or Vaultwarden Login item containing its username, password and TOTP seed. App confirmation (`in_app_required`) and captcha (`captcha_required`) are unsupported.
 - Vault API credentials, exactly one Ghostfolio credential, and explicitly selected source and destination accounts.

@@ -2,7 +2,7 @@
 
 This documents the supported adapter contract, backed by pinned connector source
 and synthetic regressions. The private API can change without notice.
-`cash-rules.yaml` owns classifications; unexpected or ambiguous data blocks writes.
+`ghostfolio_degiro_sync/cash-rules.yaml` owns classifications; unexpected or ambiguous data blocks writes.
 
 ## Authentication and raw data
 
@@ -55,7 +55,7 @@ Observed types: `CASH_TRANSACTION`, `FLATEX_CASH_SWEEP`, `TRANSACTION`,
 `COMPENSATION_BOOKING`. `CASH_TRANSACTION` contains paid dividends, withholding,
 brokerage, FX, funding, annual exchange fees and interest. Its type alone is
 insufficient. The observed exact French labels and restricted patterns live in
-`cash-rules.yaml`; language changes need deliberate rules review.
+`ghostfolio_degiro_sync/cash-rules.yaml`; language changes need deliberate rules review.
 
 Ten paid dividend rows and ten withholding rows form unique one-to-one groups on
 product ID, currency and exact `date` and `valueDate`. Dividend changes are positive

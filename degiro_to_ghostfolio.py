@@ -8,6 +8,7 @@ import csv
 import io
 import fcntl
 import hashlib
+from importlib.resources import files
 from ipaddress import ip_address
 from contextlib import contextmanager, redirect_stderr
 from datetime import date, datetime, timedelta, timezone
@@ -336,7 +337,7 @@ def reconcile_trade_holdings(activities, existing, quantities):
 
 def load_cash_rules(path=None):
     """Read the reviewed local taxonomy; malformed rules never broaden matching."""
-    path = Path(path) if path is not None else Path(__file__).with_name("cash-rules.yaml")
+    path = Path(path) if path is not None else files("ghostfolio_degiro_sync").joinpath("cash-rules.yaml")
     try:
         document = yaml.safe_load(path.read_text())
         rules = document["rules"]
