@@ -293,3 +293,118 @@ def test_apply_refuses_concurrent_destination_lock(tmp_path, snapshot, monkeypat
             migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
     assert puts == []
 
+
+def test_inspect_and_rollback_preserve_new_v1_imports(tmp_path, snapshot, monkeypatch):
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch)
+    migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    extra = {**deepcopy(rows[1]), 'id': 'new-import', 'comment': 'DEGIRO#v1#123:TRADE:999'}
+    rows.append(extra)
+    capture = tmp_path / 'after.json'
+    capture.write_bytes(migration.numeric_json({'count': len(rows), 'activities': rows}))
+    before = {p: p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
+    states = migration.inspect(args[5], args[1], args[2], capture, migration.digest(capture.read_bytes()))
+    assert set(states.values()) == {'converted'}
+    assert all(p.read_bytes() == data for p, data in before.items())
+    permit = rollback_permit(args)
+    def request(method, host, token, row_id=None, payload=None):
+        if method == 'GET':
+            return {'count': len(rows), 'activities': deepcopy(rows)}
+        record = migration.keyed_yaml(args[5].read_bytes())
+        assert record['rows'][row_id]['rollback_status'] == 'pending'
+        next(row for row in rows if row['id'] == row_id)['comment'] = payload['comment']
+    monkeypatch.setattr(migration, 'maintenance_request', request)
+    migration.rollback(args[5], args[1], args[2], permit, migration.digest(permit.read_bytes()),
+        'https://portfolio.example', 'synthetic-token')
+    assert rows[-1] == extra
+    assert all(row['comment'].startswith('DEGIRO#123:') for row in rows[1:-1])
+    assert migration.keyed_yaml(args[5].read_bytes())['status'] == 'rolled_back'
+
+
+def rollback_permit(args):
+    permit = migration.keyed_yaml(args[3].read_bytes())
+    permit['authorization'] = 'rollback-reviewed-comments'
+    permit['journal_sha256'] = migration.digest(args[5].read_bytes())
+    permit['settlements'] = {}
+    path = args[3].with_name('rollback.yaml')
+    path.write_bytes(migration.yaml_bytes(permit))
+    return path
+
+
+@pytest.mark.parametrize('outcome', ['old-readback', 'late-completion', 'manual-drift'])
+def test_rollback_uncertain_requests_need_independent_settlement(tmp_path, snapshot, monkeypatch, outcome):
+    def timeout(rows, row_id, payload):
+        if outcome != 'old-readback':
+            next(row for row in rows if row['id'] == row_id)['comment'] = payload['comment']
+        raise RuntimeError('Lost response')
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch, timeout)
+    with pytest.raises(RuntimeError):
+        migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    pending_id = puts[0]
+    if outcome == 'manual-drift':
+        next(row for row in rows if row['id'] == pending_id)['fee'] = 99
+    permit = rollback_permit(args)
+    def request(method, host, token, row_id=None, payload=None):
+        if method == 'GET':
+            return {'count': len(rows), 'activities': deepcopy(rows)}
+        pytest.fail('Unsettled reversal dispatched')
+    monkeypatch.setattr(migration, 'maintenance_request', request)
+    with pytest.raises(RuntimeError, match='settlement'):
+        migration.rollback(args[5], args[1], args[2], permit, migration.digest(permit.read_bytes()),
+            'https://portfolio.example', 'synthetic-token')
+    assert len(puts) == 1
+
+
+@pytest.mark.parametrize('completed', [False, True])
+def test_rollback_independent_settlement_controls_reversal(tmp_path, snapshot, monkeypatch, completed):
+    def timeout(rows, row_id, payload):
+        if completed:
+            next(row for row in rows if row['id'] == row_id)['comment'] = payload['comment']
+        raise RuntimeError('Lost response')
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch, timeout)
+    with pytest.raises(RuntimeError):
+        migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    row_id = puts[0]
+    permit = rollback_permit(args)
+    approval = migration.keyed_yaml(permit.read_bytes())
+    approval['write_count'] = int(completed)
+    approval['settlements'][row_id] = {'direction': 'apply', 'outcome': 'completed' if completed else 'cancelled',
+        'independent': True, 'evidence_ref': 'synthetic-independent-request-disposition'}
+    permit.write_bytes(migration.yaml_bytes(approval))
+    reversed_ids = []
+    def request(method, host, token, target=None, payload=None):
+        if method == 'GET':
+            return {'count': len(rows), 'activities': deepcopy(rows)}
+        reversed_ids.append(target)
+        assert migration.keyed_yaml(args[5].read_bytes())['rows'][target]['rollback_status'] == 'pending'
+        next(row for row in rows if row['id'] == target)['comment'] = payload['comment']
+    monkeypatch.setattr(migration, 'maintenance_request', request)
+    migration.rollback(args[5], args[1], args[2], permit, migration.digest(permit.read_bytes()),
+        'https://portfolio.example', 'synthetic-token')
+    assert reversed_ids == ([row_id] if completed else [])
+
+
+def test_rollback_interruption_remains_uncertain_and_manual_drift_blocks(tmp_path, snapshot, monkeypatch):
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch)
+    migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    permit = rollback_permit(args)
+    def request(method, host, token, row_id=None, payload=None):
+        if method == 'GET':
+            return {'count': len(rows), 'activities': deepcopy(rows)}
+        next(row for row in rows if row['id'] == row_id)['comment'] = payload['comment']
+        raise RuntimeError('Lost reversal response')
+    monkeypatch.setattr(migration, 'maintenance_request', request)
+    with pytest.raises(RuntimeError):
+        migration.rollback(args[5], args[1], args[2], permit, migration.digest(permit.read_bytes()),
+            'https://portfolio.example', 'synthetic-token')
+    record, reviewed = migration.migration_journal(args[5], args[1], args[2])
+    states = migration.inspect_rows(record, {'count': len(rows), 'activities': rows}, reviewed['snapshot'])
+    assert 'uncertain:original' in states.values()
+    permit = rollback_permit(args)
+    with pytest.raises(RuntimeError, match='settlement'):
+        migration.rollback(args[5], args[1], args[2], permit, migration.digest(permit.read_bytes()),
+            'https://portfolio.example', 'synthetic-token')
+    # A changed context is visible even after a settled successful conversion.
+    changed = next(row for row in rows if row['comment'] and row['comment'].startswith('DEGIRO#v1#'))
+    changed['fee'] = 999
+    states = migration.inspect_rows(record, {'count': len(rows), 'activities': rows}, reviewed['snapshot'])
+    assert states[changed['id']] == 'changed'

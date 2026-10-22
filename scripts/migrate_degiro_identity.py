@@ -20,12 +20,30 @@ def main():
         apply.add_argument('--' + name, type=Path, required=True)
     for name in ('manifest-sha256', 'approval-sha256', 'host'):
         apply.add_argument('--' + name, required=True)
+    inspect = commands.add_parser('inspect')
+    rollback = commands.add_parser('rollback')
+    for command in (inspect, rollback):
+        for name in ('journal', 'manifest'):
+            command.add_argument('--' + name, type=Path, required=True)
+        command.add_argument('--manifest-sha256', required=True)
+    inspect.add_argument('--snapshot', type=Path, required=True)
+    inspect.add_argument('--snapshot-sha256', required=True)
+    rollback.add_argument('--approval', type=Path, required=True)
+    rollback.add_argument('--approval-sha256', required=True)
+    rollback.add_argument('--host', required=True)
     args = parser.parse_args()
     previous = logging.root.manager.disable
     logging.disable(logging.CRITICAL)
     try:
         if args.command == 'preview':
             print(maintenance.preview(args.inputs, args.output))
+        elif args.command == 'inspect':
+            print(maintenance.yaml_bytes(maintenance.inspect(args.journal, args.manifest,
+                args.manifest_sha256, args.snapshot, args.snapshot_sha256)).decode(), end='')
+        elif args.command == 'rollback':
+            maintenance.rollback(args.journal, args.manifest, args.manifest_sha256,
+                args.approval, args.approval_sha256, args.host, None)
+            print('Journal-owned comments restored; new imports retained')
         else:
             maintenance.apply(args.inputs, args.manifest, args.manifest_sha256,
                 args.approval, args.approval_sha256, args.journal, args.host, None)

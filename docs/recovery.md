@@ -256,3 +256,42 @@ in the journal. No automatic retry is permitted, even if readback still shows
 the original comment: a delayed request may complete later. Independent
 completion/cancellation evidence is required for recovery. Retain captures and
 journal; leave writers stopped at this boundary.
+
+## Inspect and reverse a stopped conversion
+
+Inspection reads saved complete snapshots and the private journal only:
+
+```sh
+.venv/bin/python scripts/migrate_degiro_identity.py inspect --journal /private/operation.yaml --manifest /private/review/manifest.yaml --manifest-sha256 "$MANIFEST_SHA256" --snapshot /private/current.json --snapshot-sha256 "$SNAPSHOT_SHA256"
+```
+
+Each journal-owned ID is `original`, `converted`, `changed` or `absent`.
+An unresolved apply or reversal request adds `uncertain:`. Observation does not
+settle a request. Inspection writes nothing and reads no credentials.
+
+Reversal uses the same bounded transport, private locks, pending intent and
+complete readback. It restores comments only. Its separate permit uses the
+same schema and exact target/class prerequisites as apply, with authorization
+`rollback-reviewed-comments`, current `journal_sha256`, exact reversal
+`write_count` and the operation's approved recovery scope:
+
+```sh
+.venv/bin/python scripts/migrate_degiro_identity.py rollback --journal /private/operation.yaml --manifest /private/review/manifest.yaml --manifest-sha256 "$MANIFEST_SHA256" --approval /private/rollback.yaml --approval-sha256 "$ROLLBACK_APPROVAL_SHA256" --host "$GHOST_HOST"
+```
+
+For every pending request, `settlements` must key the activity ID with
+`direction` (`apply` or `rollback`), `outcome` (`completed` or `cancelled`),
+`independent: true` and an independent `evidence_ref`. The saved disposition must
+agree with exact fresh readback. An unchanged original comment alone is not
+cancellation proof. A lost reversal response remains pending; do not repeat it.
+Manual edits or any changed financial/profile context block reversal.
+New v1 imports are outside the journal and remain untouched. Protected rows are
+checked before and after every reversal.
+
+Before resuming imports, retain the exact mixed-history DRY_RUN preview and
+prove unchanged full source selection and zero duplicate creations under the
+operation. Reversal does not start writers. Safe halt uses the exact qualified
+candidate digest with `DRY_RUN=1` and the existing Compose target. If it cannot
+start, keep writers stopped until compatible repair. Neither comment reversal
+nor a source Git revert qualifies an older binary when retained v1 rows exist.
+A database restore has a separate operation boundary and is never automatic.

@@ -553,3 +553,151 @@ def maintenance_token(host, token):
     require(credentials['ghost_host'] == host, 'Credential origin differs from approved target')
     ghostfolio.authenticate_ghostfolio(credentials)
     return credentials['ghost_token']
+
+
+def migration_journal(journal, manifest, manifest_sha256):
+    from ghostfolio_degiro_sync.journal import private_state_file
+    reviewed = keyed_yaml(read_evidence(Path(manifest), manifest_sha256))
+    descriptor = os.open(safe_path(Path(journal)), os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, 'rb') as stream:
+        private_state_file(stream.fileno())
+        data = stream.read(1_000_001)
+    require(len(data) <= 1_000_000, 'Journal exceeds state budget')
+    record = keyed_yaml(data)
+    require(record.get('schema') == 'degiro-migration-journal-v1'
+            and record.get('manifest_sha256') == manifest_sha256
+            and record.get('scope') == reviewed['scope'], 'Journal binding changed')
+    require(isinstance(record.get('rows'), dict) and record['rows'].keys() == reviewed['replacements'].keys(),
+            'Journal ownership changed')
+    for row_id, entry in record['rows'].items():
+        replacement = reviewed['replacements'][row_id]
+        require(all(entry.get(key) == value for key, value in replacement.items()), 'Journal replacement changed')
+        before = entry['preimage']
+        require(before.get('id') == row_id and before.get('comment') == entry['old_comment']
+                and digest(canonical_json(before)) == entry['before_fingerprint']
+                and digest(canonical_json({**before, 'comment': entry['new_comment']})) == entry['after_fingerprint'],
+                'Journal preimage changed')
+        require(entry.get('status') in ('prepared', 'pending', 'verified')
+                and entry.get('rollback_status') in (None, 'pending', 'verified'), 'Invalid journal transition')
+    return record, reviewed
+
+
+def inspect_rows(record, snapshot, metadata):
+    require(isinstance(snapshot, dict) and isinstance(snapshot.get('activities'), list), 'Invalid snapshot')
+    validate_snapshot(snapshot, {**metadata, 'count': len(snapshot['activities'])})
+    actual = {row['id']: row for row in snapshot['activities']}
+    result = {}
+    for row_id, entry in record['rows'].items():
+        row = actual.get(row_id)
+        fingerprint = digest(canonical_json(row))
+        state = ('converted' if fingerprint == entry['after_fingerprint'] else
+                 'original' if fingerprint == entry['before_fingerprint'] else
+                 'absent' if row is None else 'changed')
+        pending = entry.get('rollback_status') == 'pending' or (
+            entry.get('rollback_status') is None and entry['status'] == 'pending')
+        result[row_id] = 'uncertain:' + state if pending else state
+    return result
+
+
+def inspect(journal, manifest, manifest_sha256, snapshot, snapshot_sha256):
+    record, reviewed = migration_journal(journal, manifest, manifest_sha256)
+    return inspect_rows(record, exact_json(read_evidence(Path(snapshot), snapshot_sha256)), reviewed['snapshot'])
+
+
+def hydrate_row(row):
+    return {**row, **{key: Decimal(str(row[key])) for key in ('quantity', 'unitPrice', 'fee')}}
+
+
+def rollback(journal, manifest, manifest_sha256, approval, approval_sha256, host, token):
+    from contextlib import ExitStack
+    import time
+    from ghostfolio_degiro_sync.journal import account_journal
+    path = safe_path(Path(journal))
+    permit_bytes = read_evidence(Path(approval), approval_sha256)
+    reviewed_bytes = read_evidence(Path(manifest), manifest_sha256)
+    descriptor = journal_lock(path, {safe_path(Path(approval)): permit_bytes, safe_path(Path(manifest)): reviewed_bytes})
+    try:
+        journal_bytes = path.read_bytes()
+        record, reviewed = migration_journal(path, manifest, manifest_sha256)
+        permit = keyed_yaml(permit_bytes)
+        require(permit.get('journal_sha256') == digest(journal_bytes)
+                and permit.get('host') == record['host'] == host
+                and permit.get('state_dir') == record['state_dir'], 'Rollback binding changed')
+        # Validate authority before authentication or fresh reads. The selected
+        # count is checked again after independent settlement and exact readback.
+        qualified_approval({**permit, 'write_count': len(record['rows'])}, reviewed,
+            manifest_sha256, host, [hydrate_row(entry['preimage']) for entry in record['rows'].values()], 'rollback')
+        with ExitStack() as stack:
+            for source, target in sorted(record['scope'].items()):
+                state = stack.enter_context(account_journal({'state_dir': permit['state_dir'],
+                    'ghost_host': host, 'source_account': source, 'target_account': target['id']}))
+                require(state['document']['pending'] is None, 'Unsettled normal synchronization intent')
+            token = maintenance_token(host, token)
+            def fresh():
+                result = maintenance_request('GET', host, token)
+                inspect_rows(record, result, reviewed['snapshot'])
+                require(read_evidence(Path(approval), approval_sha256) == permit_bytes
+                        and read_evidence(Path(manifest), manifest_sha256) == reviewed_bytes, 'Rollback evidence changed')
+                require(implementation_hashes() == reviewed['implementation'], 'Implementation changed')
+                return result
+            snapshot = fresh()
+            states = inspect_rows(record, snapshot, reviewed['snapshot'])
+            selected, resolved = [], []
+            settlements = permit.get('settlements', {})
+            require(isinstance(settlements, dict), 'Invalid request settlements')
+            for row_id, entry in record['rows'].items():
+                state = states[row_id]
+                reverse = entry.get('rollback_status')
+                pending = reverse == 'pending' or reverse is None and entry['status'] == 'pending'
+                if pending:
+                    proof = settlements.get(row_id, {})
+                    require(isinstance(proof, dict) and proof.get('direction') == ('rollback' if reverse else 'apply')
+                            and proof.get('outcome') in ('completed', 'cancelled')
+                            and proof.get('independent') is True and text(proof.get('evidence_ref')),
+                            'Pending request lacks independent settlement proof')
+                    state = state.removeprefix('uncertain:')
+                    expected_state = ('original' if reverse else 'converted') if proof['outcome'] == 'completed' else (
+                        'converted' if reverse else 'original')
+                    require(state == expected_state, 'Request settlement contradicts readback')
+                    resolved.append((entry, reverse, proof))
+                elif reverse == 'verified' or entry['status'] == 'prepared':
+                    require(state == 'original', 'Unchanged original context required')
+                else:
+                    require(state == 'converted', 'Unchanged converted context required')
+                if state == 'converted':
+                    selected.append(row_id)
+            batch, pause = qualified_approval(permit, reviewed, manifest_sha256, host,
+                [hydrate_row(record['rows'][row_id]['preimage']) for row_id in selected], 'rollback')
+            expected = {row['id']: row for row in snapshot['activities']}
+            def check():
+                actual = {row['id']: row for row in fresh()['activities']}
+                require(actual.keys() == expected.keys() and all(canonical_json(actual[key]) == canonical_json(value)
+                    for key, value in expected.items()), 'Rollback protected context changed')
+            check()
+            for entry, reverse, proof in resolved:
+                entry['settlement'] = proof
+                if reverse:
+                    if proof['outcome'] == 'completed':
+                        entry['rollback_status'] = 'verified'
+                    else:
+                        del entry['rollback_status']
+                else:
+                    entry['status'] = 'verified' if proof['outcome'] == 'completed' else 'prepared'
+            for index, row_id in enumerate(selected):
+                if index and index % batch == 0:
+                    time.sleep(pause)
+                check()
+                entry = record['rows'][row_id]
+                payload = comment_payload(expected[row_id], entry['old_comment'])
+                entry.update(rollback_status='pending', rollback_request_body_sha256=digest(numeric_json(payload)))
+                record.update(status='rollback_in_progress', rollback_approval_sha256=approval_sha256)
+                persist(path, record)
+                maintenance_request('PUT', host, token, row_id, payload)
+                expected[row_id] = {**expected[row_id], 'comment': entry['old_comment']}
+                check()
+                entry['rollback_status'] = 'verified'
+                persist(path, record)
+            record['status'] = 'rolled_back'
+            persist(path, record)
+    finally:
+        os.close(descriptor)
