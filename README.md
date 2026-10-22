@@ -260,3 +260,22 @@ quantity `1` does not prove a security quantity. The report adds no reads or
 writes and does not change import selection, exit status or notifications. Private
 captures may retain original financial JSON for this comparison; protect them as
 financial data. They are not source lifetime-coverage proof.
+
+
+Simulation prints a plain DEGIRO reconciliation report, including runs without
+dividends. Each finding names its source identity, exact compared destination ID,
+expected and observed values, coverage and one Action line. Unavailable evidence
+is explicit. Display uses currency minor units; comparison keeps the original
+decimals and zero quantity tolerance. An inspection action does not authorize an
+update. Weak evidence never recommends a row to keep. This report can contain
+private account and activity identities; do not post raw logs publicly.
+
+Validate a retained simulation log for lab acceptance with:
+
+```sh
+.venv/bin/python scripts/check_degiro_report.py private-simulation.log
+```
+
+The checker rejects an Action that names a different activity from its comparison.
+It validates report structure and consistency, not financial truth or live target
+qualification. Keep the exact candidate, inputs and clock with the lab evidence.

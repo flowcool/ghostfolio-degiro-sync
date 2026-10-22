@@ -255,3 +255,58 @@ def snapshot_reconciliation(snapshot: dict[str, Any], existing: dict[str, Any],
         expected += accounting.normalize_fees(snapshot, target)
         expected += accounting.normalize_cash_yield(snapshot, target)
     return reconcile_activities(expected, observed, snapshot.get('from_date'), snapshot.get('to_date'), exact=exact)
+
+
+def display_value(value: object) -> str:
+    """One plain line without Python representations or injected control lines."""
+    if value is None:
+        return 'unavailable'
+    return ''.join(character if character.isprintable() else ' ' for character in str(value))
+
+
+def display_number(value: object, currency: object=None) -> str:
+    from ghostfolio_degiro_sync import accounting
+    try:
+        number = accounting.financial_decimal(value)
+        if currency is not None:
+            if currency not in accounting.CURRENCY_QUANTA:
+                return 'unavailable'
+            number = number.quantize(accounting.CURRENCY_QUANTA[currency])
+        return format(number, 'f')
+    except (RuntimeError, ArithmeticError):
+        return 'unavailable'
+
+
+def render_reconciliation(findings: list[dict[str, Any]]) -> str:
+    """Plain DEGIRO report; inspection actions never authorize a mutation."""
+    lines = ['DEGIRO reconciliation: nothing written']
+    if not findings:
+        return '\n'.join([*lines, 'No source or destination events available.', 'End DEGIRO reconciliation'])
+    for index, block in enumerate(findings, 1):
+        lines.append(f"Finding {index}: {display_value(block['status'])}")
+        lines.append('Source identity: ' + display_value(block['identity']))
+        lines.append('Compared activity: ' + display_value(block['target']))
+        for label, name in (('Expected', 'expected'), ('Observed', 'observed')):
+            row = block[name] or {}
+            currency = row.get('currency')
+            lines.append(f"{label}: type {display_value(row.get('type'))}; date {display_value(row.get('date'))}; "
+                f"symbol {display_value(row.get('symbol'))}; currency {display_value(currency)}; "
+                f"quantity {display_number(row.get('quantity'))}; unitPrice {display_number(row.get('unitPrice'), currency or '?')} "
+                f"{display_value(currency)}; fee {display_number(row.get('fee'), currency or '?')} {display_value(currency)}")
+        lines.append('Security quantity: ' + display_number(block['security_quantity']))
+        lines.append('Checks: ' + ('; '.join(f'{name} {value}' for name, value in block['checks'].items()) or 'unavailable'))
+        lines.append('Coverage: source events ' + str(block['source_count']) + '; destination activities '
+            + str(len(block['observed_ids'])) + '; exact original decimals ' + ('yes' if block['exact'] else 'no'))
+        lines.append('Reason: ' + display_value(block['reason']))
+        target = block['target']
+        if block['status'] == 'coherent' and target is not None:
+            action = f'No action needed for activity {display_value(target)}.'
+        elif block['status'] == 'to-check' and target is not None:
+            action = f'Inspect activity {display_value(target)}.'
+        elif block['status'] == 'outside-window':
+            action = 'Retain outside-window history; no activity selected.'
+        else:
+            action = 'Inspect evidence; no activity selected.'
+        lines.append('Action: ' + action)
+    lines.append('End DEGIRO reconciliation')
+    return '\n'.join(lines)

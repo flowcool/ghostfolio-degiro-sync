@@ -262,6 +262,8 @@ def log_simulation(result):
                  result["cash_before"], result["cash"])
     elif result.get("cash") is not None:
         log.info("[DRY RUN] Proposed Ghostfolio cash: EUR %.2f (no update sent)", result["cash"])
+    for line in diagnostics_module.render_reconciliation(result.get("reconciliation", [])).splitlines():
+        log.info("%s", line)
     exclusions = result.get("exclusions", {})
     log.info("[DRY RUN] Candidate exclusions: already_imported=%d manual_match=%d duplicate_candidate=%d",
              exclusions.get("already_imported", 0), exclusions.get("manual_match", 0),

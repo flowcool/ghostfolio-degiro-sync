@@ -88,3 +88,33 @@ def test_report_is_observational_for_selection(snapshot):
     after = sync.select_account_activities(config, snapshot, TARGET, body, MAPPING, QUOTES, now=NOW)
     assert before == after
     assert report and all(not block['exact'] for block in report)
+
+
+def test_plain_report_has_exact_target_and_one_action():
+    expected = candidate()
+    observed = {**expected, 'id': 'compared-row', 'unitPrice': 3}
+    findings = diagnostics.reconcile_activities([expected], [observed], '2026-01-01', '2026-01-31')
+    text = diagnostics.render_reconciliation(findings)
+    assert 'DEGIRO reconciliation: nothing written' in text
+    assert 'Compared activity: compared-row' in text
+    assert 'Action: Inspect activity compared-row.' in text
+    assert text.count('Action:') == 1
+    assert 'unitPrice 2.00 USD' in text and 'unitPrice 3.00 USD' in text
+    assert 'Security quantity: 1' in text
+    from scripts.check_degiro_report import check_report
+    assert check_report(text) == []
+    assert check_report(text.replace('Action: Inspect activity compared-row.', 'Action: Inspect activity wrong-row.'))
+
+
+def test_no_dividend_report_and_unavailable_units_are_explicit():
+    from scripts.check_degiro_report import check_report
+    empty = diagnostics.render_reconciliation([])
+    assert 'No source or destination events available.' in empty
+    assert check_report(empty) == []
+    row = candidate('DIVIDEND', 'DIVIDEND')
+    row['currency'] = 'GBp'
+    text = diagnostics.render_reconciliation(diagnostics.reconcile_activities([row], [], None, None, exact=False))
+    assert 'Security quantity: unavailable' in text
+    assert 'unitPrice unavailable' in text
+    assert 'Action: Inspect evidence; no activity selected.' in text
+    assert check_report(text) == []
