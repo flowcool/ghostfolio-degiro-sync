@@ -4,6 +4,12 @@ status: accepted
 
 # Preserve the immutable broker-independent core projection
 
+The connector package uses strict typing and frozen dataclass or TypedDict data
+records. Business operations remain module-level functions. Validate external
+input before constructing records and exclude secrets from representations.
+These conventions apply to authored adapter code. They never authorize edits
+or annotation changes to generated projection bytes.
+
 The DEGIRO adapter reuses a reviewed broker-independent implementation through
 an immutable byte projection, with provenance and propagation owned by
 [CORE_PROVENANCE.md](../../CORE_PROVENANCE.md). Keep broker policy, identities,

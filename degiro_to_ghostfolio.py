@@ -9,7 +9,6 @@ import io
 import fcntl
 import hashlib
 from importlib.resources import files
-from ipaddress import ip_address
 from contextlib import contextmanager, redirect_stderr
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -34,6 +33,7 @@ import yaml
 
 if sys.argv[1:] != ["--notify-worker"]:
     import ghostfolio_core as core
+    from ghostfolio_degiro_sync.config import parse_settings, runtime_config, validate_ghost_host
 
 
 log = logging.getLogger(__name__)
@@ -682,45 +682,6 @@ def apply_cash_balance(snapshot, target_account, source_account, update_balance,
         if not callable(update_balance) or update_balance(target_account["id"], balance) is not True:
             raise RuntimeError("Ghostfolio cash update did not confirm success")
     return balance
-
-
-def validate_ghost_host(host):
-    """Configured HTTPS origin or private HTTP; never disclose a rejected URL."""
-    try:
-        if not isinstance(host, str) or not host or host != host.strip():
-            raise ValueError
-        parts = urlsplit(host)
-        name = parts.hostname
-        if (parts.scheme not in ("http", "https") or not name
-                or parts.username is not None or parts.password is not None
-                or parts.path or parts.query or parts.fragment
-                or host != f"{parts.scheme}://{parts.netloc}"
-                or parts.netloc != parts.netloc.lower()
-                or any(ord(char) <= 32 or ord(char) >= 127 for char in host)
-                or "\\" in host or "%" in host or "?" in host or "#" in host
-                or (parts.port is not None and not 1 <= parts.port <= 65535)
-                or parts.netloc.endswith(":")):
-            raise ValueError
-        try:
-            address = ip_address(name)
-        except ValueError:
-            address = None
-            if len(name) > 253 or not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", name):
-                raise ValueError
-            if any(not label or len(label) > 63 or label.startswith("-")
-                   or label.endswith("-") for label in name.split(".")):
-                raise ValueError
-        if address is not None:
-            if address.is_unspecified or address.is_multicast or address.is_link_local:
-                raise ValueError
-            private = address.is_loopback or (address.is_private and not address.is_reserved)
-        else:
-            private = "." not in name and bool(re.search(r"[a-z]", name))
-        if parts.scheme == "http" and not private:
-            raise ValueError
-        return host
-    except (ValueError, TypeError):
-        raise RuntimeError("Ghostfolio target URL is outside the approved origin policy") from None
 
 
 # Adapted from ghostfolio-ibkr-sync 54958ab1035eb97a1f67f9072b79699813ec3800;
@@ -1867,11 +1828,11 @@ def load_sync_config():
     except (OSError, ValueError, TypeError, KeyError, yaml.YAMLError):
         raise tag_failure(RuntimeError("Invalid explicitly verified Yahoo mapping file"),
                           "config", "mapping") from None
-    return {**credentials, "source_account": source,
+    return runtime_config(parse_settings({**credentials, "source_account": source,
             "target_account": target, "dry_run": mode in ("1", "true", "yes", "on"),
             "state_dir": os.environ.get("STATE_DIR"), "sync_mode": sync_mode,
             "cutover_manifest": os.environ.get("CUTOVER_MANIFEST"),
-            "cutover_sha256": os.environ.get("CUTOVER_SHA256")}, mapping, quotes
+            "cutover_sha256": os.environ.get("CUTOVER_SHA256")})), mapping, quotes
 
 
 def run_sync(from_date, to_date, window_days=90):

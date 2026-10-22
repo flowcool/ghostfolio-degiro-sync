@@ -7,6 +7,14 @@ configuration; the topical contracts below own financial and recovery behavior.
 
 ## Module responsibilities
 
+The installed `ghostfolio_degiro_sync` package starts the staged extraction.
+`config.py` validates the configuration boundary and constructs frozen settings
+from `models.py`. The command uses an explicit dictionary conversion while its
+execution functions remain in the legacy module. New package modules use strict
+typing. Frozen data records carry settings and results; business operations
+remain module-level functions. Credentials stay out of record representations.
+The generated core remains outside this convention change.
+
 | Module | Current location | Responsibility and seam |
 | --- | --- | --- |
 | Command orchestration | `degiro_to_ghostfolio.py`: `main`, `run_sync`, `run_sync_locked` | Validate configuration and dates, select a mode, hold the applicable account lock, authenticate and acquire evidence before synchronization. |

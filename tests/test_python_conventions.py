@@ -6,21 +6,30 @@ from pathlib import Path
 import pytest
 
 
-def convention_violations(source):
+def convention_violations(source, typed=False):
     tree = ast.parse(source, type_comments=True)
     violations = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
-            violations.append((node.lineno, 'class definition'))
-        elif isinstance(node, ast.AnnAssign):
+            frozen = any(isinstance(decorator, ast.Call)
+                and isinstance(decorator.func, ast.Name) and decorator.func.id == 'dataclass'
+                and any(keyword.arg == 'frozen' and isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value is True for keyword in decorator.keywords)
+                for decorator in node.decorator_list)
+            record = any(isinstance(base, ast.Name) and base.id == 'TypedDict' for base in node.bases)
+            if not typed or not (frozen or record):
+                violations.append((node.lineno, 'class definition'))
+            elif any(isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) for child in node.body):
+                violations.append((node.lineno, 'business method in data record'))
+        elif not typed and isinstance(node, ast.AnnAssign):
             violations.append((node.lineno, 'variable annotation'))
-        elif isinstance(node, ast.arg) and node.annotation is not None:
+        elif not typed and isinstance(node, ast.arg) and node.annotation is not None:
             violations.append((node.lineno, 'argument annotation'))
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.returns is not None:
+        elif not typed and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.returns is not None:
             violations.append((node.lineno, 'return annotation'))
         if getattr(node, 'type_comment', None) is not None or isinstance(node, ast.TypeIgnore):
             violations.append((node.lineno, 'type comment'))
-        if getattr(node, 'type_params', ()) or type(node).__name__ == 'TypeAlias':
+        if not typed and (getattr(node, 'type_params', ()) or type(node).__name__ == 'TypeAlias'):
             violations.append((node.lineno, 'type parameter or alias'))
     return sorted(set(violations))
 
@@ -29,12 +38,14 @@ def test_all_project_python_obeys_functional_unannotated_style():
     root = Path(__file__).resolve().parents[1]
     # Include the frozen core and fixture projection read-only, never rewrite them.
     files = sorted(set(root.glob('*.py')) | set((root / 'scripts').rglob('*.py'))
-        | set((root / 'tests').rglob('*.py')))
+        | set((root / 'tests').rglob('*.py'))
+        | set((root / 'ghostfolio_degiro_sync').rglob('*.py')))
     names = {str(path.relative_to(root)) for path in files}
     assert {'degiro_to_ghostfolio.py', 'ghostfolio_core.py', 'scripts/merge_pr.py',
         'tests/test_python_conventions.py'} <= names
     failures = [(str(path.relative_to(root)), line, reason) for path in files
-        for line, reason in convention_violations(path.read_text(encoding="utf-8"))]
+        for line, reason in convention_violations(path.read_text(encoding="utf-8"),
+            typed='ghostfolio_degiro_sync' in path.parts)]
     assert not failures, failures
 
 

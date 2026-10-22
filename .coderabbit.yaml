@@ -34,6 +34,12 @@ reviews:
     languagetool:
       enabled: false
   path_instructions:
+    - path: "ghostfolio_degiro_sync/**/*.py"
+      instructions: >-
+        Strictly typed functional adapter. Business operations are module-level
+        functions. Classes are frozen dataclasses or TypedDict data records only.
+        Validate external inputs before typing; exclude secrets from repr.
+        Preserve exact decimals, ownership, pending-write and transport guards.
     - path: "ghostfolio_core.py"
       instructions: >-
         Immutable byte projection of the pinned IBKR core: any hand edit is a
@@ -65,7 +71,7 @@ reviews:
     - path: "renovate.json"
       instructions: >-
         Dependabot supplies alerts; Renovate alone supplies dependency PRs.
-        Preserve exact Python pins, coupled dependency updates, Python 3.12,
+        Preserve exact Python pins, coupled dependency updates, Python 3.14,
         image digests, action SHAs, manual merge, security urgency and explicit
         compatibility review. Never automate core regeneration or binary
         version changes without both architecture checksums.

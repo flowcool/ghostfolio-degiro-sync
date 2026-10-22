@@ -10,9 +10,16 @@ responsibilities, financial execution or recovery.
 
 ## Offline checks
 
+Package modules use strict typing and frozen dataclass or TypedDict records.
+Validate external input before constructing records. Keep business operations
+as module-level functions and exclude credentials from record representations.
+Legacy modules keep their style until extraction. Generated core bytes remain
+read-only and outside formatting and type-checking changes.
+
 ```sh
 python3.14 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
+bash scripts/check.sh
 .venv/bin/python -m pytest -q
 .venv/bin/python scripts/check_core.py --source ../ghostfolio-ibkr-sync --check-main
 git diff --check
@@ -37,7 +44,7 @@ Use arm64 on an arm64 host. The smoke has no broker or vault access. Account cre
 
 ## Upstream maintenance and review
 
-Read docs/upstreams.md. Scheduled watches create public compatibility notices without changing pins or deployments. Review upstream source, update synthetic contract fixtures and record evidence before adopting changes. Development tools follow functional Python with no custom classes/type annotations.
+Read docs/upstreams.md. Scheduled watches create public compatibility notices without changing pins or deployments. Review upstream source, update synthetic contract fixtures and record evidence before adopting changes. Contributor scripts outside the package keep functional Python without custom classes or type annotations.
 
 Use the pull-request template. CI and completed CodeRabbit coverage must apply to the final head before the guarded scripts/merge_pr.py command. Keep personal paths, hostnames, operator names, captures and private issue references out of public artifacts.
 
