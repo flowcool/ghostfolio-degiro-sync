@@ -6,8 +6,8 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import degiro_to_ghostfolio as adapter
-
+from ghostfolio_degiro_sync import config as config_module
+from ghostfolio_degiro_sync import journal as journal_module
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
@@ -16,10 +16,10 @@ def main(argv=None):
         help='Confirm only the matched private import intent; no financial mutation')
     args = parser.parse_args(argv)
     try:
-        config = {**adapter.load_ghost_credentials(),
+        config = {**config_module.load_ghost_credentials(),
             'target_account': os.environ.get('GHOST_ACCOUNT_ID'),
             'source_account': os.environ.get('DEGIRO_ACCOUNT_ID'), 'state_dir': os.environ.get('STATE_DIR')}
-        result = adapter.readback_import_intent(config, expected_intent_id=args.expected_intent_id,
+        result = journal_module.readback_import_intent(config, expected_intent_id=args.expected_intent_id,
             confirm=args.confirm_local_state)
         action = 'confirmed locally' if result['confirmed'] else 'verified; intent retained'
         print('Positive import recovery: ' + str(result['matched']) + ' exact activities ' + action

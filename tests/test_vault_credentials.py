@@ -9,6 +9,9 @@ import pytest
 
 import degiro_to_ghostfolio as adapter
 
+from ghostfolio_degiro_sync import degiro as degiro_module
+from ghostfolio_degiro_sync import vault as vault_module
+
 ITEM = "12345678-1234-4234-8234-123456789abc"
 SEED = "JBSWY3DPEHPK3PXP"
 SECRETS = {"BW_ITEM_ID": ITEM, "BW_CLIENTID": "user.CLIENT-SENTINEL",
@@ -54,9 +57,9 @@ def mock_cli(monkeypatch, item, fail=None):
 
 def test_fresh_item_each_execution_and_temporary_state_removed(vault, monkeypatch, caplog):
     calls, directories = mock_cli(monkeypatch, vault)
-    first = adapter.broker_credentials()
+    first = vault_module.broker_credentials()
     vault["login"]["password"] = "ROTATED-PASSWORD-SENTINEL"
-    second = adapter.broker_credentials()
+    second = vault_module.broker_credentials()
     assert first.password == "BROKER-PASSWORD-SENTINEL" and second.password == "ROTATED-PASSWORD-SENTINEL"
     assert first.totp_secret_key == SEED
     assert [call[0] for call in calls] == ["config", "login", "unlock", "sync", "get", "logout"] * 2
@@ -69,7 +72,7 @@ def test_fresh_item_each_execution_and_temporary_state_removed(vault, monkeypatc
 def test_failure_is_private_and_never_constructs_broker_credentials(vault, monkeypatch, stage):
     calls, directories = mock_cli(monkeypatch, vault, stage)
     with pytest.raises(RuntimeError, match="Bitwarden credential retrieval failed") as error:
-        adapter.broker_credentials()
+        vault_module.broker_credentials()
     rendered = "".join(traceback.format_exception(error.type, error.value, error.tb))
     assert "MASTER-SENTINEL" not in rendered and "BROKER-PASSWORD-SENTINEL" not in rendered
     assert calls[-1][0] == (stage if stage in ("config", "login") else "logout")
@@ -89,7 +92,7 @@ def test_invalid_configuration_refuses_cli_before_network(vault, monkeypatch, ch
                            else "https://user:MASTER-SENTINEL@vault.example")
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("CLI attempted"))
     with pytest.raises(RuntimeError):
-        adapter.broker_credentials()
+        vault_module.broker_credentials()
 
 
 @pytest.mark.parametrize("change", ["wrong-id", "deleted", "type", "bool-type", "no-login", "no-seed", "temporary-otp", "hotp", "sha256", "digits", "interval"])
@@ -112,13 +115,13 @@ def test_item_and_totp_contract_reject_ambiguous_data(vault, monkeypatch, change
             "interval": f"otpauth://totp/broker?secret={SEED}&period=60"}[change]
     mock_cli(monkeypatch, vault)
     with pytest.raises(RuntimeError, match="Bitwarden credential retrieval failed"):
-        adapter.broker_credentials()
+        vault_module.broker_credentials()
 
 
 def test_otpauth_uri_supported(vault, monkeypatch):
     vault["login"]["totp"] = f"otpauth://totp/broker?secret={SEED}"
     mock_cli(monkeypatch, vault)
-    assert adapter.broker_credentials().totp_secret_key == SEED
+    assert vault_module.broker_credentials().totp_secret_key == SEED
 
 
 @pytest.mark.parametrize("failure", ["exit", "json", "oversize", "session", "deadline"])
@@ -142,7 +145,7 @@ def test_invalid_cli_results_fail_closed_and_remove_state(vault, monkeypatch, fa
         ticks = iter([0, 121])
         monkeypatch.setattr(adapter.time, "monotonic", lambda: next(ticks, 121))
     with pytest.raises(RuntimeError, match="Bitwarden credential retrieval failed"):
-        adapter.broker_credentials()
+        vault_module.broker_credentials()
     assert not any(p.exists() for p in directories)
 
 
@@ -159,7 +162,7 @@ def test_vault_to_real_broker_actions_and_otp_timing(vault, monkeypatch, caplog)
         return OTP
     monkeypatch.setattr(pyotp.TOTP, "now", now)
     broker_calls = broker_http(monkeypatch)
-    snapshot = adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2))
+    snapshot = degiro_module.read_degiro(date(2026, 1, 1), date(2026, 1, 2))
     assert snapshot["source_account"] == "123"
     assert len([r for r, _ in broker_calls if "/login/" in r.url]) == 1
     assert_no_secrets(caplog.text)
@@ -172,7 +175,7 @@ def test_vault_failure_prevents_any_broker_request(vault, monkeypatch, stage):
     mock_cli(monkeypatch, vault, stage)
     monkeypatch.setattr(requests.Session, "send", lambda *a, **k: pytest.fail("Broker contacted"))
     with pytest.raises(RuntimeError, match="Bitwarden credential retrieval failed"):
-        adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2))
+        degiro_module.read_degiro(date(2026, 1, 1), date(2026, 1, 2))
 
 
 @pytest.mark.parametrize("server,arguments", [
@@ -186,5 +189,5 @@ def test_vault_failure_prevents_any_broker_request(vault, monkeypatch, stage):
 def test_cloud_regions_and_self_hosted_use_correct_cli_endpoints(vault, monkeypatch, server, arguments):
     monkeypatch.setenv("BW_SERVER", server)
     calls, _ = mock_cli(monkeypatch, vault)
-    assert adapter.broker_credentials().username == vault["login"]["username"]
+    assert vault_module.broker_credentials().username == vault["login"]["username"]
     assert calls[0] == arguments

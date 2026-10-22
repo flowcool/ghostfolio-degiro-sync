@@ -6,6 +6,8 @@ import pytest
 import yaml
 
 import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import accounting as accounting_module
+
 import ghostfolio_core as core
 
 
@@ -21,7 +23,7 @@ def snapshot():
 
 
 def normalize(snapshot):
-    return adapter.normalize_fees(snapshot, 'target-a')
+    return accounting_module.normalize_fees(snapshot, 'target-a')
 
 
 def test_only_connection_charge_is_a_standalone_fee(snapshot):
@@ -34,7 +36,7 @@ def test_only_connection_charge_is_a_standalone_fee(snapshot):
 def test_commission_and_autofx_are_already_execution_costs(snapshot):
     snapshot['cash_movements'].pop()
     assert normalize(snapshot) == []
-    trade = adapter.normalize_trades(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'USD'})[0]
+    trade = accounting_module.normalize_trades(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'USD'})[0]
     assert trade['fee'] == pytest.approx(.165)
 
 
@@ -121,7 +123,7 @@ def test_cash_only_fx_does_not_become_a_fee(snapshot):
 def test_source_identity_and_target_are_scoped(snapshot):
     first = normalize(snapshot)[0]
     snapshot['source_account'] = '456'
-    second = adapter.normalize_fees(snapshot, 'target-b')[0]
+    second = accounting_module.normalize_fees(snapshot, 'target-b')[0]
     assert second['comment'] == 'DEGIRO#456:FEE:104'
     assert first['symbol'] != second['symbol']
     assert first['accountId'] != second['accountId']
@@ -130,7 +132,7 @@ def test_source_identity_and_target_are_scoped(snapshot):
 @pytest.mark.parametrize('target', [None, '', ' '])
 def test_missing_target_blocks(snapshot, target):
     with pytest.raises(RuntimeError, match='target account'):
-        adapter.normalize_fees(snapshot, target)
+        accounting_module.normalize_fees(snapshot, target)
 
 
 def accepted_row(activity):

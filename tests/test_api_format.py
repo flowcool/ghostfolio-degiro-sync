@@ -7,6 +7,10 @@ import pytest
 import yaml
 
 import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import accounting as accounting_module
+from ghostfolio_degiro_sync import degiro as degiro_module
+from ghostfolio_degiro_sync import sync as sync_module
+
 from test_degiro_read import broker_http, credentials, response, assert_no_secrets
 
 
@@ -21,7 +25,7 @@ def snapshot():
 def test_supported_contract_does_not_depend_on_calendar_age(snapshot, year):
     snapshot['transactions'][0]['date'] = year + '-01-02T10:00:00+01:00'
     before = deepcopy(snapshot)
-    adapter.check_api_import_format(snapshot)
+    accounting_module.check_api_import_format(snapshot)
     assert snapshot == before
 
 
@@ -45,9 +49,9 @@ def test_incompatible_formats_block_before_dispatch(snapshot, case, reason, dry_
         snapshot[case] = ['CREDENTIAL_SENTINEL']
     before = deepcopy(snapshot)
     with pytest.raises(RuntimeError) as caught:
-        adapter.synchronize_locked({'dry_run': dry_run}, snapshot, {}, {}, {}, {},
+        sync_module.synchronize_locked({'dry_run': dry_run}, snapshot, {}, {}, {}, {},
             lambda *a: pytest.fail('Import dispatched'), lambda *a: pytest.fail('Cash dispatched'))
-    assert str(caught.value) == adapter.API_FORMAT_ERRORS[reason]
+    assert str(caught.value) == accounting_module.API_FORMAT_ERRORS[reason]
     assert 'CREDENTIAL_SENTINEL' not in str(caught.value)
     assert snapshot == before
 
@@ -59,8 +63,8 @@ def test_incompatible_formats_block_before_dispatch(snapshot, case, reason, dry_
 def test_incompatible_fields_are_not_defaulted_or_echoed(snapshot, field, value):
     snapshot['transactions'][0][field] = value
     with pytest.raises(RuntimeError) as caught:
-        adapter.check_api_import_format(snapshot)
-    assert str(caught.value) == adapter.API_FORMAT_ERRORS['financial_schema']
+        accounting_module.check_api_import_format(snapshot)
+    assert str(caught.value) == accounting_module.API_FORMAT_ERRORS['financial_schema']
     assert 'CREDENTIAL_SENTINEL' not in str(caught.value)
     assert snapshot['transactions'][0][field] is value
 
@@ -69,8 +73,8 @@ def test_incompatible_fields_are_not_defaulted_or_echoed(snapshot, field, value)
 def test_zero_rate_is_incompatible_not_invented_legacy_version(snapshot, field):
     snapshot['transactions'][0][field] = 0
     with pytest.raises(RuntimeError) as caught:
-        adapter.check_api_import_format(snapshot)
-    assert str(caught.value) == adapter.API_FORMAT_ERRORS['fx_schema']
+        accounting_module.check_api_import_format(snapshot)
+    assert str(caught.value) == accounting_module.API_FORMAT_ERRORS['fx_schema']
     assert snapshot['transactions'][0][field] == 0
 
 
@@ -78,24 +82,24 @@ def test_zero_rate_is_incompatible_not_invented_legacy_version(snapshot, field):
                                  {'transactions': [None], 'cash_movements': []}])
 def test_unknown_history_is_not_called_legacy(bad):
     with pytest.raises(RuntimeError) as caught:
-        adapter.check_api_import_format(bad)
-    assert str(caught.value) == adapter.API_FORMAT_ERRORS['unknown']
+        accounting_module.check_api_import_format(bad)
+    assert str(caught.value) == accounting_module.API_FORMAT_ERRORS['unknown']
 
 
 @pytest.mark.parametrize('body', [{}, {'data': {'unexpected': []}}, {'data': {'cashMovements': None}},
                                    {'data': {'cashMovements': ['CREDENTIAL_SENTINEL']}}])
 def test_unknown_cash_envelope_is_not_invented_as_empty_or_legacy(body):
     with pytest.raises(RuntimeError) as caught:
-        adapter.raw_rows(body, 'cashMovements')
-    assert str(caught.value) == adapter.API_FORMAT_ERRORS['unknown']
+        degiro_module.raw_rows(body, 'cashMovements')
+    assert str(caught.value) == accounting_module.API_FORMAT_ERRORS['unknown']
 
 
 def test_legacy_reader_error_survives_sanitization_and_logs_out(credentials, monkeypatch, caplog):
     calls = broker_http(monkeypatch, '/accountoverview', response({'data': {'cashMovements': [
         {'id': 0, 'type': 'CASH_FUND_NAV_CHANGE', 'description': 'CREDENTIAL_SENTINEL'}]}}))
     with pytest.raises(RuntimeError) as caught:
-        adapter.read_degiro(date(2019, 1, 1), date(2019, 1, 2))
-    assert str(caught.value) == adapter.API_FORMAT_ERRORS['legacy_cash']
+        degiro_module.read_degiro(date(2019, 1, 1), date(2019, 1, 2))
+    assert str(caught.value) == accounting_module.API_FORMAT_ERRORS['legacy_cash']
     assert '/logout;' in calls[-1][0].url
     assert_no_secrets(caplog.text + str(caught.value))
     assert 'CREDENTIAL_SENTINEL' not in caplog.text + str(caught.value)
@@ -108,7 +112,7 @@ def test_readonly_cli_reports_legacy_format_without_saving_bad_snapshot(
     output = tmp_path / 'snapshot.json'
     assert adapter.main(['--read-only', '--from-date', '2019-01-01',
                          '--to-date', '2019-01-02', '--output', str(output)]) == 1
-    assert adapter.API_FORMAT_ERRORS['legacy_cash'] in caplog.text
+    assert accounting_module.API_FORMAT_ERRORS['legacy_cash'] in caplog.text
     assert 'CREDENTIAL_SENTINEL' not in caplog.text
     assert_no_secrets(caplog.text)
     assert not output.exists()
@@ -128,21 +132,21 @@ def test_readonly_cli_rejects_execution_format_before_saving(
     output = tmp_path / 'snapshot.json'
     assert adapter.main(['--read-only', '--from-date', '2026-01-01',
                          '--to-date', '2026-01-02', '--output', str(output)]) == 1
-    assert adapter.API_FORMAT_ERRORS[reason] in caplog.text
+    assert accounting_module.API_FORMAT_ERRORS[reason] in caplog.text
     assert 'CREDENTIAL_SENTINEL' not in caplog.text
     assert_no_secrets(caplog.text)
     assert not output.exists()
     assert '/logout;' in calls[-1][0].url
 
 
-@pytest.mark.parametrize('reason', list(adapter.API_FORMAT_ERRORS.values()) + ['CREDENTIAL_SENTINEL'])
+@pytest.mark.parametrize('reason', list(accounting_module.API_FORMAT_ERRORS.values()) + ['CREDENTIAL_SENTINEL'])
 def test_sync_cli_exposes_only_fixed_format_diagnostics(monkeypatch, caplog, reason):
     def failed(*args):
         raise RuntimeError(reason)
-    monkeypatch.setattr(adapter, 'run_sync', failed)
+    monkeypatch.setattr(sync_module, 'run_sync', failed)
     assert adapter.main(['--sync']) == 1
     assert 'CREDENTIAL_SENTINEL' not in caplog.text
-    if reason in adapter.API_FORMAT_ERRORS.values():
+    if reason in accounting_module.API_FORMAT_ERRORS.values():
         assert reason in caplog.text
     else:
         assert 'unknown, incomplete or uncertain' in caplog.text

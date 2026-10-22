@@ -16,7 +16,7 @@ def test_recovery_command_defaults_to_preflight(monkeypatch, capsys, confirm):
             'target_account': 'target-a', 'source_account': '123', 'state_dir': '/private/state'}
         assert expected_intent_id == 'a' * 32
         return {'matched': 2, 'confirmed': confirm, 'snapshot_sha256': 'f' * 64}
-    monkeypatch.setattr(recover_degiro.adapter, 'readback_import_intent', recovery)
+    monkeypatch.setattr(recover_degiro.journal_module, 'readback_import_intent', recovery)
     arguments = ['--expected-intent-id', 'a' * 32]
     if confirm:
         arguments.append('--confirm-local-state')
@@ -30,7 +30,7 @@ def test_recovery_command_defaults_to_preflight(monkeypatch, capsys, confirm):
 def test_recovery_command_never_prints_private_failure(monkeypatch, capsys):
     def failed(*args, **kwargs):
         raise RuntimeError('TOKEN-SENTINEL PRIVATE-SENTINEL')
-    monkeypatch.setattr(recover_degiro.adapter, 'readback_import_intent', failed)
+    monkeypatch.setattr(recover_degiro.journal_module, 'readback_import_intent', failed)
     assert recover_degiro.main(['--expected-intent-id', 'a' * 32]) == 1
     output = capsys.readouterr()
     assert not output.out

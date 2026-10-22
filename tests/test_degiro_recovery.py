@@ -11,6 +11,11 @@ import yaml
 import requests
 
 import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import config as config_module
+from ghostfolio_degiro_sync import degiro as degiro_module
+from ghostfolio_degiro_sync import journal as journal_module
+from ghostfolio_degiro_sync import sync as sync_module
+
 from test_degiro_sync import NOW, TARGET, MAPPING, QUOTES, activity_row, opening_holding, response, snapshot
 
 
@@ -22,7 +27,7 @@ def config(tmp_path):
 
 
 def synchronize(config, snapshot, importer, writer=lambda *args: True):
-    return adapter.synchronize_account(config, snapshot, TARGET,
+    return sync_module.synchronize_account(config, snapshot, TARGET,
         {'activities': [opening_holding()], 'count': 1}, MAPPING, QUOTES,
         importer, writer, now=NOW)
 
@@ -62,8 +67,9 @@ def test_lost_response_restart_never_dispatches_again(config, snapshot):
     script = '''
 import json, sys
 import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import journal as journal_module
 config = json.loads(sys.argv[1])
-with adapter.account_journal(config) as journal:
+with journal_module.account_journal(config) as journal:
     assert journal['document']['pending']['kind'] == 'import'
 print('PENDING')
 '''
@@ -95,14 +101,14 @@ def test_insufficient_readback_never_clears_pending(config, snapshot, evidence):
         rows[0]['quantity'] = None
     body = {'activities': rows, 'count': len(rows) + (1 if evidence == 'count' else 0)}
     with pytest.raises(RuntimeError):
-        adapter.resolve_import_intent(config, body, expected_intent_id=intent['id'])
+        journal_module.resolve_import_intent(config, body, expected_intent_id=intent['id'])
     assert document(config)['pending'] == intent
 
 
 def test_complete_positive_readback_explicitly_resolves_without_replay(config, snapshot):
     intent = pending_import(config, snapshot)
     rows = [activity_row(a, str(i)) for i, a in enumerate(intent['payload'].values())]
-    assert adapter.resolve_import_intent(config, {'activities': rows, 'count': len(rows)},
+    assert journal_module.resolve_import_intent(config, {'activities': rows, 'count': len(rows)},
         expected_intent_id=intent['id']) == 2
     state = document(config)
     assert state['pending'] is None and intent['id'] in state['resolved']
@@ -114,14 +120,14 @@ def test_invalid_expected_request_identity_preserves_journal(config, snapshot, i
     path = next(Path(config['state_dir']).glob('*.yaml'))
     before = path.read_bytes()
     with pytest.raises(RuntimeError, match='Invalid expected'):
-        adapter.resolve_import_intent(config, {}, expected_intent_id=identity)
+        journal_module.resolve_import_intent(config, {}, expected_intent_id=identity)
     assert path.read_bytes() == before
 
 
 def test_request_selection_is_mandatory(config, snapshot):
     intent = pending_import(config, snapshot)
     with pytest.raises(TypeError):
-        adapter.resolve_import_intent(config, {'activities': [], 'count': 0})
+        journal_module.resolve_import_intent(config, {'activities': [], 'count': 0})
     assert document(config)['pending'] == intent
 
 
@@ -129,14 +135,14 @@ def test_old_request_proof_cannot_resolve_successor_with_same_payload(config, sn
     intent = pending_import(config, snapshot)
     rows = [activity_row(a, str(i)) for i, a in enumerate(intent['payload'].values())]
     body = {'activities': rows, 'count': len(rows)}
-    assert adapter.resolve_import_intent(config, body, expected_intent_id=intent['id']) == 2
+    assert journal_module.resolve_import_intent(config, body, expected_intent_id=intent['id']) == 2
     # Simulate a later separately authorized request, preserving identical DTOs.
-    with adapter.account_journal(config) as journal:
-        successor = adapter.begin_intent(journal, 'import', deepcopy(intent['payload']))
+    with journal_module.account_journal(config) as journal:
+        successor = journal_module.begin_intent(journal, 'import', deepcopy(intent['payload']))
         path = journal['path']
     before = path.read_bytes()
     with pytest.raises(RuntimeError, match='identity changed'):
-        adapter.resolve_import_intent(config, body, expected_intent_id=intent['id'])
+        journal_module.resolve_import_intent(config, body, expected_intent_id=intent['id'])
     assert path.read_bytes() == before
     assert document(config)['pending']['id'] == successor
     with pytest.raises(RuntimeError, match='durable write intent'):
@@ -157,11 +163,11 @@ def test_authenticated_recovery_holds_lock_and_uses_only_get(config, snapshot, m
         assert session.trust_env is False and options['allow_redirects'] is False
         assert options['timeout'] == (10, 60)
         with pytest.raises(RuntimeError, match='Another synchronization'):
-            with adapter.account_journal(config):
+            with journal_module.account_journal(config):
                 pytest.fail('Recovery failed to hold account lock across readback')
         return response(TARGET if request.url.endswith('/target-a') else {'activities': rows, 'count': len(rows)})
     monkeypatch.setattr(requests.Session, 'send', send)
-    result = adapter.readback_import_intent({**config, 'ghost_token': 'TOKEN-SENTINEL'},
+    result = journal_module.readback_import_intent({**config, 'ghost_token': 'TOKEN-SENTINEL'},
         expected_intent_id=intent['id'], confirm=confirm)
     assert result['matched'] == 2 and result['confirmed'] is confirm
     assert len(result['snapshot_sha256']) == 64
@@ -181,9 +187,9 @@ def test_recovery_preconditions_fail_before_http(config, snapshot, monkeypatch, 
     if failure == 'stale-id':
         identity = 'a' * 32 if intent['id'] != 'a' * 32 else 'b' * 32
     elif failure == 'cash':
-        with adapter.account_journal(config) as journal:
+        with journal_module.account_journal(config) as journal:
             journal['document']['pending']['kind'] = 'cash'
-            adapter.write_journal(journal)
+            journal_module.write_journal(journal)
     elif failure == 'unsafe-origin':
         config['ghost_host'] = 'https://evil.example'
     else:
@@ -192,7 +198,7 @@ def test_recovery_preconditions_fail_before_http(config, snapshot, monkeypatch, 
     before = path.read_bytes()
     monkeypatch.setattr(requests.Session, 'send', lambda *a, **k: pytest.fail('Invalid recovery sent HTTP'))
     with pytest.raises(RuntimeError):
-        adapter.readback_import_intent(config, expected_intent_id=identity, confirm=confirm)
+        journal_module.readback_import_intent(config, expected_intent_id=identity, confirm=confirm)
     assert path.read_bytes() == before
 
 
@@ -229,7 +235,7 @@ def test_failed_authenticated_readback_never_confirms(config, snapshot, monkeypa
             500 if failure == 'activity-status' else 200)
     monkeypatch.setattr(requests.Session, 'send', send)
     with pytest.raises((RuntimeError, ValueError, requests.RequestException)) as error:
-        adapter.readback_import_intent({**config, 'ghost_token': 'TOKEN-SENTINEL'},
+        journal_module.readback_import_intent({**config, 'ghost_token': 'TOKEN-SENTINEL'},
             expected_intent_id=intent['id'], confirm=True)
     assert 'TOKEN-SENTINEL' not in str(error.value) and 'PRIVATE-SENTINEL' not in str(error.value)
     assert path.read_bytes() == before
@@ -246,7 +252,7 @@ def test_cash_response_loss_also_survives_restart(config, snapshot):
     with pytest.raises(RuntimeError, match='durable write intent'):
         synchronize(deepcopy(config), snapshot, lambda *args: pytest.fail('Cash uncertainty replay'))
     with pytest.raises(RuntimeError, match='No recoverable'):
-        adapter.resolve_import_intent(config, {'activities': [], 'count': 0},
+        journal_module.resolve_import_intent(config, {'activities': [], 'count': 0},
             expected_intent_id=document(config)['pending']['id'])
 
 
@@ -260,34 +266,34 @@ def test_journal_write_failure_prevents_dispatch(config, snapshot, monkeypatch):
 
 
 def test_oversized_intent_never_replaces_readable_journal(config):
-    with adapter.account_journal(config) as journal:
-        adapter.write_journal(journal)
+    with journal_module.account_journal(config) as journal:
+        journal_module.write_journal(journal)
         previous = journal['path'].read_bytes()
         with pytest.raises(RuntimeError, match='budget'):
-            adapter.begin_intent(journal, 'import', {'fake': 'x' * 1_000_001})
+            journal_module.begin_intent(journal, 'import', {'fake': 'x' * 1_000_001})
         assert journal['path'].read_bytes() == previous
 
 
 def test_resolved_retention_preserves_newest_confirmations_and_pending_fence(config):
-    with adapter.account_journal(config) as journal:
+    with journal_module.account_journal(config) as journal:
         start = datetime(2020, 1, 1, tzinfo=timezone.utc)
         # Reverse insertion order proves retention follows dates, not YAML order.
         journal['document']['resolved'] = {f'{i:032x}': {
             'kind': 'cash', 'at': (start + timedelta(seconds=i)).isoformat()}
             for i in reversed(range(1005))}
-        adapter.write_journal(journal)
-        identity = adapter.begin_intent(journal, 'cash', {'account': 'target-a', 'balance': 12.3})
+        journal_module.write_journal(journal)
+        identity = journal_module.begin_intent(journal, 'cash', {'account': 'target-a', 'balance': 12.3})
         before = document(config)
         assert len(before['resolved']) == 1005 and before['pending']['id'] == identity
         with pytest.raises(RuntimeError, match='identity changed'):
-            adapter.confirm_intent(journal, 'wrong-id')
+            journal_module.confirm_intent(journal, 'wrong-id')
         assert document(config) == before
-        adapter.confirm_intent(journal, identity)
+        journal_module.confirm_intent(journal, identity)
     stored = document(config)
     assert stored['pending'] is None and len(stored['resolved']) == 1000
     assert set(stored['resolved']) == {f'{i:032x}' for i in range(6, 1005)} | {identity}
-    with adapter.account_journal(config) as journal:
-        pending = adapter.begin_intent(journal, 'cash', {'account': 'target-a', 'balance': 99})
+    with journal_module.account_journal(config) as journal:
+        pending = journal_module.begin_intent(journal, 'cash', {'account': 'target-a', 'balance': 99})
     assert document(config)['pending']['id'] == pending
     with pytest.raises(RuntimeError, match='durable write intent'):
         synchronize(config, {}, lambda *args: pytest.fail('Pending cash replayed'))
@@ -298,14 +304,15 @@ def test_lock_refuses_another_process(config, other_source):
     script = '''
 import json, sys
 import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import journal as journal_module
 try:
-    with adapter.account_journal(json.loads(sys.argv[1])):
+    with journal_module.account_journal(json.loads(sys.argv[1])):
         raise AssertionError('Concurrent account lock admitted')
 except RuntimeError as error:
     assert str(error) == 'Another synchronization owns this account'
 print('LOCKED')
 '''
-    with adapter.account_journal(config):
+    with journal_module.account_journal(config):
         second = {**config, 'source_account': '456'} if other_source else config
         result = subprocess.run([sys.executable, '-c', script, json.dumps(second)],
             text=True, capture_output=True, timeout=10)
@@ -313,18 +320,18 @@ print('LOCKED')
 
 
 def test_another_source_cannot_replace_recorded_target_ownership(config):
-    with adapter.account_journal(config) as journal:
-        adapter.write_journal(journal)
+    with journal_module.account_journal(config) as journal:
+        journal_module.write_journal(journal)
     with pytest.raises(RuntimeError, match='Invalid private'):
-        with adapter.account_journal({**config, 'source_account': '456'}):
+        with journal_module.account_journal({**config, 'source_account': '456'}):
             pytest.fail('Different source bypassed account owner')
 
 
 @pytest.mark.parametrize('mutation', ['public-directory', 'symlink-directory', 'public-lock',
     'symlink-lock', 'symlink-journal', 'public-journal', 'corrupt', 'wrong-owner', 'oversized'])
 def test_unsafe_or_corrupt_state_blocks_before_callback(config, snapshot, mutation, tmp_path):
-    with adapter.account_journal(config) as journal:
-        adapter.write_journal(journal)
+    with journal_module.account_journal(config) as journal:
+        journal_module.write_journal(journal)
         journal_path = journal['path']
     directory = Path(config['state_dir'])
     lock = next(directory.glob('*.lock'))
@@ -368,10 +375,10 @@ def test_live_requires_state_but_dry_run_does_not(config, snapshot):
 
 def test_run_sync_pending_blocks_before_broker_login(config, snapshot, monkeypatch):
     pending_import(config, snapshot)
-    monkeypatch.setattr(adapter, 'load_sync_config', lambda: (config, MAPPING, QUOTES))
-    monkeypatch.setattr(adapter, 'read_degiro', lambda *args: pytest.fail('Pending intent logged into broker'))
+    monkeypatch.setattr(config_module, 'load_sync_config', lambda: (config, MAPPING, QUOTES))
+    monkeypatch.setattr(degiro_module, 'read_degiro', lambda *args: pytest.fail('Pending intent logged into broker'))
     with pytest.raises(RuntimeError, match='durable write intent'):
-        adapter.run_sync(NOW.date(), NOW.date())
+        sync_module.run_sync(NOW.date(), NOW.date())
 
 
 @pytest.mark.parametrize('confirm', [False, True])

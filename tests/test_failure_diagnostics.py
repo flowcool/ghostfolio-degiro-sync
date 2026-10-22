@@ -9,6 +9,10 @@ import pytest
 import requests
 
 import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import config as config_module
+from ghostfolio_degiro_sync import degiro as degiro_module
+from ghostfolio_degiro_sync import ghostfolio as ghostfolio_module
+
 from ghostfolio_degiro_sync import vault as vault_module
 from test_degiro_read import credentials, broker_http, USERNAME, PASSWORD, SESSION, OTP, SEED
 from test_vault_credentials import vault, mock_cli, SECRETS
@@ -31,7 +35,7 @@ def read_arguments(tmp_path, *extra):
 
 
 def test_invalid_date_has_safe_diagnostic_before_broker(monkeypatch, tmp_path, caplog, capsys):
-    monkeypatch.setattr(adapter, "read_degiro", lambda *a, **k: pytest.fail("Broker contacted"))
+    monkeypatch.setattr(degiro_module, "read_degiro", lambda *a, **k: pytest.fail("Broker contacted"))
     assert adapter.main(["--read-only", "--from-date", SECRET, "--to-date", "2026-01-02",
                          "--output", str(tmp_path / "capture.json")]) == 1
     assert "stage=config reason=date_range" in caplog.text
@@ -48,7 +52,7 @@ def test_argparse_errors_never_echo_values(arguments, caplog, capsys):
 
 @pytest.mark.parametrize("window", ["1", "367", "-90"])
 def test_window_range_is_distinct_from_date_errors(monkeypatch, tmp_path, caplog, capsys, window):
-    monkeypatch.setattr(adapter, "read_degiro", lambda *a, **k: pytest.fail("Broker contacted"))
+    monkeypatch.setattr(degiro_module, "read_degiro", lambda *a, **k: pytest.fail("Broker contacted"))
     assert adapter.main(read_arguments(tmp_path, "--window-days", window)) == 1
     assert "stage=config reason=window_days" in caplog.text
     assert_private(caplog, capsys)
@@ -81,8 +85,8 @@ def test_sync_configuration_fails_before_auth(monkeypatch, tmp_path, caplog, cap
         monkeypatch.setenv("GHOST_ACCESS_TOKEN", SECRET)
     elif change == "lookback":
         monkeypatch.setenv("LOOKBACK_DAYS", SECRET)
-    monkeypatch.setattr(adapter, "authenticate_ghostfolio", lambda *a: pytest.fail("Ghostfolio contacted"))
-    monkeypatch.setattr(adapter, "read_degiro", lambda *a, **k: pytest.fail("Broker contacted"))
+    monkeypatch.setattr(ghostfolio_module, "authenticate_ghostfolio", lambda *a: pytest.fail("Ghostfolio contacted"))
+    monkeypatch.setattr(degiro_module, "read_degiro", lambda *a, **k: pytest.fail("Broker contacted"))
     assert adapter.main(["--sync"]) == 1
     assert f"stage=config reason={reason}" in caplog.text
     assert_private(caplog, capsys)
@@ -124,7 +128,7 @@ def test_broker_stage_survives_sync_catch_all(credentials, monkeypatch, caplog, 
     broker_http(monkeypatch, fail_path="/transactions", failure=requests.RequestException(SECRET))
     config = {"dry_run": True, "sync_mode": "full_history", "target_account": "synthetic",
               "ghost_host": "https://portfolio.example", "ghost_token": SECRET}
-    monkeypatch.setattr(adapter, "load_sync_config", lambda: (config, {}, {}))
+    monkeypatch.setattr(config_module, "load_sync_config", lambda: (config, {}, {}))
     monkeypatch.setenv("LOOKBACK_DAYS", "90")
     monkeypatch.setenv("SYNC_MODE", "full_history")
     assert adapter.main(["--sync", "--from-date", "2026-01-01", "--to-date", "2026-01-02"]) == 1
@@ -139,7 +143,7 @@ def test_forged_diagnostics_and_exception_text_are_not_rendered(monkeypatch, tmp
         error = RuntimeError(SECRET)
         error.sync_diagnostic = metadata
         raise error
-    monkeypatch.setattr(adapter, "read_degiro", refused)
+    monkeypatch.setattr(degiro_module, "read_degiro", refused)
     assert adapter.main(read_arguments(tmp_path)) == 1
     assert "stage=broker reason=read" in caplog.text
     assert_private(caplog, capsys)
@@ -148,7 +152,7 @@ def test_forged_diagnostics_and_exception_text_are_not_rendered(monkeypatch, tmp
 def test_output_collision_is_identified_and_preserves_file(monkeypatch, tmp_path, caplog, capsys):
     destination = tmp_path / "capture.json"
     destination.write_text(SECRET)
-    monkeypatch.setattr(adapter, "read_degiro", lambda *a, **k: pytest.fail("Broker contacted"))
+    monkeypatch.setattr(degiro_module, "read_degiro", lambda *a, **k: pytest.fail("Broker contacted"))
     assert adapter.main(read_arguments(tmp_path)) == 1
     assert "stage=output reason=destination" in caplog.text
     assert destination.read_text() == SECRET
@@ -161,7 +165,7 @@ def test_ghostfolio_exchange_failure_is_identified(monkeypatch, tmp_path, caplog
     monkeypatch.delenv("GHOST_TOKEN", raising=False)
     def refused(*args, **kwargs):
         raise requests.RequestException(SECRET)
-    monkeypatch.setattr(adapter, "ghost_exchange_access_token", refused)
+    monkeypatch.setattr(ghostfolio_module, "ghost_exchange_access_token", refused)
     assert adapter.main(["--ghost-accounts", "--output", str(tmp_path / "accounts.json")]) == 1
     assert "stage=ghostfolio reason=authentication" in caplog.text
     assert_private(caplog, capsys)
@@ -171,8 +175,8 @@ def test_ghostfolio_exchange_failure_is_identified(monkeypatch, tmp_path, caplog
 def test_ghostfolio_reads_have_distinct_private_diagnostics(monkeypatch, caplog, capsys, reason):
     config = {"dry_run": True, "sync_mode": "full_history", "target_account": "synthetic",
               "ghost_host": "https://portfolio.example", "ghost_token": SECRET}
-    monkeypatch.setattr(adapter, "load_sync_config", lambda: (config, {}, {}))
-    monkeypatch.setattr(adapter, "read_degiro", lambda *a, **k: {"account_info": {"baseCurrency": "EUR"}})
+    monkeypatch.setattr(config_module, "load_sync_config", lambda: (config, {}, {}))
+    monkeypatch.setattr(degiro_module, "read_degiro", lambda *a, **k: {"account_info": {"baseCurrency": "EUR"}})
     monkeypatch.setenv("LOOKBACK_DAYS", "90")
     monkeypatch.setenv("SYNC_MODE", "full_history")
     calls = []
@@ -184,7 +188,7 @@ def test_ghostfolio_reads_have_distinct_private_diagnostics(monkeypatch, caplog,
     @contextmanager
     def transport(*args):
         yield SimpleNamespace(get=get)
-    monkeypatch.setattr(adapter, "ghost_transport", transport)
+    monkeypatch.setattr(ghostfolio_module, "ghost_transport", transport)
     assert adapter.main(["--sync", "--from-date", "2026-01-01", "--to-date", "2026-01-02"]) == 1
     assert f"stage=ghostfolio reason={reason}" in caplog.text
     assert_private(caplog, capsys)
@@ -208,19 +212,19 @@ def test_invalid_report_locale_is_private(monkeypatch, tmp_path, caplog, capsys)
 
 def test_cutover_read_failure_retains_its_stage(credentials, monkeypatch, tmp_path, caplog, capsys):
     broker_http(monkeypatch)
-    read = adapter.read_degiro
+    read = degiro_module.read_degiro
     def refused():
         raise RuntimeError(SECRET)
     def with_cutover(*args, **kwargs):
         return read(*args, **kwargs, cutover_target_reader=refused)
-    monkeypatch.setattr(adapter, "read_degiro", with_cutover)
+    monkeypatch.setattr(degiro_module, "read_degiro", with_cutover)
     assert adapter.main(read_arguments(tmp_path)) == 1
     assert "stage=cutover_destination reason=failed" in caplog.text
     assert_private(caplog, capsys)
 
 
 def test_output_write_failure_does_not_render_path(monkeypatch, tmp_path, caplog, capsys):
-    monkeypatch.setattr(adapter, "read_degiro", lambda *a, **k: {})
+    monkeypatch.setattr(degiro_module, "read_degiro", lambda *a, **k: {})
     def refused(*args, **kwargs):
         raise OSError(SECRET)
     monkeypatch.setattr(adapter, "save_private_snapshot", refused)

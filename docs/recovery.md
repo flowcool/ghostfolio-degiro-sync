@@ -1,5 +1,11 @@
 # Durable write intent and explicit recovery
 
+The installed package keeps persistence, locks and recovery in `journal.py`.
+`sync.py` owns execution and coverage. Recovery, cutover and cleanup commands
+use their owning modules. The private journal schema and command options remain
+unchanged during this extraction. Every write still records durable intent
+before dispatch; an uncertain result keeps the cash and retry fences active.
+
 Live synchronization requires `STATE_DIR`: an existing persistent directory owned
 by the process UID and mode 0700. For the supported Compose deployment, follow the
 [README mount preparation](../README.md#vault-and-mapping), separate from the

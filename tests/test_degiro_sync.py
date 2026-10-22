@@ -10,6 +10,14 @@ import requests
 import yaml
 
 import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import accounting as accounting_module
+from ghostfolio_degiro_sync import config as config_module
+from ghostfolio_degiro_sync import degiro as degiro_module
+from ghostfolio_degiro_sync import diagnostics as diagnostics_module
+from ghostfolio_degiro_sync import ghostfolio as ghostfolio_module
+from ghostfolio_degiro_sync import journal as journal_module
+from ghostfolio_degiro_sync import sync as sync_module
+
 import ghostfolio_core as core
 
 
@@ -60,7 +68,7 @@ def run(snapshot, existing=None, dry_run=True, importer=None, writer=None, confi
     config = {'source_account': '123', 'target_account': 'target-a', 'dry_run': dry_run} if config is None else config
     config.setdefault('state_dir', os.environ['STATE_DIR'])
     config.setdefault('ghost_host', 'http://localhost:3333')
-    return adapter.synchronize_account(config, snapshot, TARGET,
+    return sync_module.synchronize_account(config, snapshot, TARGET,
         {'activities': rows, 'count': len(rows)}, MAPPING, QUOTES,
         importer or (lambda activities: pytest.fail('Unexpected POST')),
         writer or (lambda *args: pytest.fail('Unexpected PUT')), now=NOW)
@@ -164,20 +172,20 @@ def test_redacted_inactive_or_unknown_target_context_blocks(snapshot, field, val
 def test_count_mismatch_and_duplicate_created_ids_block(snapshot):
     row = opening_holding()
     with pytest.raises(RuntimeError, match='Incomplete'):
-        adapter.existing_activity_context({'activities': [row], 'count': 2}, TARGET)
+        ghostfolio_module.existing_activity_context({'activities': [row], 'count': 2}, TARGET)
     with pytest.raises(RuntimeError, match='Duplicate'):
-        adapter.existing_activity_context({'activities': [row, row], 'count': 2}, TARGET)
+        ghostfolio_module.existing_activity_context({'activities': [row, row], 'count': 2}, TARGET)
 
 
 def test_foreign_account_canonical_ownership_blocks(snapshot):
-    fee = adapter.normalize_fees(snapshot, TARGET['id'])[0]
+    fee = accounting_module.normalize_fees(snapshot, TARGET['id'])[0]
     fee['accountId'] = 'other-account'
     with pytest.raises(RuntimeError, match='another target'):
         run(snapshot, [opening_holding(), activity_row(fee, 'foreign')], dry_run=False)
 
 
 def test_existing_identity_cannot_change_mapping_or_amount(snapshot):
-    trade = adapter.normalize_trades(snapshot, TARGET['id'], MAPPING, QUOTES)[0]
+    trade = accounting_module.normalize_trades(snapshot, TARGET['id'], MAPPING, QUOTES)[0]
     row = activity_row(trade, 'canonical')
     row['fee'] = 99
     with pytest.raises(RuntimeError, match='changed financial'):
@@ -190,7 +198,7 @@ def test_existing_identity_cannot_change_mapping_or_amount(snapshot):
 
 @pytest.mark.parametrize('dry_run', [True, False])
 def test_changed_configured_mapping_preserves_native_shaped_existing_rows(snapshot, tmp_path, dry_run):
-    canonical = adapter.normalize_trades(snapshot, TARGET['id'], MAPPING, QUOTES)[0]
+    canonical = accounting_module.normalize_trades(snapshot, TARGET['id'], MAPPING, QUOTES)[0]
     existing = {'activities': [opening_holding(), activity_row(canonical, 'canonical')], 'count': 2}
     before = deepcopy(existing)
     config = {'source_account': '123', 'target_account': TARGET['id'],
@@ -200,11 +208,11 @@ def test_changed_configured_mapping_preserves_native_shaped_existing_rows(snapsh
         pytest.fail('Changed mapping reached a financial callback')
 
     with pytest.raises(RuntimeError, match='^Existing DEGIRO identity changed financial evidence$'):
-        adapter.synchronize_account(config, snapshot, TARGET, existing,
+        sync_module.synchronize_account(config, snapshot, TARGET, existing,
             {'US0378331005': 'CHANGED_TEST'}, {'CHANGED_TEST': 'USD'},
             forbidden, forbidden, now=NOW)
     assert existing == before
-    with adapter.account_journal(config) as journal:
+    with journal_module.account_journal(config) as journal:
         assert journal['document']['pending'] is None
 
 
@@ -212,7 +220,7 @@ def test_unrelated_crypto_context_is_preserved_without_blocking_target(snapshot)
     foreign = opening_holding()
     foreign.update(id='crypto', accountId='unrelated')
     foreign['assetProfile'] = {'symbol': 'bitcoin', 'dataSource': 'COINGECKO'}
-    rows, holdings = adapter.existing_activity_context(
+    rows, holdings = ghostfolio_module.existing_activity_context(
         {'activities': [opening_holding(), foreign], 'count': 2}, TARGET)
     assert rows[1]['dataSource'] == 'COINGECKO'
     assert holdings == {('target-a', 'TEST'): 10}
@@ -220,7 +228,7 @@ def test_unrelated_crypto_context_is_preserved_without_blocking_target(snapshot)
 
 
 def test_crypto_provider_never_weakens_foreign_canonical_ownership(snapshot):
-    fee = adapter.normalize_fees(snapshot, TARGET['id'])[0]
+    fee = accounting_module.normalize_fees(snapshot, TARGET['id'])[0]
     fee.update(accountId='other-account', dataSource='COINGECKO')
     with pytest.raises(RuntimeError, match='another target'):
         run(snapshot, [opening_holding(), activity_row(fee, 'foreign')], dry_run=False)
@@ -244,7 +252,7 @@ def test_foreign_profile_still_requires_well_formed_evidence(snapshot, field, va
 
 
 def test_manual_csv_fee_overlap_requires_explicit_reconciliation(snapshot):
-    fee = adapter.normalize_fees(snapshot, TARGET['id'])[0]
+    fee = accounting_module.normalize_fees(snapshot, TARGET['id'])[0]
     fee['comment'] = None
     with pytest.raises(RuntimeError, match='Manual or CSV'):
         run(snapshot, [opening_holding(), activity_row(fee, 'manual')], dry_run=False)
@@ -292,7 +300,7 @@ def test_accepted_buys_must_fund_later_sells(snapshot):
     'http://169.254.169.254', None])
 def test_exact_target_origin_policy(url):
     with pytest.raises(RuntimeError) as error:
-        adapter.validate_ghost_host(url)
+        config_module.validate_ghost_host(url)
     assert 'SECRET' not in str(error.value) and 'pass' not in str(error.value)
 
 
@@ -311,7 +319,7 @@ def test_transport_dry_run_blocks_every_mutation(monkeypatch):
     calls = []
     monkeypatch.setattr(requests.Session, 'send', lambda self, req, **kw: calls.append(req) or response())
     original = core.requests
-    with adapter.ghost_transport(transport_config(), TARGET) as session:
+    with ghostfolio_module.ghost_transport(transport_config(), TARGET) as session:
         assert core.requests is session
         for method, path in [('POST', '/api/v1/import'), ('PUT', '/api/v1/account/target-a'),
                              ('DELETE', '/api/v1/activities/created')]:
@@ -326,7 +334,7 @@ def test_transport_bounds_http_and_restores_core(monkeypatch):
         calls.append((req, kw))
         return response({'activities': [], 'count': 0})
     monkeypatch.setattr(requests.Session, 'send', send)
-    with adapter.ghost_transport(transport_config(), TARGET) as session:
+    with ghostfolio_module.ghost_transport(transport_config(), TARGET) as session:
         assert session.trust_env is False
         session.get('http://localhost:3333/api/v1/activities')
     req, options = calls[0]
@@ -340,7 +348,7 @@ def test_transport_bounds_http_and_restores_core(monkeypatch):
     'http://localhost:3333/api/v1/account/other'])
 def test_transport_refuses_other_origin_route_or_query(monkeypatch, url):
     monkeypatch.setattr(requests.Session, 'send', lambda *args, **kw: pytest.fail('Boundary bypass'))
-    with adapter.ghost_transport(transport_config(False), TARGET) as session:
+    with ghostfolio_module.ghost_transport(transport_config(False), TARGET) as session:
         with pytest.raises(RuntimeError, match='boundary'):
             session.get(url)
 
@@ -352,7 +360,7 @@ def test_core_cash_writer_rechecks_current_currency_before_put(monkeypatch):
         return response({**TARGET, 'currency': 'USD'})
     monkeypatch.setattr(requests.Session, 'send', send)
     config = transport_config(False)
-    with adapter.ghost_transport(config, TARGET):
+    with ghostfolio_module.ghost_transport(config, TARGET):
         with pytest.raises(RuntimeError, match='changed'):
             core.ghost_update_cash_balance(config, 'target-a', 12.3)
     assert calls == ['GET']
@@ -362,7 +370,7 @@ def test_transport_redirect_and_error_logs_do_not_expose_secrets(monkeypatch, ca
     monkeypatch.setattr(requests.Session, 'send', lambda *args, **kw: response({'secret': 'BODY-SENTINEL'}, 302))
     config = transport_config(False)
     fee = {'accountId': 'target-a', 'comment': 'DEGIRO#123:FEE:104', 'symbol': 'GF_TEST'}
-    with adapter.ghost_transport(config, TARGET):
+    with ghostfolio_module.ghost_transport(config, TARGET):
         imported, ok = core.ghost_import_activities(config, [fee])
     assert imported == [] and ok is False
     assert config['_uncertain_import_accounts'] == {'target-a'}
@@ -385,7 +393,7 @@ def configure(monkeypatch, tmp_path, dry_run=None):
 
 def test_config_is_env_only_and_defaults_dry_run(monkeypatch, tmp_path):
     configure(monkeypatch, tmp_path)
-    config, mapping, quotes = adapter.load_sync_config()
+    config, mapping, quotes = config_module.load_sync_config()
     assert config['dry_run'] is True and config['ghost_token'] == 'TOKEN-SENTINEL'
     assert mapping == MAPPING and quotes == QUOTES
 
@@ -397,20 +405,20 @@ def test_missing_sync_mode_refuses_before_credentials_or_broker(monkeypatch, tmp
         monkeypatch.delenv('SYNC_MODE', raising=False)
     else:
         monkeypatch.setenv('SYNC_MODE', mode)
-    monkeypatch.setattr(adapter, 'load_ghost_credentials',
+    monkeypatch.setattr(config_module, 'load_ghost_credentials',
                         lambda: pytest.fail('Missing mode loaded credentials'))
-    monkeypatch.setattr(adapter, 'read_degiro',
+    monkeypatch.setattr(degiro_module, 'read_degiro',
                         lambda *args, **kwargs: pytest.fail('Missing mode contacted broker'))
     with pytest.raises(RuntimeError, match='Set SYNC_MODE explicitly') as failure:
-        adapter.run_sync(NOW.date(), NOW.date())
-    assert adapter.failure_diagnostic(failure.value) == ('config', 'sync_mode')
+        sync_module.run_sync(NOW.date(), NOW.date())
+    assert diagnostics_module.failure_diagnostic(failure.value) == ('config', 'sync_mode')
 
 
 @pytest.mark.parametrize('mode', ['rolling', 'prospective', 'full_history'])
 def test_explicit_sync_modes_are_preserved(monkeypatch, tmp_path, mode):
     configure(monkeypatch, tmp_path)
     monkeypatch.setenv('SYNC_MODE', mode)
-    config, mapping, quotes = adapter.load_sync_config()
+    config, mapping, quotes = config_module.load_sync_config()
     assert config['sync_mode'] == mode
     assert config['dry_run'] is True
 
@@ -421,9 +429,9 @@ def test_explicit_sync_modes_are_preserved(monkeypatch, tmp_path, mode):
 def test_invalid_config_rejected_before_broker_read(monkeypatch, tmp_path, name, value):
     configure(monkeypatch, tmp_path)
     monkeypatch.setenv(name, value)
-    monkeypatch.setattr(adapter, 'read_degiro', lambda *args: pytest.fail('Invalid config contacted broker'))
+    monkeypatch.setattr(degiro_module, 'read_degiro', lambda *args: pytest.fail('Invalid config contacted broker'))
     with pytest.raises(RuntimeError):
-        adapter.run_sync(NOW.date(), NOW.date())
+        sync_module.run_sync(NOW.date(), NOW.date())
 
 
 @pytest.mark.parametrize('document', [None, {}, {'US0378331006': {'symbol': 'TEST', 'currency': 'USD'}},
@@ -434,14 +442,14 @@ def test_mapping_requires_explicit_verified_units(monkeypatch, tmp_path, documen
     path = configure(monkeypatch, tmp_path)
     path.write_text(yaml.safe_dump(document))
     with pytest.raises(RuntimeError, match='mapping'):
-        adapter.load_sync_config()
+        config_module.load_sync_config()
 
 
 def test_mocked_http_end_to_end_dry_run_has_gets_only(snapshot, monkeypatch, tmp_path):
     configure(monkeypatch, tmp_path)
     snapshot['fetch_started_at'] = (datetime.now(timezone.utc) - timedelta(seconds=2)).isoformat()
     snapshot['fetched_at'] = datetime.now(timezone.utc).isoformat()
-    monkeypatch.setattr(adapter, 'read_degiro', lambda *args: snapshot)
+    monkeypatch.setattr(degiro_module, 'read_degiro', lambda *args: snapshot)
     calls = []
     def send(self, req, **kw):
         calls.append((req.method, req.path_url))
@@ -449,7 +457,7 @@ def test_mocked_http_end_to_end_dry_run_has_gets_only(snapshot, monkeypatch, tmp
             return response(TARGET)
         return response({'activities': [opening_holding()], 'count': 1})
     monkeypatch.setattr(requests.Session, 'send', send)
-    result = adapter.run_sync(NOW.date(), NOW.date())
+    result = sync_module.run_sync(NOW.date(), NOW.date())
     assert len(result['proposed']) == 3 and result['accepted'] == []
     assert calls == [('GET', '/api/v1/account/target-a'), ('GET', '/api/v1/activities')]
 
@@ -458,7 +466,7 @@ def test_mocked_live_http_exact_acceptance_before_cash(snapshot, monkeypatch, tm
     configure(monkeypatch, tmp_path, '0')
     snapshot['fetch_started_at'] = (datetime.now(timezone.utc) - timedelta(seconds=2)).isoformat()
     snapshot['fetched_at'] = datetime.now(timezone.utc).isoformat()
-    monkeypatch.setattr(adapter, 'read_degiro', lambda *args: snapshot)
+    monkeypatch.setattr(degiro_module, 'read_degiro', lambda *args: snapshot)
     calls = []
     def send(self, req, **kw):
         calls.append((req.method, req.path_url))
@@ -472,7 +480,7 @@ def test_mocked_live_http_exact_acceptance_before_cash(snapshot, monkeypatch, tm
             return response(TARGET)
         return response(TARGET if req.path_url.endswith('/target-a') else {'activities': [opening_holding()], 'count': 1})
     monkeypatch.setattr(requests.Session, 'send', send)
-    result = adapter.run_sync(NOW.date(), NOW.date())
+    result = sync_module.run_sync(NOW.date(), NOW.date())
     assert len(result['accepted']) == 3
     assert [method for method, path in calls] == ['GET', 'GET', 'POST', 'POST', 'GET', 'PUT']
 
@@ -481,7 +489,7 @@ def test_unresolved_symbol_degrades_and_blocks_cash(snapshot, monkeypatch, tmp_p
     configure(monkeypatch, tmp_path, '0')
     snapshot['fetch_started_at'] = (datetime.now(timezone.utc) - timedelta(seconds=2)).isoformat()
     snapshot['fetched_at'] = datetime.now(timezone.utc).isoformat()
-    monkeypatch.setattr(adapter, 'read_degiro', lambda *args: snapshot)
+    monkeypatch.setattr(degiro_module, 'read_degiro', lambda *args: snapshot)
     posts = []
     def send(self, req, **kw):
         if req.method == 'POST':
@@ -495,7 +503,7 @@ def test_unresolved_symbol_degrades_and_blocks_cash(snapshot, monkeypatch, tmp_p
         return response(TARGET if req.path_url.endswith('/target-a') else {'activities': [opening_holding()], 'count': 1})
     monkeypatch.setattr(requests.Session, 'send', send)
     with pytest.raises(RuntimeError, match='cash blocked'):
-        adapter.run_sync(NOW.date(), NOW.date())
+        sync_module.run_sync(NOW.date(), NOW.date())
     assert len(posts) == 2 and all(a['symbol'] != 'TEST' for a in posts[1])
 
 
@@ -503,8 +511,8 @@ def test_other_400_fails_without_symbol_retry(snapshot, monkeypatch):
     calls = []
     monkeypatch.setattr(requests.Session, 'send', lambda *args, **kw: calls.append(True) or response({'message': ['invalid MANUAL symbol']}, 400))
     config = transport_config(False)
-    fee = adapter.normalize_fees(snapshot, TARGET['id'])
-    with adapter.ghost_transport(config, TARGET):
+    fee = accounting_module.normalize_fees(snapshot, TARGET['id'])
+    with ghostfolio_module.ghost_transport(config, TARGET):
         created, ok = core.ghost_import_activities(config, fee)
     assert created == [] and ok is False and len(calls) == 1
 
@@ -517,7 +525,7 @@ def test_fresh_cash_read_rejects_changed_account_context(monkeypatch, field, val
     monkeypatch.setattr(requests.Session, 'send', lambda self, req, **kw:
         calls.append(req.method) or response({**TARGET, field: value}))
     config = transport_config(False)
-    with adapter.ghost_transport(config, TARGET):
+    with ghostfolio_module.ghost_transport(config, TARGET):
         with pytest.raises(RuntimeError):
             core.ghost_update_cash_balance(config, 'target-a', 12.3)
     assert calls == ['GET']
@@ -530,7 +538,7 @@ def test_transport_failure_is_sanitized_and_restores_logger(monkeypatch, caplog)
     previous = core.requests
     disabled = core.log.disabled
     with pytest.raises(requests.RequestException) as error:
-        with adapter.ghost_transport(transport_config(), TARGET) as session:
+        with ghostfolio_module.ghost_transport(transport_config(), TARGET) as session:
             session.get('http://localhost:3333/api/v1/activities')
     assert str(error.value) == 'Ghostfolio bounded transport failed'
     assert core.requests is previous and core.log.disabled is disabled
@@ -538,7 +546,7 @@ def test_transport_failure_is_sanitized_and_restores_logger(monkeypatch, caplog)
 
 
 def test_cli_unverified_history_is_nonzero_and_never_reports_live_success(monkeypatch, caplog):
-    monkeypatch.setattr(adapter, 'run_sync', lambda *args: {
+    monkeypatch.setattr(sync_module, 'run_sync', lambda *args: {
         'dry_run': True, 'proposed': [], 'accepted': [], 'history_verified': False})
     assert adapter.main(['--sync', '--from-date', '2026-01-01', '--to-date', '2026-01-02']) == 1
     assert 'unverified' in caplog.text
@@ -547,7 +555,7 @@ def test_cli_unverified_history_is_nonzero_and_never_reports_live_success(monkey
 def test_cli_errors_are_fixed_and_preclude_private_exception_text(monkeypatch, caplog):
     def fail(*args):
         raise RuntimeError('TOKEN-SENTINEL BODY-SENTINEL')
-    monkeypatch.setattr(adapter, 'run_sync', fail)
+    monkeypatch.setattr(sync_module, 'run_sync', fail)
     assert adapter.main(['--sync', '--from-date', '2026-01-01', '--to-date', '2026-01-02']) == 1
     assert 'SENTINEL' not in caplog.text
 
@@ -573,7 +581,7 @@ def test_cron_default_dates_are_bounded_zurich_lookback(monkeypatch, instant, ex
     monkeypatch.setattr(adapter, 'datetime', clock)
     monkeypatch.setenv('LOOKBACK_DAYS', '90')
     calls = []
-    monkeypatch.setattr(adapter, 'run_sync', lambda start, end, window:
+    monkeypatch.setattr(sync_module, 'run_sync', lambda start, end, window:
         calls.append((start, end, window)) or {'dry_run': True, 'proposed': [],
             'accepted': [], 'history_verified': True})
     assert adapter.main(['--sync']) == 0
@@ -585,10 +593,10 @@ def test_cron_default_dates_are_bounded_zurich_lookback(monkeypatch, instant, ex
 @pytest.mark.parametrize('lookback', ['1', '367', 'invalid', 'true'])
 def test_invalid_cron_lookback_never_runs_sync(monkeypatch, lookback):
     monkeypatch.setenv('LOOKBACK_DAYS', lookback)
-    monkeypatch.setattr(adapter, 'run_sync', lambda *args: pytest.fail('Invalid lookback ran sync'))
+    monkeypatch.setattr(sync_module, 'run_sync', lambda *args: pytest.fail('Invalid lookback ran sync'))
     assert adapter.main(['--sync']) == 1
 
 
 def test_read_only_still_requires_dates_before_broker_auth(monkeypatch, tmp_path):
-    monkeypatch.setattr(adapter, 'read_degiro', lambda *args: pytest.fail('Missing dates contacted broker'))
+    monkeypatch.setattr(degiro_module, 'read_degiro', lambda *args: pytest.fail('Missing dates contacted broker'))
     assert adapter.main(['--read-only', '--output', str(tmp_path / 'private.json')]) == 1

@@ -9,6 +9,8 @@ import yaml
 import degiro_to_ghostfolio as adapter
 
 
+from ghostfolio_degiro_sync import accounting as accounting_module
+
 @pytest.fixture
 def snapshot():
     data = yaml.safe_load((Path(__file__).parent / 'fixtures/degiro_contract.yaml').read_text())
@@ -17,7 +19,7 @@ def snapshot():
 
 
 def convert(snapshot):
-    return adapter.normalize_trades(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'USD'})
+    return accounting_module.normalize_trades(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'USD'})
 
 
 def buy(snapshot, execution_id=11, quantity='2'):
@@ -44,7 +46,7 @@ def test_fractional_buy_and_same_currency(snapshot):
                fxRate=1, grossFxRate=1, autoFxFeeInBaseCurrency=0,
                totalFeesInBaseCurrency='-0.05')
     snapshot['transactions'] = [row]
-    activity, = adapter.normalize_trades(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'EUR'})
+    activity, = accounting_module.normalize_trades(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'EUR'})
     assert activity['quantity'] == .125
     assert activity['unitPrice'] == 10.32
     assert activity['fee'] == .05
@@ -55,12 +57,12 @@ def test_jpy_total_rounding_and_fee_conversion(snapshot):
     snapshot['products']['20']['currency'] = 'JPY'
     snapshot['transactions'][0].update(quantity=-.5, price='1001', total=501,
         totalInBaseCurrency='3.34', fxRate=150, grossFxRate=150)
-    activity, = adapter.normalize_trades(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'JPY'})
+    activity, = accounting_module.normalize_trades(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'JPY'})
     assert activity['fee'] == 22.5
     assert activity['quantity'] == .5
     snapshot['transactions'][0]['total'] = 502
     with pytest.raises(RuntimeError, match='price and quantity'):
-        adapter.normalize_trades(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'JPY'})
+        accounting_module.normalize_trades(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'JPY'})
 
 
 @pytest.mark.parametrize('field,value', [
@@ -100,7 +102,7 @@ def test_unverified_metadata_is_blocked(snapshot, field, value):
     ({'US0378331005': 'TEST'}, {'TEST': 'GBp'})])
 def test_no_ticker_fallback_or_quote_unit_guess(snapshot, mapping, quotes):
     with pytest.raises(RuntimeError):
-        adapter.normalize_trades(snapshot, 'target-a', mapping, quotes)
+        accounting_module.normalize_trades(snapshot, 'target-a', mapping, quotes)
 
 
 def test_signed_buy_requires_matching_totals(snapshot):
@@ -145,17 +147,17 @@ def test_identity_scoped_by_source_and_target(snapshot):
     snapshot['source_account'] = '456'
     second = convert(snapshot)[0]
     assert first['comment'] != second['comment']
-    assert adapter.reconcile_trade_holdings([second], [first], {('target-a', 'TEST'): 2}) == [second]
+    assert accounting_module.reconcile_trade_holdings([second], [first], {('target-a', 'TEST'): 2}) == [second]
     first['accountId'] = 'target-b'
     second['comment'] = first['comment']
-    assert adapter.reconcile_trade_holdings([second], [first], {('target-a', 'TEST'): 2}) == [second]
+    assert accounting_module.reconcile_trade_holdings([second], [first], {('target-a', 'TEST'): 2}) == [second]
 
 
 def test_imported_execution_not_subtracted_again(snapshot):
     activity = convert(snapshot)[0]
     existing = dict(activity, id='server-id', date='2026-01-02T10:00:00+01:00')
-    assert adapter.reconcile_trade_holdings([activity], [existing], {}) == []
-    assert adapter.reconcile_trade_holdings([activity, activity], [], {('target-a', 'TEST'): 2}) == [activity]
+    assert accounting_module.reconcile_trade_holdings([activity], [existing], {}) == []
+    assert accounting_module.reconcile_trade_holdings([activity, activity], [], {('target-a', 'TEST'): 2}) == [activity]
 
 
 @pytest.mark.parametrize('field,value', [('fee', .1), ('quantity', 1), ('unitPrice', 9),
@@ -164,38 +166,38 @@ def test_existing_identity_cannot_hide_changed_trade(snapshot, field, value):
     activity = convert(snapshot)[0]
     existing = dict(activity, **{field: value})
     with pytest.raises(RuntimeError, match='changed financial content'):
-        adapter.reconcile_trade_holdings([activity], [existing], {('target-a', 'TEST'): 2})
+        accounting_module.reconcile_trade_holdings([activity], [existing], {('target-a', 'TEST'): 2})
 
 
 def test_duplicate_existing_identity_blocks(snapshot):
     activity = convert(snapshot)[0]
     with pytest.raises(RuntimeError, match='Duplicate existing'):
-        adapter.reconcile_trade_holdings([activity], [activity, activity], {})
+        accounting_module.reconcile_trade_holdings([activity], [activity, activity], {})
     conflict = dict(activity, quantity=1)
     with pytest.raises(RuntimeError, match='Conflicting existing'):
-        adapter.reconcile_trade_holdings([activity], [activity, conflict], {})
+        accounting_module.reconcile_trade_holdings([activity], [activity, conflict], {})
     with pytest.raises(RuntimeError, match='Conflicting pending'):
-        adapter.reconcile_trade_holdings([activity, conflict], [], {('target-a', 'TEST'): 10})
+        accounting_module.reconcile_trade_holdings([activity, conflict], [], {('target-a', 'TEST'): 10})
 
 
 def test_holdings_require_same_account_and_symbol(snapshot):
     activity = convert(snapshot)[0]
     for holdings in ({}, {('target-b', 'TEST'): 2}, {('target-a', 'OTHER'): 2}, {('target-a', 'TEST'): 1.9999}):
         with pytest.raises(RuntimeError, match='negative target holding'):
-            adapter.reconcile_trade_holdings([activity], [], holdings)
-    assert adapter.reconcile_trade_holdings([activity], [], {('target-a', 'TEST'): 2}) == [activity]
+            accounting_module.reconcile_trade_holdings([activity], [], holdings)
+    assert accounting_module.reconcile_trade_holdings([activity], [], {('target-a', 'TEST'): 2}) == [activity]
 
 
 def test_chronology_and_fractional_position_guard(snapshot):
     sell = convert(snapshot)[0]
     purchase = dict(sell, comment='DEGIRO#123:TRADE:11', type='BUY', quantity=2,
                     date='2026-01-01T09:00:00+00:00')
-    assert adapter.reconcile_trade_holdings([sell, purchase], [], {}) == [purchase, sell]
+    assert accounting_module.reconcile_trade_holdings([sell, purchase], [], {}) == [purchase, sell]
     purchase['date'] = '2026-01-03T09:00:00+00:00'
     with pytest.raises(RuntimeError, match='negative'):
-        adapter.reconcile_trade_holdings([purchase, sell], [], {})
+        accounting_module.reconcile_trade_holdings([purchase, sell], [], {})
     sell['quantity'] = .125
-    assert adapter.reconcile_trade_holdings([sell], [], {('target-a', 'TEST'): .125}) == [sell]
+    assert accounting_module.reconcile_trade_holdings([sell], [], {('target-a', 'TEST'): .125}) == [sell]
 
 
 def test_manual_overlap_blocks_without_silent_identity_adoption(snapshot):
@@ -204,21 +206,21 @@ def test_manual_overlap_blocks_without_silent_identity_adoption(snapshot):
     for quantity in (2, 4):
         manual['quantity'] = quantity
         with pytest.raises(RuntimeError, match='explicit reconciliation'):
-            adapter.reconcile_trade_holdings([activity], [manual], {('target-a', 'TEST'): 10})
+            accounting_module.reconcile_trade_holdings([activity], [manual], {('target-a', 'TEST'): 10})
     manual['accountId'] = 'target-b'
-    assert adapter.reconcile_trade_holdings([activity], [manual], {('target-a', 'TEST'): 2}) == [activity]
+    assert accounting_module.reconcile_trade_holdings([activity], [manual], {('target-a', 'TEST'): 2}) == [activity]
 
 
 def test_financial_values_do_not_echo_private_data():
     with pytest.raises(RuntimeError) as error:
-        adapter.financial_decimal('PRIVATE-NONNUMERIC')
+        accounting_module.financial_decimal('PRIVATE-NONNUMERIC')
     assert 'PRIVATE' not in str(error.value)
 
 
 def test_dividend_identity_is_not_a_trade_identity(snapshot):
     activity = convert(snapshot)[0]
     dividend = dict(activity, comment='DEGIRO#123:DIVIDEND:101', type='DIVIDEND')
-    assert adapter.reconcile_trade_holdings([activity], [dividend], {('target-a', 'TEST'): 2}) == [activity]
+    assert accounting_module.reconcile_trade_holdings([activity], [dividend], {('target-a', 'TEST'): 2}) == [activity]
 
 
 @pytest.mark.parametrize('field,value', [('quantity', -2), ('quantity', 0),
@@ -227,4 +229,4 @@ def test_holdings_reject_malformed_pending_activities(snapshot, field, value):
     activity = convert(snapshot)[0]
     activity[field] = value
     with pytest.raises(RuntimeError):
-        adapter.reconcile_trade_holdings([activity], [], {('target-a', 'TEST'): 10})
+        accounting_module.reconcile_trade_holdings([activity], [], {('target-a', 'TEST'): 10})

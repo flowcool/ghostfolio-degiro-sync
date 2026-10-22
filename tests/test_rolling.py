@@ -8,6 +8,12 @@ import pytest
 import yaml
 
 import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import accounting as accounting_module
+from ghostfolio_degiro_sync import degiro as degiro_module
+from ghostfolio_degiro_sync import ghostfolio as ghostfolio_module
+from ghostfolio_degiro_sync import journal as journal_module
+from ghostfolio_degiro_sync import sync as sync_module
+
 from test_prospective import evidence, prospective_account, sync_account, cash_statement
 from test_degiro_sync import activity_row
 
@@ -62,15 +68,15 @@ def test_bad_evidence_refuses_before_writes(rolling, change, message):
     config, snapshot, destination = rolling
     config["dry_run"] = False
     if change == "gap":
-        with adapter.account_journal(config) as journal:
+        with journal_module.account_journal(config) as journal:
             journal["document"]["coverage"] = {"from_date": "2025-01-01", "through": "2025-10-06T12:00:00Z"}
-            adapter.write_journal(journal)
+            journal_module.write_journal(journal)
     elif change == "future":
         snapshot["transactions"][0]["date"] = "2026-01-05T00:00:00Z"
     elif change == "holdings":
         snapshot["update"]["portfolio"]["value"][-1]["value"][-1]["value"] = 99
     elif change == "conflict":
-        activities = adapter.normalize_trades(snapshot, "target-a", {"US0378331005": "TEST"}, {"TEST": "USD"})
+        activities = accounting_module.normalize_trades(snapshot, "target-a", {"US0378331005": "TEST"}, {"TEST": "USD"})
         row = activity_row(activities[0], "changed")
         row["fee"] += 1
         destination["activities"]["activities"].append(row)
@@ -87,9 +93,9 @@ def test_bad_evidence_refuses_before_writes(rolling, change, message):
 
 def test_explicit_catchup_covers_gap(rolling):
     config, snapshot, destination = rolling
-    with adapter.account_journal(config) as journal:
+    with journal_module.account_journal(config) as journal:
         journal["document"]["coverage"] = {"from_date": "2025-01-01", "through": "2025-10-06T12:00:00Z"}
-        adapter.write_journal(journal)
+        journal_module.write_journal(journal)
     snapshot["from_date"] = "2025-10-06"
     assert len(sync_account(rolling)["proposed"]) == 3
     assert state(config)["coverage"]["through"] == "2025-10-06T12:00:00Z"
@@ -134,8 +140,8 @@ def test_restart_only_complete_exact_readback_can_continue(rolling, readback):
 
 def test_cash_uncertainty_is_not_automatically_resolved(rolling):
     config, snapshot, destination = rolling
-    with adapter.account_journal(config) as journal:
-        adapter.begin_intent(journal, "cash", {"account": "target-a", "balance": 12.3})
+    with journal_module.account_journal(config) as journal:
+        journal_module.begin_intent(journal, "cash", {"account": "target-a", "balance": 12.3})
     before = deepcopy(state(config))
     with pytest.raises(RuntimeError, match="durable write intent"):
         sync_account(rolling)
@@ -155,16 +161,16 @@ def test_ibkr_manual_matching_boundaries(kind, gap, qty, expected):
     entries = [row]
     if expected == "refuse":
         with pytest.raises(RuntimeError, match="manual trade"):
-            adapter.match_manual_activity(activity, entries)
+            ghostfolio_module.match_manual_activity(activity, entries)
     else:
-        assert adapter.match_manual_activity(activity, entries) is expected
+        assert ghostfolio_module.match_manual_activity(activity, entries) is expected
         if expected and kind != "DIVIDEND":
             assert entries == []
 
 
 def test_matching_manual_sell_prevents_duplicate_and_preserves_holdings(rolling):
     config, snapshot, destination = rolling
-    activity = adapter.normalize_trades(snapshot, "target-a", {"US0378331005": "TEST"}, {"TEST": "USD"})[0]
+    activity = accounting_module.normalize_trades(snapshot, "target-a", {"US0378331005": "TEST"}, {"TEST": "USD"})[0]
     activity["comment"] = None
     row = activity_row(activity, "manual-sell")
     row["date"] = "2026-01-03T00:00:00Z"
@@ -203,7 +209,7 @@ def test_actual_command_uses_rolling_today_and_private_read_only_plan(rolling, m
     def exchange(host, token):
         auth_calls.append((host, token))
         return 'synthetic-token'
-    monkeypatch.setattr(adapter, 'ghost_exchange_access_token', exchange)
+    monkeypatch.setattr(ghostfolio_module, 'ghost_exchange_access_token', exchange)
     if credential_mode == 'access':
         monkeypatch.delenv('GHOST_TOKEN')
         monkeypatch.setenv('GHOST_ACCESS_TOKEN', 'synthetic-security-token')
@@ -218,7 +224,7 @@ def test_actual_command_uses_rolling_today_and_private_read_only_plan(rolling, m
         assert len(auth_calls) == (1 if credential_mode == 'access' else 0)
         queried.append((start.isoformat(), end.isoformat(), kwargs))
         return deepcopy(snapshot)
-    monkeypatch.setattr(adapter, 'read_degiro', acquire)
+    monkeypatch.setattr(degiro_module, 'read_degiro', acquire)
     reads = []
     def get(url):
         reads.append(url)
@@ -228,7 +234,7 @@ def test_actual_command_uses_rolling_today_and_private_read_only_plan(rolling, m
         assert cfg['dry_run'] is True
         assert cfg['ghost_token'] == 'synthetic-token' and 'ghost_access_token' not in cfg
         yield SimpleNamespace(get=get)
-    monkeypatch.setattr(adapter, 'ghost_transport', transport)
+    monkeypatch.setattr(ghostfolio_module, 'ghost_transport', transport)
     monkeypatch.setattr(adapter.core, 'ghost_import_activities', lambda *a: pytest.fail('POST'))
     monkeypatch.setattr(adapter.core, 'ghost_update_cash_balance', lambda *a: pytest.fail('PUT'))
     assert adapter.main(['--sync']) == 0
@@ -244,7 +250,7 @@ def test_actual_command_uses_rolling_today_and_private_read_only_plan(rolling, m
 
 def test_manual_match_never_hides_changed_canonical_identity(rolling):
     config, snapshot, destination = rolling
-    a = adapter.normalize_trades(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'USD'})[0]
+    a = accounting_module.normalize_trades(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'USD'})[0]
     manual = activity_row({**a, 'comment': None}, 'manual')
     canonical = activity_row({**a, 'fee': a['fee'] + 1}, 'canonical')
     destination['activities']['activities'].extend([manual, canonical])
@@ -258,7 +264,7 @@ def test_repeated_source_identity_does_not_consume_manual_entry_twice():
          'dataSource': 'YAHOO', 'date': '2026-01-01T00:00:00Z', 'fee': 0,
          'quantity': 2, 'symbol': 'TEST', 'type': 'BUY', 'unitPrice': 10}
     manual = {**a, 'comment': None}
-    assert adapter.pending_activities([a, deepcopy(a)], [manual], {'id': 'target-a'}, '123',
+    assert ghostfolio_module.pending_activities([a, deepcopy(a)], [manual], {'id': 'target-a'}, '123',
                                       manual_matching=True) == []
 
 
@@ -267,6 +273,6 @@ def test_rolling_failure_diagnostics_are_visible_in_dry_run(monkeypatch, caplog,
     monkeypatch.setenv("DRY_RUN", "1")
     def refused(*args):
         raise RuntimeError(message)
-    monkeypatch.setattr(adapter, "run_sync", refused)
+    monkeypatch.setattr(sync_module, "run_sync", refused)
     assert adapter.main(["--sync"]) == 1
     assert message in caplog.text

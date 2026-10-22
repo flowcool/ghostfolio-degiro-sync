@@ -10,7 +10,7 @@ from typing import Any, TypeGuard, cast
 
 import yaml
 
-from ghostfolio_degiro_sync.identity import broker_identity, execution_comment
+from ghostfolio_degiro_sync import identity as identity_module
 
 # Observed placeholders only; nonzero cash in these currencies is not authorized.
 CASH_CURRENCIES = frozenset({"CAD", "CHF", "DKK", "EUR", "GBP", "HKD", "JPY", "NOK", "SEK", "USD"})
@@ -123,9 +123,9 @@ def convert_trade_to_activity(trade: Any, product: Any, source_account: Any, tar
         raise RuntimeError("Invalid DEGIRO execution metadata")
     if not isinstance(target_account, str) or not target_account.strip():
         raise RuntimeError("Missing Ghostfolio target account")
-    comment = execution_comment(source_account, trade.get("id"))
-    product_id = broker_identity(trade.get("productId"))
-    if broker_identity(product.get("id")) != product_id:
+    comment = identity_module.execution_comment(source_account, trade.get("id"))
+    product_id = identity_module.broker_identity(trade.get("productId"))
+    if identity_module.broker_identity(product.get("id")) != product_id:
         raise RuntimeError("DEGIRO product identity mismatch")
     if product.get("productType") != "STOCK" or financial_decimal(product.get("contractSize")) != 1:
         raise RuntimeError("Unverified DEGIRO instrument units")
@@ -187,7 +187,7 @@ def normalize_trades(snapshot: dict[str, Any], target_account: Any, mapping: dic
     merge_history(rows, snapshot["transactions"])
     result: list[dict[str, Any]] = []
     for trade in rows:
-        product_id = broker_identity(trade.get("productId"))
+        product_id = identity_module.broker_identity(trade.get("productId"))
         product = snapshot["products"].get(product_id)
         result.append(convert_trade_to_activity(trade, product, snapshot["source_account"],
             target_account, snapshot["account_info"]["baseCurrency"], mapping, quote_currencies))
@@ -303,7 +303,7 @@ def classify_cash_movements(rows: list[dict[str, Any]], rules: dict[str, Any] | 
     merge_history(unique, rows, cash=True)
     result: dict[str, list[dict[str, Any]]] = {name: [] for name in rules}
     for row in unique:
-        broker_identity(row.get("id"))
+        identity_module.broker_identity(row.get("id"))
         broker_instant(row.get("date"))
         description = row.get("description")
         if not isinstance(description, str):
@@ -331,7 +331,7 @@ def classify_cash_movements(rows: list[dict[str, Any]], rules: dict[str, Any] | 
             if rule.get("treatment") in ("zero_interest", "positive_compensation"):
                 validate_cash_yield(row, name, rule["treatment"])
         if rule.get("product_required"):
-            broker_identity(row.get("productId"))
+            identity_module.broker_identity(row.get("productId"))
         if rule.get("order_required") and (
                 not isinstance(row.get("orderId"), str) or not row["orderId"].strip()):
             raise RuntimeError("Missing DEGIRO cash order relation")
@@ -366,7 +366,7 @@ def normalize_cash_yield(snapshot: dict[str, Any], target_account: Any, rules: A
         raise RuntimeError("Unsupported DEGIRO cash category blocks account writes")
     if not isinstance(target_account, str) or not target_account.strip():
         raise RuntimeError("Missing Ghostfolio target account")
-    source = broker_identity(snapshot["source_account"])
+    source = identity_module.broker_identity(snapshot["source_account"])
     result: list[dict[str, Any]] = []
     for category, kind, label in (("flatex_interest", "INTEREST", "FLATEX_INTEREST"),
                                  ("monetary_fund_compensation", "COMPENSATION", "MMF_COMPENSATION")):
@@ -375,7 +375,7 @@ def normalize_cash_yield(snapshot: dict[str, Any], target_account: Any, rules: A
             if snapshot["account_info"]["baseCurrency"] != "EUR":
                 raise RuntimeError("Unverified DEGIRO cash yield account currency")
             result.append({"accountId": target_account,
-                "comment": f"DEGIRO#{source}:{kind}:{broker_identity(row['id'])}",
+                "comment": f"DEGIRO#{source}:{kind}:{identity_module.broker_identity(row['id'])}",
                 "currency": "EUR", "dataSource": "MANUAL", "date": broker_instant(row["date"]),
                 "fee": 0, "quantity": 1, "symbol": f"GF_DEGIRO_{source}_{label}_EUR",
                 "type": "INTEREST", "unitPrice": float(financial_decimal(row["change"]))})
@@ -389,7 +389,7 @@ def associate_dividends(classified: Any) -> Any:
         for row in classified.get(category, []):
             if row.get("orderId") not in (None, ""):
                 raise RuntimeError("Unverified DEGIRO dividend relation")
-            key = (broker_identity(row.get("productId")), row["currency"],
+            key = (identity_module.broker_identity(row.get("productId")), row["currency"],
                    broker_instant(row.get("date")), broker_instant(row.get("valueDate")))
             groups.setdefault(key, {"paid_dividend": [], "dividend_withholding": []})[category].append(row)
     pairs = []
@@ -415,9 +415,9 @@ def normalize_dividends(snapshot: dict[str, Any], target_account: Any, mapping: 
         raise RuntimeError("Missing Ghostfolio target account")
     result: list[dict[str, Any]] = []
     for dividend, withholding in associate_dividends(classified):
-        product_id = broker_identity(dividend["productId"])
+        product_id = identity_module.broker_identity(dividend["productId"])
         product = snapshot["products"].get(product_id)
-        if (not isinstance(product, dict) or broker_identity(product.get("id")) != product_id
+        if (not isinstance(product, dict) or identity_module.broker_identity(product.get("id")) != product_id
                 or product.get("productType") != "STOCK"
                 or financial_decimal(product.get("contractSize")) != 1):
             raise RuntimeError("Unverified DEGIRO dividend instrument")
@@ -436,7 +436,7 @@ def normalize_dividends(snapshot: dict[str, Any], target_account: Any, mapping: 
         if not isfinite(gross) or gross <= 0 or not isfinite(tax) or tax <= 0:
             raise RuntimeError("DEGIRO dividend cannot be represented safely")
         result.append({"accountId": target_account,
-            "comment": f"DEGIRO#{broker_identity(snapshot['source_account'])}:DIVIDEND:{broker_identity(dividend['id'])}",
+            "comment": f"DEGIRO#{identity_module.broker_identity(snapshot['source_account'])}:DIVIDEND:{identity_module.broker_identity(dividend['id'])}",
             "currency": currency, "dataSource": "YAHOO", "date": broker_instant(dividend["date"]),
             "fee": tax, "quantity": 1, "symbol": symbol, "type": "DIVIDEND", "unitPrice": gross})
     return sorted(result, key=lambda activity: (activity["date"], activity["comment"]))
@@ -449,12 +449,12 @@ def reconcile_execution_costs(classified: Any, transactions: Any, base_currency:
     matched = set()
     for row in classified.get("trade_commission", []):
         candidates = [trade for trade in executions
-            if broker_identity(trade.get("productId")) == broker_identity(row["productId"])
+            if identity_module.broker_identity(trade.get("productId")) == identity_module.broker_identity(row["productId"])
             and broker_instant(trade.get("date")) == broker_instant(row["date"])]
         if len(candidates) != 1 or row["currency"] != base_currency:
             raise RuntimeError("Unverified or ambiguous DEGIRO execution cost")
         trade = candidates[0]
-        identity = broker_identity(trade.get("id"))
+        identity = identity_module.broker_identity(trade.get("id"))
         brokerage = financial_decimal(trade.get("feeInBaseCurrency"))
         autofx = financial_decimal(trade.get("autoFxFeeInBaseCurrency"))
         total = financial_decimal(trade.get("totalFeesInBaseCurrency"))
@@ -474,7 +474,7 @@ def normalize_fees(snapshot: dict[str, Any], target_account: Any, rules: Any=Non
         raise RuntimeError("Unsupported DEGIRO cash category blocks account writes")
     if not isinstance(target_account, str) or not target_account.strip():
         raise RuntimeError("Missing Ghostfolio target account")
-    source_account = broker_identity(snapshot["source_account"])
+    source_account = identity_module.broker_identity(snapshot["source_account"])
     base_currency = snapshot["account_info"]["baseCurrency"]
     reconcile_execution_costs(classified, snapshot["transactions"], base_currency)
     result: list[dict[str, Any]] = []
@@ -493,7 +493,7 @@ def normalize_fees(snapshot: dict[str, Any], target_account: Any, rules: Any=Non
             if not isfinite(fee) or fee <= 0 or Decimal(str(fee)) != amount:
                 raise RuntimeError("DEGIRO autonomous fee cannot be represented safely")
             result.append({"accountId": target_account,
-                "comment": f"DEGIRO#{source_account}:FEE:{broker_identity(row['id'])}",
+                "comment": f"DEGIRO#{source_account}:FEE:{identity_module.broker_identity(row['id'])}",
                 "currency": "EUR", "dataSource": "MANUAL", "date": broker_instant(row["date"]),
                 "fee": fee, "quantity": 1,
                 "symbol": f"GF_DEGIRO_{source_account}_EXCHANGE_CONNECTION_EUR",
@@ -511,7 +511,7 @@ def current_cash_balance(snapshot: dict[str, Any], target_account: Any, source_a
         fetched = datetime.fromisoformat(broker_instant(snapshot["fetched_at"]))
         if not now - timedelta(minutes=5) <= started <= fetched <= now:
             raise RuntimeError("DEGIRO cash snapshot is stale or has invalid timing")
-        if broker_identity(snapshot["source_account"]) != broker_identity(source_account):
+        if identity_module.broker_identity(snapshot["source_account"]) != identity_module.broker_identity(source_account):
             raise RuntimeError("DEGIRO cash source account mismatch")
         if (not isinstance(target_account, dict) or not isinstance(target_account.get("id"), str)
                 or not target_account["id"].strip()):
@@ -614,8 +614,6 @@ def validate_cash_yield_identity(activity: dict[str, Any], namespace: str) -> No
             raise RuntimeError("Invalid canonical DEGIRO cash yield evidence")
 
 
-
-
 def merge_history(existing: list[dict[str, Any]], rows: list[dict[str, Any]], require_ids: bool=True, cash: bool=False, identity_field: str="id") -> list[dict[str, Any]]:
     """Keep equal overlap rows once; reject missing identities or conflicting content."""
     for row in rows:
@@ -637,3 +635,12 @@ def merge_history(existing: list[dict[str, Any]], rows: list[dict[str, Any]], re
         else:
             existing.append(row)
     return existing
+
+
+def prospective_instant(value: Any) -> Any:
+    """Require explicit seconds and offset; never manufacture missing precision."""
+    if (not isinstance(value, str) or not re.fullmatch(
+            r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+            r"(?:\.[0-9]{1,6})?(?:Z|[+-][0-9]{2}:[0-9]{2})", value)):
+        raise RuntimeError("Ambiguous prospective timestamp precision")
+    return datetime.fromisoformat(broker_instant(value))

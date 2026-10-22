@@ -1,10 +1,18 @@
 """Validate external configuration before constructing immutable records."""
 
+import os
 import re
 from collections.abc import Mapping
 from ipaddress import ip_address
+from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
+import yaml
+
+from ghostfolio_degiro_sync import accounting as accounting_module
+from ghostfolio_degiro_sync import diagnostics as diagnostics_module
+from ghostfolio_degiro_sync import identity as identity_module
 from ghostfolio_degiro_sync.models import Settings
 
 
@@ -99,3 +107,73 @@ def validate_ghost_host(host: object) -> str:
         return host
     except (ValueError, TypeError):
         raise RuntimeError("Ghostfolio target URL is outside the approved origin policy") from None
+
+
+def load_ghost_credentials() -> Any:
+    """Exactly one environment credential; blank inputs count as absent."""
+    host = validate_ghost_host(os.environ.get("GHOST_HOST"))
+    token = os.environ.get("GHOST_TOKEN")
+    access = os.environ.get("GHOST_ACCESS_TOKEN")
+    token = token if token and token.strip() else None
+    access = access if access and access.strip() else None
+    if (token is None) == (access is None):
+        raise RuntimeError("Set exactly one of GHOST_TOKEN or GHOST_ACCESS_TOKEN")
+    if token is not None:
+        if "\r" in token or "\n" in token:
+            raise RuntimeError("Invalid Ghostfolio sync environment")
+        return {"ghost_host": host, "ghost_token": token}
+    return {"ghost_host": host, "ghost_token": None, "ghost_access_token": access}
+
+
+def verified_mapping_document(document: Any) -> Any:
+    """One mapping contract shared by runtime and offline cutover preparation."""
+    try:
+        if not isinstance(document, dict) or not document:
+            raise ValueError
+        mapping: dict[str, str] = {}
+        quotes: dict[str, str] = {}
+        for isin, entry in document.items():
+            if (not accounting_module.valid_isin(isin) or not isinstance(entry, dict)
+                    or set(entry) != {"symbol", "currency"}
+                    or not isinstance(entry["symbol"], str) or not entry["symbol"].strip()
+                    or entry["symbol"] != entry["symbol"].strip()
+                    or entry["currency"] not in accounting_module.CURRENCY_QUANTA):
+                raise ValueError
+            symbol, currency = entry["symbol"], entry["currency"]
+            if symbol in quotes and quotes[symbol] != currency:
+                raise ValueError
+            mapping[isin], quotes[symbol] = symbol, currency
+        return mapping, quotes
+    except (ValueError, TypeError, KeyError):
+        raise RuntimeError("Invalid explicitly verified Yahoo mapping file") from None
+
+
+def load_sync_config() -> Any:
+    """Operator configuration only; credentials are read verbatim from environment."""
+    sync_mode = os.environ.get("SYNC_MODE")
+    if sync_mode is None or not sync_mode.strip():
+        raise diagnostics_module.tag_failure(RuntimeError("Set SYNC_MODE explicitly: rolling, prospective or full_history"),
+                          "config", "sync_mode")
+    if sync_mode not in ("full_history", "prospective", "rolling"):
+        raise diagnostics_module.tag_failure(RuntimeError("Invalid synchronization mode"), "config", "sync_mode")
+    with diagnostics_module.diagnostic_boundary("config", "ghostfolio_credentials"):
+        credentials = load_ghost_credentials()
+    target = os.environ.get("GHOST_ACCOUNT_ID")
+    with diagnostics_module.diagnostic_boundary("config", "account"):
+        source = identity_module.broker_identity(os.environ.get("DEGIRO_ACCOUNT_ID"))
+    mode = os.environ.get("DRY_RUN", "1").strip().lower()
+    if (not isinstance(target, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", target)
+            or mode not in ("1", "true", "yes", "on", "0", "false", "no", "off")):
+        raise diagnostics_module.tag_failure(RuntimeError("Invalid Ghostfolio sync environment"), "config", "account")
+    try:
+        document = yaml.safe_load(Path(os.environ.get("MAPPING_FILE", "mapping.yaml")).read_text())
+        with diagnostics_module.diagnostic_boundary("config", "mapping"):
+            mapping, quotes = verified_mapping_document(document)
+    except (OSError, ValueError, TypeError, KeyError, yaml.YAMLError):
+        raise diagnostics_module.tag_failure(RuntimeError("Invalid explicitly verified Yahoo mapping file"),
+                          "config", "mapping") from None
+    return runtime_config(parse_settings({**credentials, "source_account": source,
+            "target_account": target, "dry_run": mode in ("1", "true", "yes", "on"),
+            "state_dir": os.environ.get("STATE_DIR"), "sync_mode": sync_mode,
+            "cutover_manifest": os.environ.get("CUTOVER_MANIFEST"),
+            "cutover_sha256": os.environ.get("CUTOVER_SHA256")})), mapping, quotes

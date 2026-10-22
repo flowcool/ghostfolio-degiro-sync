@@ -15,6 +15,12 @@ import yaml
 import degiro_to_ghostfolio as adapter
 
 
+from ghostfolio_degiro_sync import config as config_module
+from ghostfolio_degiro_sync import degiro as degiro_module
+from ghostfolio_degiro_sync import ghostfolio as ghostfolio_module
+from ghostfolio_degiro_sync import journal as journal_module
+from ghostfolio_degiro_sync import sync as sync_module
+
 MAPPING = {"US0378331005": "TEST"}
 QUOTES = {"TEST": "USD"}
 CUTOVER = "2025-12-31T12:00:00+00:00"
@@ -44,7 +50,7 @@ def evidence(tmp_path):
         "activities": {"count": 1, "activities": [row]}}
     manifest = {"version": 1, "source_account": "123", "target_account": "target-a",
         "cutover": CUTOVER, "basis_status": "unverified",
-        "mapping_sha256": adapter.evidence_digest({"mapping": MAPPING, "quote_currencies": QUOTES}),
+        "mapping_sha256": journal_module.evidence_digest({"mapping": MAPPING, "quote_currencies": QUOTES}),
         "opening": {}}
     for name, capture in (("broker", broker), ("destination", destination)):
         path = tmp_path / (name + ".json")
@@ -52,12 +58,12 @@ def evidence(tmp_path):
         manifest["opening"][name] = {"path": path.name, "sha256": digest}
     path = tmp_path / "manifest.yaml"
     digest = private_file(path, yaml.safe_dump(manifest).encode())
-    result = adapter.load_prospective_evidence(path, digest)
+    result = journal_module.load_prospective_evidence(path, digest)
     return result, path, digest
 
 
 def opening_context(evidence, mapping=None):
-    return adapter.prospective_opening_context(evidence,
+    return sync_module.prospective_opening_context(evidence,
         {"source_account": "123", "target_account": "target-a"},
         MAPPING if mapping is None else mapping, QUOTES)
 
@@ -70,7 +76,7 @@ def test_verified_opening_preserves_history_and_separates_basis(evidence):
     assert set(context["protected"]) == {"opening"}
     assert context["cash"] == 12.3 and context["basis_status"] == "unverified"
     assert path.read_bytes() == before
-    assert adapter.load_prospective_evidence(path, digest) == loaded
+    assert journal_module.load_prospective_evidence(path, digest) == loaded
 
 
 @pytest.mark.parametrize("change", ["quantity", "cash", "source", "target", "mapping",
@@ -120,14 +126,14 @@ def test_changed_public_or_symlink_evidence_refused(evidence, tmp_path):
     alias = tmp_path / "alias.yaml"
     alias.symlink_to(path)
     with pytest.raises(RuntimeError):
-        adapter.load_prospective_evidence(alias, digest)
+        journal_module.load_prospective_evidence(alias, digest)
     path.chmod(0o644)
     with pytest.raises(RuntimeError):
-        adapter.load_prospective_evidence(path, digest)
+        journal_module.load_prospective_evidence(path, digest)
     path.chmod(0o600)
     path.write_bytes(path.read_bytes() + b"\n")
     with pytest.raises(RuntimeError, match="Changed"):
-        adapter.load_prospective_evidence(path, digest)
+        journal_module.load_prospective_evidence(path, digest)
 
 
 def test_changed_bound_capture_refused(evidence):
@@ -136,7 +142,7 @@ def test_changed_bound_capture_refused(evidence):
     before = capture.read_bytes()
     capture.write_bytes(before + b"\n")
     with pytest.raises(RuntimeError, match="Changed"):
-        adapter.load_prospective_evidence(path, digest)
+        journal_module.load_prospective_evidence(path, digest)
     assert capture.read_bytes() == before + b"\n"
 
 
@@ -144,7 +150,7 @@ def test_duplicate_manifest_key_refused(evidence):
     unused_loaded, path, unused_digest = evidence
     digest = private_file(path, path.read_bytes() + b"version: 1\n")
     with pytest.raises(RuntimeError, match="Duplicate"):
-        adapter.load_prospective_evidence(path, digest)
+        journal_module.load_prospective_evidence(path, digest)
 
 
 def cash_statement(snapshot):
@@ -194,7 +200,7 @@ def prospective_account(evidence, tmp_path):
 
 def sync_account(account, importer=None, writer=None):
     config, snapshot, destination = account
-    return adapter.synchronize_account(config, snapshot, destination["account"],
+    return sync_module.synchronize_account(config, snapshot, destination["account"],
         destination["activities"], MAPPING, QUOTES,
         importer or (lambda unused: pytest.fail("Unexpected POST")),
         writer or (lambda *unused: pytest.fail("Unexpected PUT")),
@@ -250,7 +256,7 @@ def test_first_and_repeat_preserve_legacy_and_use_opening_inventory(prospective_
     first = sync_account(prospective_account, post, lambda *args: balances.append(args) or True)
     assert len(first["accepted"]) == 3 and first["history_verified"] is False
     assert body["activities"][0] == opening
-    assert adapter.existing_activity_context(body, destination["account"])[1] == {("target-a", "TEST"): 8}
+    assert ghostfolio_module.existing_activity_context(body, destination["account"])[1] == {("target-a", "TEST"): 8}
     second = sync_account(prospective_account, post, lambda *args: balances.append(args) or True)
     assert second["proposed"] == [] and len(imports) == 3
     assert body["activities"][0] == opening
@@ -331,10 +337,10 @@ def test_actual_dry_run_command_exercises_config_and_orchestration(prospective_a
         monkeypatch.setenv(key, value)
     # Real run_sync/load_sync_config and real synchronize_locked, with only acquisition replaced.
     def acquired(cfg, mapping, quotes, from_date, to_date, window_days, journal=None):
-        return adapter.synchronize_locked(cfg, snapshot, destination["account"], destination["activities"],
+        return sync_module.synchronize_locked(cfg, snapshot, destination["account"], destination["activities"],
             mapping, quotes, lambda rows: pytest.fail("POST"), lambda *args: pytest.fail("PUT"),
             now=datetime.fromisoformat(snapshot["fetched_at"]), journal=journal)
-    monkeypatch.setattr(adapter, "run_sync_locked", acquired)
+    monkeypatch.setattr(sync_module, "run_sync_locked", acquired)
     with caplog.at_level("INFO"):
         assert adapter.main(["--sync", "--from-date", "2025-12-31", "--to-date", "2026-01-04"]) == 0
     assert "historical completeness and basis remain unverified" in caplog.text
@@ -363,7 +369,7 @@ def test_dry_run_command_keeps_acquisition_scope_and_read_only_transports(prospe
     def exchange(host, token):
         auth_calls.append((host, token))
         return 'synthetic-token'
-    monkeypatch.setattr(adapter, 'ghost_exchange_access_token', exchange)
+    monkeypatch.setattr(ghostfolio_module, 'ghost_exchange_access_token', exchange)
     if credential_mode == 'access':
         monkeypatch.delenv('GHOST_TOKEN')
         monkeypatch.setenv('GHOST_ACCESS_TOKEN', 'synthetic-security-token')
@@ -379,8 +385,8 @@ def test_dry_run_command_keeps_acquisition_scope_and_read_only_transports(prospe
     def transport(cfg, target):
         assert cfg['ghost_token'] == 'synthetic-token' and 'ghost_access_token' not in cfg
         yield SimpleNamespace(get=get)
-    monkeypatch.setattr(adapter, "read_degiro", read)
-    monkeypatch.setattr(adapter, "ghost_transport", transport)
+    monkeypatch.setattr(degiro_module, "read_degiro", read)
+    monkeypatch.setattr(ghostfolio_module, "ghost_transport", transport)
     monkeypatch.setattr(adapter.core, "ghost_import_activities", lambda *args: pytest.fail("POST"))
     monkeypatch.setattr(adapter.core, "ghost_update_cash_balance", lambda *args: pytest.fail("PUT"))
     # A narrow requested lookback cannot replace the manifest's full replay interval.
@@ -415,7 +421,7 @@ def test_prepare_command_publishes_only_after_validating_and_refuses_overwrite(e
     assert prepare_cutover.main(args) == 0
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
     assert "CUTOVER_SHA256=" + digest in capsys.readouterr().out
-    assert adapter.prospective_opening_context(adapter.load_prospective_evidence(output, digest),
+    assert sync_module.prospective_opening_context(journal_module.load_prospective_evidence(output, digest),
         {"source_account": "123", "target_account": "target-a"}, MAPPING, QUOTES)["quantities"] == {
             ("target-a", "TEST"): 10}
     assert output.stat().st_mode & 0o777 == 0o600
@@ -465,7 +471,7 @@ def test_read_only_capture_publishes_private_candidates_without_financial_writes
     loaded, unused_path, unused_digest = evidence
     config = {'dry_run': True, 'ghost_host': 'http://localhost:3333', 'source_account': '123',
         'target_account': 'target-a'}
-    monkeypatch.setattr(adapter, 'load_sync_config', lambda: (config, MAPPING, QUOTES))
+    monkeypatch.setattr(config_module, 'load_sync_config', lambda: (config, MAPPING, QUOTES))
     calls = []
     @contextmanager
     def transport(cfg, target):
@@ -483,8 +489,8 @@ def test_read_only_capture_publishes_private_candidates_without_financial_writes
         result['fetched_at'] = datetime.now(timezone.utc).isoformat()
         result['from_date'], result['to_date'] = start.isoformat(), end.isoformat()
         return result
-    monkeypatch.setattr(adapter, 'ghost_transport', transport)
-    monkeypatch.setattr(adapter, 'read_degiro', read)
+    monkeypatch.setattr(ghostfolio_module, 'ghost_transport', transport)
+    monkeypatch.setattr(degiro_module, 'read_degiro', read)
     monkeypatch.setattr(adapter.core, 'ghost_import_activities', lambda *args: pytest.fail('POST'))
     monkeypatch.setattr(adapter.core, 'ghost_update_cash_balance', lambda *args: pytest.fail('PUT'))
     output = tmp_path / 'capture'
@@ -509,9 +515,9 @@ def test_read_only_capture_publishes_private_candidates_without_financial_writes
         "--output-directory", str(combined)]) == 0
     manifest = combined / "manifest.yaml"
     digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
-    assert opening_context(adapter.load_prospective_evidence(manifest, digest))["cutover"]
+    assert opening_context(journal_module.load_prospective_evidence(manifest, digest))["cutover"]
     assert len(calls) == 4
-    loaded_combined = adapter.load_prospective_evidence(manifest, digest)
+    loaded_combined = journal_module.load_prospective_evidence(manifest, digest)
     assert loaded_combined['captures']['broker']['from_date'] == start
     with pytest.raises(RuntimeError):
         prepare_cutover.capture(tmp_path / 'future-capture', config, '9999-01-01')
@@ -537,7 +543,7 @@ def test_read_only_capture_publishes_private_candidates_without_financial_writes
 def test_capture_failure_reports_safe_stage_without_private_details(monkeypatch, capsys, tmp_path,
                                                                    failure, expected):
     from scripts import prepare_cutover
-    monkeypatch.setattr(adapter, 'load_sync_config', lambda: ({'dry_run': True}, {}, {}))
+    monkeypatch.setattr(config_module, 'load_sync_config', lambda: ({'dry_run': True}, {}, {}))
     def refuse(*args):
         raise RuntimeError(failure)
     monkeypatch.setattr(prepare_cutover, 'capture', refuse)
@@ -581,7 +587,7 @@ def test_uncertain_cash_remains_fenced_with_no_coverage_checkpoint(prospective_a
         return batch, True
     with pytest.raises(RuntimeError, match='Uncertain cash'):
         sync_account(prospective_account, post, lambda *args: False)
-    with adapter.account_journal(config) as journal:
+    with journal_module.account_journal(config) as journal:
         assert journal['document']['pending']['kind'] == 'cash'
         assert set(journal['document']) == {'version', 'owner', 'pending', 'resolved'}
     config['dry_run'] = True
@@ -647,9 +653,9 @@ def test_closed_holding_needs_no_metadata_but_requires_identity(evidence, mismat
                   {"name": "size", "value": 0}]})
     if mismatch:
         with pytest.raises(RuntimeError, match="identity"):
-            adapter.broker_stock_holdings(snapshot, {"id": "target-a"}, MAPPING, QUOTES)
+            sync_module.broker_stock_holdings(snapshot, {"id": "target-a"}, MAPPING, QUOTES)
     else:
-        assert adapter.broker_stock_holdings(snapshot, {"id": "target-a"}, MAPPING, QUOTES) == {
+        assert sync_module.broker_stock_holdings(snapshot, {"id": "target-a"}, MAPPING, QUOTES) == {
             ("target-a", "TEST"): 10}
 
 
@@ -671,11 +677,11 @@ def test_only_identified_empty_currency_cash_placeholders_are_excluded_from_hold
         'value': [{'name': 'id', 'value': inner}, {'name': 'size', 'value': size},
                   {'name': 'positionType', 'value': position}]})
     if accepted:
-        assert adapter.broker_stock_holdings(snapshot, {'id': 'target-a'}, MAPPING, QUOTES) == {
+        assert sync_module.broker_stock_holdings(snapshot, {'id': 'target-a'}, MAPPING, QUOTES) == {
             ('target-a', 'TEST'): 10}
     else:
         with pytest.raises(RuntimeError):
-            adapter.broker_stock_holdings(snapshot, {'id': 'target-a'}, MAPPING, QUOTES)
+            sync_module.broker_stock_holdings(snapshot, {'id': 'target-a'}, MAPPING, QUOTES)
 
 
 def test_minute_only_opening_source_event_refused(evidence):
@@ -707,7 +713,7 @@ def test_subcent_execution_total_corroborates_cent_views_without_writes(
     snapshot['account_report_csv'] = cash_statement(statement)
     snapshot['update']['portfolio']['value'][-1]['value'][-1]['value'] = 12 if side == 'B' else 8
     original = deepcopy(destination)
-    assert adapter.prospective_statement_matches(snapshot) == 5
+    assert sync_module.prospective_statement_matches(snapshot) == 5
     result = sync_account(prospective_account)
     assert len(result['proposed']) == 3 and result['accepted'] == []
     activity = next(row for row in result['proposed'] if row['type'] in ('BUY', 'SELL'))
@@ -719,7 +725,7 @@ def test_subcent_execution_total_corroborates_cent_views_without_writes(
 def test_exact_one_cent_execution_boundary_is_corroborated(prospective_account):
     config, snapshot, destination = prospective_account
     next(row for row in snapshot['cash_movements'] if row['type'] == 'TRANSACTION')['change'] = '20.01'
-    assert adapter.prospective_statement_matches(snapshot) == 5
+    assert sync_module.prospective_statement_matches(snapshot) == 5
     assert len(sync_account(prospective_account)['proposed']) == 3
 
 
@@ -796,4 +802,4 @@ def test_nearby_rounding_candidate_does_not_ambiguate_exact_execution_matches(pr
     row.update(id=111, change='20.01')
     snapshot['transactions'].append(trade)
     snapshot['cash_movements'].append(row)
-    adapter.prospective_execution_cash(snapshot)
+    sync_module.prospective_execution_cash(snapshot)

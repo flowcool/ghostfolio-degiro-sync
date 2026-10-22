@@ -11,6 +11,8 @@ import pytest
 
 import degiro_to_ghostfolio as m
 
+from ghostfolio_degiro_sync import sync as sync_module
+
 URL_SECRET = "CANARY-DEST-3b9e"          # synthetic credential inside a notify URL
 SYNC_SECRET = "CANARY-SYNC-TOKEN-8d21"   # synthetic sync credential in the parent env
 URLS = [f"json://user:{URL_SECRET}@notify.invalid/hook"]
@@ -310,7 +312,7 @@ def test_one_sanitized_failure_and_preserved_exit(monkeypatch, caplog, status, m
         calls.append((settings, title, body))
         return status
     monkeypatch.setattr(m, 'send_notification', send)
-    monkeypatch.setattr(m, 'run_sync', lambda *a: (_ for _ in ()).throw(RuntimeError(SYNC_SECRET)))
+    monkeypatch.setattr(sync_module, 'run_sync', lambda *a: (_ for _ in ()).throw(RuntimeError(SYNC_SECRET)))
     assert m.main(['--sync']) == 1
     assert len(calls) == 1
     assert SYNC_SECRET not in calls[0][2] and URL_SECRET not in calls[0][2]
@@ -323,13 +325,13 @@ def test_notification_failure_never_masks_sync_exit(monkeypatch):
     def failed(*args):
         raise RuntimeError(URL_SECRET)
     monkeypatch.setattr(m, 'send_notification', failed)
-    monkeypatch.setattr(m, 'run_sync', failed)
+    monkeypatch.setattr(sync_module, 'run_sync', failed)
     assert m.main(['--sync']) == 1
 
 
 def test_success_is_silent(monkeypatch):
     monkeypatch.setenv('DRY_RUN', '0')
-    monkeypatch.setattr(m, 'run_sync', lambda *a: {'dry_run': False, 'proposed': [], 'accepted': [],
+    monkeypatch.setattr(sync_module, 'run_sync', lambda *a: {'dry_run': False, 'proposed': [], 'accepted': [],
         'history_verified': False, 'rolling_verified': True})
     monkeypatch.setattr(m, 'send_notification', lambda *a: pytest.fail('Unexpected success alert'))
     assert m.main(['--sync']) == 0
@@ -340,7 +342,7 @@ def test_interrupted_sync_sends_no_alert(monkeypatch, error):
     monkeypatch.setenv('DRY_RUN', '0')
     def interrupt(*args):
         raise error
-    monkeypatch.setattr(m, 'run_sync', interrupt)
+    monkeypatch.setattr(sync_module, 'run_sync', interrupt)
     monkeypatch.setattr(m, 'send_notification', lambda *a: pytest.fail('Unexpected signal alert'))
     with pytest.raises(error):
         m.main(['--sync'])
@@ -350,7 +352,7 @@ def test_interrupted_sync_sends_no_alert(monkeypatch, error):
 def test_scheduled_success_silent(monkeypatch, mode):
     monkeypatch.setenv("DRY_RUN", mode)
     monkeypatch.setenv("CRON", "15 6 * * *")
-    monkeypatch.setattr(m, "run_sync", lambda *a: {"dry_run": mode == "1", "proposed": [],
+    monkeypatch.setattr(sync_module, "run_sync", lambda *a: {"dry_run": mode == "1", "proposed": [],
         "accepted": [], "history_verified": False, "rolling_verified": True})
     monkeypatch.setattr(m, "send_notification", lambda *a: pytest.fail("Unexpected success alert"))
     assert m.main(["--sync"]) == 0
@@ -361,7 +363,7 @@ def test_scheduled_unverified_result_alerts_once_and_blocks_writes(monkeypatch):
     monkeypatch.setenv("CRON", "15 6 * * *")
     monkeypatch.setenv("APPRISE_URLS", json.dumps(URLS))
     calls = []
-    monkeypatch.setattr(m, "run_sync", lambda *a: {"dry_run": True, "proposed": [],
+    monkeypatch.setattr(sync_module, "run_sync", lambda *a: {"dry_run": True, "proposed": [],
         "accepted": [], "history_verified": False})
     monkeypatch.setattr(m, "send_notification", lambda *a: calls.append(a) or "sent")
     assert m.main(["--sync"]) == 1
@@ -377,7 +379,7 @@ def test_scheduled_notification_worker_failure_preserves_original_failure(monkey
         calls.append(args)
         raise RuntimeError(URL_SECRET)
     monkeypatch.setattr(m, "send_notification", fail)
-    monkeypatch.setattr(m, "run_sync", lambda *a: (_ for _ in ()).throw(RuntimeError(SYNC_SECRET)))
+    monkeypatch.setattr(sync_module, "run_sync", lambda *a: (_ for _ in ()).throw(RuntimeError(SYNC_SECRET)))
     assert m.main(["--sync"]) == 1
     assert len(calls) == 1
 
@@ -387,5 +389,5 @@ def test_scheduled_empty_configuration_does_not_send(monkeypatch):
     monkeypatch.setenv("CRON", "15 6 * * *")
     monkeypatch.delenv("APPRISE_URLS", raising=False)
     monkeypatch.setattr(m, "send_notification", lambda *a: pytest.fail("No destination configured"))
-    monkeypatch.setattr(m, "run_sync", lambda *a: (_ for _ in ()).throw(RuntimeError("blocked")))
+    monkeypatch.setattr(sync_module, "run_sync", lambda *a: (_ for _ in ()).throw(RuntimeError("blocked")))
     assert m.main(["--sync"]) == 1
