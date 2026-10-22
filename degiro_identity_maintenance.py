@@ -332,3 +332,224 @@ def preview(inputs, output):
     manifest_hash = digest(data)
     publish_private(Path(output), {'manifest.yaml': data, 'manifest.sha256': (manifest_hash + '\n').encode()}, list(captured))
     return manifest_hash
+
+
+TARGET_SOURCE_COMMIT = 'ef47c0d1b2c48fa4e97fb381561b514e657928cf'
+
+
+def update_class(row):
+    profile = row.get('assetProfile') or row.get('SymbolProfile') or {}
+    return f"{row['type']}:{profile.get('dataSource')}"
+
+
+def numeric_json(value):
+    """Encode exact JSON numeric tokens; never serialize Decimal as a string."""
+    if value is None or isinstance(value, (str, bool)):
+        return json.dumps(value, ensure_ascii=True).encode()
+    if type(value) is int:
+        return str(value).encode()
+    if isinstance(value, Decimal):
+        require(value.is_finite(), 'Non-finite request number')
+        return format(value, 'f').encode()
+    if isinstance(value, list):
+        return b'[' + b','.join(numeric_json(item) for item in value) + b']'
+    if isinstance(value, dict):
+        require(all(isinstance(key, str) for key in value), 'Invalid JSON key')
+        return b'{' + b','.join(numeric_json(key) + b':' + numeric_json(item)
+                               for key, item in sorted(value.items())) + b'}'
+    raise RuntimeError('Unqualified numeric transport')
+
+
+def comment_payload(row, comment):
+    """Ghostfolio 3.86 UpdateOrderDto allowlist, never a GET object echo."""
+    from math import isfinite
+    from ghostfolio_degiro_sync import identity
+    identity.parse_identity(comment, row['type'])
+    profile = row.get('assetProfile') or row.get('SymbolProfile')
+    require(isinstance(profile, dict) and profile.get('dataSource') in ('YAHOO', 'MANUAL')
+            and text(profile.get('symbol')) and profile['symbol'] == profile['symbol'].strip(),
+            'Unsupported update profile')
+    require(row['type'] in ('BUY', 'SELL', 'DIVIDEND', 'FEE', 'INTEREST')
+            and row.get('isDraft') is False and text(row.get('accountId'))
+            and text(row.get('currency')), 'Unsupported activity context')
+    payload = {key: row[key] for key in ('id', 'accountId', 'currency', 'date', 'type')}
+    payload.update(comment=comment, symbol=profile['symbol'], dataSource=profile['dataSource'])
+    for field in ('quantity', 'unitPrice', 'fee'):
+        value = row[field]
+        require(type(value) is int or isinstance(value, Decimal), 'Unqualified numeric evidence')
+        require(value >= 0 and isfinite(float(value)) and Decimal(str(float(value))) == value,
+                'Update number cannot be preserved by target numeric transport')
+        payload[field] = value
+    tags = row['tags']
+    require(all(isinstance(tag, dict) and text(tag.get('id')) for tag in tags), 'Unproven tag identity')
+    payload['tags'] = [tag['id'] for tag in tags]
+    require(len(set(payload['tags'])) == len(tags), 'Duplicate update tags')
+    numeric_json(payload)
+    return payload
+
+
+def maintenance_request(method, host, token, row_id=None, payload=None):
+    """Dedicated exact-origin allowlist. No import, cash, delete or retries."""
+    import requests
+    from urllib.parse import quote, urlsplit
+    from ghostfolio_degiro_sync import config, diagnostics, ghostfolio
+    import ghostfolio_core as core
+    config.validate_ghost_host(host)
+    require(isinstance(token, str) and bool(re.fullmatch(r'[!-~]+', token)), 'Invalid maintenance token')
+    require(method == 'GET' and row_id is None and payload is None or
+            method == 'PUT' and text(row_id) and isinstance(payload, dict) and payload.get('id') == row_id,
+            'Request outside maintenance boundary')
+    path = '/api/v1/activities' + ('/' + quote(row_id, safe='') if row_id is not None else '')
+    ghostfolio.warn_ghost_http(host)
+    with diagnostics.private_broker_logs(), requests.Session() as session:
+        session.trust_env = False
+        headers = core.ghost_headers(token)
+        headers['Content-Type'] = 'application/json'
+        request = requests.Request(method, host + path, headers=headers,
+            data=numeric_json(payload) if payload is not None else None)
+        prepared = session.prepare_request(request)
+        parts = urlsplit(prepared.url)
+        require(f'{parts.scheme}://{parts.netloc}' == host and parts.path == path
+                and not parts.query and not parts.fragment, 'Maintenance target changed')
+        try:
+            response = session.send(prepared, timeout=(10, 60), allow_redirects=False, verify=True, stream=False)
+        except requests.RequestException:
+            raise RuntimeError('Maintenance request unresolved; retain pending journal') from None
+        require(200 <= response.status_code < 300, 'Maintenance HTTP outcome unresolved')
+        return exact_json(response.content) if method == 'GET' else None
+
+
+def qualified_approval(permit, reviewed, manifest_sha256, host, rows, direction):
+    from ghostfolio_degiro_sync import config
+    config.validate_ghost_host(host)
+    require(permit.get('schema') == 'degiro-migration-approval-v1'
+            and permit.get('authorization') == direction + '-reviewed-comments', 'Invalid operation authorization')
+    require(permit.get('host') == host and permit.get('manifest_sha256') == manifest_sha256,
+            'Approval target or manifest changed')
+    for key in ('operation_plan_ref', 'backup_ref', 'writer_exclusion_ref', 'settlement_ref', 'owner_id', 'state_dir'):
+        require(text(permit.get(key)), 'Missing qualified operation prerequisite')
+    require(permit.get('writers_stopped') is True and permit.get('requests_settled') is True,
+            'Competing writers or requests remain')
+    require(reviewed['snapshot']['destination_version'] == '3.86.0'
+            and permit.get('target_source_commit') == TARGET_SOURCE_COMMIT, 'Unqualified target source')
+    for key in ('destination_version', 'destination_image'):
+        require(permit.get(key) == reviewed['snapshot'][key], 'Destination image or version changed')
+    require(type(permit.get('write_count')) is int and permit['write_count'] == len(rows), 'Unapproved write count')
+    batch, pause = permit.get('batch_size'), Decimal(str(permit.get('pause_seconds')))
+    require(type(batch) is int and batch > 0 and pause.is_finite() and pause >= 0
+            and __import__('math').isfinite(float(pause)), 'Missing qualified pacing')
+    for row in rows:
+        require(row.get('userId') == permit['owner_id'], 'Unproven migration owner')
+        qualification = permit.get('qualifications', {}).get(update_class(row), {})
+        for key in ('source_identity', 'target_dto', 'manual_zero_uuid', 'background_effects', 'pacing', 'reversal'):
+            gate = qualification.get(key, {})
+            require(gate.get('status') == 'pass' and isinstance(gate.get('source_refs'), list)
+                    and gate['source_refs'] and all(text(ref) for ref in gate['source_refs']),
+                    'Missing exact-image class qualification')
+    return batch, float(pause)
+
+
+def journal_lock(path, evidence):
+    """Private journal lock; callers also hold the normal destination account locks."""
+    import fcntl
+    import stat
+    from ghostfolio_degiro_sync.journal import private_state_file
+    path = safe_path(Path(path))
+    info = path.parent.stat()
+    require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid() and not info.st_mode & 0o077,
+            'Unsafe journal directory')
+    lock_path = safe_path(Path(str(path) + '.lock'))
+    for target in (path, lock_path):
+        for source in evidence:
+            require(not source.is_relative_to(target) and not target.is_relative_to(source)
+                    and (not target.exists() or not target.samefile(source)), 'Journal overlaps evidence')
+    descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        private_state_file(descriptor)
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return descriptor
+
+
+def persist(path, record):
+    from ghostfolio_degiro_sync.journal import write_journal
+    # Reuse atomic fsync + directory fsync. Exact decimals are evidence strings.
+    document = keyed_yaml(yaml_bytes(record))
+    write_journal({'directory': path.parent, 'path': path, 'document': document})
+
+
+def apply(inputs, manifest, manifest_sha256, approval, approval_sha256, journal, host, token):
+    from contextlib import ExitStack
+    import time
+    from ghostfolio_degiro_sync.journal import account_journal
+    proposed, captured = migration_evidence(Path(inputs))
+    reviewed_bytes = read_evidence(Path(manifest), manifest_sha256)
+    require(reviewed_bytes == yaml_bytes(proposed), 'Reviewed manifest changed')
+    reviewed = keyed_yaml(reviewed_bytes)
+    require(reviewed['selection_proof']['equal'] and reviewed['replacements'], 'No proven replacements')
+    permit_bytes = read_evidence(Path(approval), approval_sha256)
+    permit = keyed_yaml(permit_bytes)
+    config = keyed_yaml(captured[safe_path(Path(inputs))])
+    snapshot_path = safe_path(Path(inputs).parent / config['snapshot']['path'])
+    expected = {row['id']: row for row in exact_json(captured[snapshot_path])['activities']}
+    selected = [expected[row_id] for row_id in reviewed['replacements']]
+    batch, pause = qualified_approval(permit, reviewed, manifest_sha256, host, selected, 'apply')
+    payloads = {row['id']: comment_payload(row, reviewed['replacements'][row['id']]['new_comment']) for row in selected}
+    captured.update({safe_path(Path(manifest)): reviewed_bytes, safe_path(Path(approval)): permit_bytes})
+    path = safe_path(Path(journal))
+    descriptor = journal_lock(path, captured)
+    try:
+        require(not path.exists(), 'Existing migration journal; automatic retry refused')
+        with ExitStack() as stack:
+            for source, target in sorted(config['accounts'].items()):
+                state = stack.enter_context(account_journal({'state_dir': permit['state_dir'],
+                    'ghost_host': host, 'source_account': source, 'target_account': target['id']}))
+                require(state['document']['pending'] is None, 'Unsettled normal synchronization intent')
+            records = {row['id']: {**reviewed['replacements'][row['id']], 'preimage': row,
+                'request_payload': payloads[row['id']],
+                'request_body_sha256': digest(numeric_json(payloads[row['id']])), 'status': 'prepared'} for row in selected}
+            record = {'schema': 'degiro-migration-journal-v1', 'host': host,
+                'manifest_sha256': manifest_sha256, 'approval_sha256': approval_sha256,
+                'scope': reviewed['scope'], 'state_dir': permit['state_dir'], 'status': 'prepared', 'rows': records}
+            file = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            os.close(file)
+            persist(path, record)
+            def check():
+                fresh = maintenance_request('GET', host, token)
+                validate_snapshot(fresh, reviewed['snapshot'])
+                actual = {row['id']: row for row in fresh['activities']}
+                require(actual.keys() == expected.keys() and all(canonical_json(actual[k]) == canonical_json(v)
+                    for k, v in expected.items()), 'Destination context, protected rows or occupancy changed')
+                for source, data in captured.items():
+                    require(source.read_bytes() == data, 'Reviewed evidence changed')
+                require(implementation_hashes() == reviewed['implementation'], 'Implementation changed')
+            token = maintenance_token(host, token)
+            check()
+            for index, row_id in enumerate(reviewed['replacements']):
+                if index and index % batch == 0:
+                    time.sleep(pause)
+                check()
+                records[row_id]['status'] = 'pending'
+                record['status'] = 'in_progress'
+                persist(path, record)
+                maintenance_request('PUT', host, token, row_id, payloads[row_id])
+                expected[row_id] = {**expected[row_id], 'comment': reviewed['replacements'][row_id]['new_comment']}
+                check()
+                records[row_id]['status'] = 'verified'
+                persist(path, record)
+            record['status'] = 'complete'
+            persist(path, record)
+    finally:
+        os.close(descriptor)
+
+
+def maintenance_token(host, token):
+    if token is not None:
+        return token
+    from ghostfolio_degiro_sync import config, ghostfolio
+    credentials = config.load_ghost_credentials()
+    require(credentials['ghost_host'] == host, 'Credential origin differs from approved target')
+    ghostfolio.authenticate_ghostfolio(credentials)
+    return credentials['ghost_token']

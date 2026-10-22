@@ -208,3 +208,51 @@ implementation and destination hashes. Source windows do not prove lifetime
 broker coverage. Target DTO, zero/MANUAL/UUID, background effects, pacing,
 source lifetime and reversal qualifications remain explicit pending gates.
 Preview does not authorize conversion, database restore or old-binary restart.
+
+## Approved historical comment conversion
+
+`apply` is a separate financial operation. Neither `DRY_RUN=0` nor a preview
+approves it. Supply the reviewed input/manifest hashes, a separately approved
+keyed YAML permit and a new private journal path:
+
+```sh
+.venv/bin/python scripts/migrate_degiro_identity.py apply --inputs /private/inputs.yaml --manifest /private/review/manifest.yaml --manifest-sha256 "$MANIFEST_SHA256" --approval /private/approval.yaml --approval-sha256 "$APPROVAL_SHA256" --journal /private/operation.yaml --host "$GHOST_HOST"
+```
+
+Permit schema is `degiro-migration-approval-v1`; authorization is
+`apply-reviewed-comments`. Bind `host`, `manifest_sha256`, `owner_id`,
+`destination_version`, `destination_image` and `target_source_commit`.
+The implemented UpdateOrderDto allowlist is based on Ghostfolio 3.86.0 source
+[`ef47c0d`](https://github.com/ghostfolio/ghostfolio/tree/ef47c0d1b2c48fa4e97fb381561b514e657928cf).
+Source inspection does not qualify any real target. The controller can reconnect
+profiles and the service can queue background market-data work. Every class
+(`TYPE:DATA_SOURCE`) in `qualifications` therefore needs `pass` and nonempty
+`source_refs` for `source_identity`, `target_dto`, `manual_zero_uuid`,
+`background_effects`, `pacing` and `reversal`, bound to that exact image.
+Pending or failed classes block the operation. Keep their rows intact.
+
+The operation must record `operation_plan_ref`, recoverable `backup_ref`,
+`writer_exclusion_ref`, independent `settlement_ref`, `writers_stopped: true`,
+`requests_settled: true`, exact `write_count`, measured positive `batch_size`
+and nonnegative `pause_seconds`. `state_dir` must be the normal connector's
+private state directory. Stop all competing writers and bind the actual deployed
+image/version before approval. The engine holds normal destination locks and
+refuses an unresolved normal sync intent. This does not replace external writer
+exclusion or current deployment proof.
+
+Credentials follow the existing exclusive `GHOST_TOKEN`/`GHOST_ACCESS_TOKEN`
+policy and exact `GHOST_HOST`. Exchange happens once, after local approval and
+lock checks. The dedicated transport permits only complete activities GET and
+reviewed activity PUT. Scheduled sync gains no historical PUT route. DTOs use
+stored activity currency and actual profile identity, explicit fields and exact
+numeric JSON tokens. Numbers the target cannot preserve are refused. The engine
+never copies the entire GET row into a PUT.
+
+A private YAML journal persists and flushes each pending request before dispatch.
+Complete readback must preserve every field and every protected row except the
+approved comment. A failed request, normalization, profile effect or uncertain
+completion stops further writes. Confirmed subsets and pending requests remain
+in the journal. No automatic retry is permitted, even if readback still shows
+the original comment: a delayed request may complete later. Independent
+completion/cancellation evidence is required for recovery. Retain captures and
+journal; leave writers stopped at this boundary.

@@ -149,3 +149,147 @@ def test_preview_changed_complete_selection_removes_replacements(tmp_path, snaps
     manifest = migration.keyed_yaml((tmp_path / 'review/manifest.yaml').read_bytes())
     assert not manifest['replacements'] and manifest['selection_proof']['equal'] is False
     assert manifest['counts']['unproven'] == 3
+
+
+def prepare_apply(tmp_path, snapshot):
+    inputs, rows = saved_inputs(tmp_path, snapshot)
+    config = yaml.safe_load(inputs.read_text())
+    for index, row in enumerate(rows):
+        if row['assetProfile']['dataSource'] == 'MANUAL':
+            row['assetProfile']['symbol'] = f'00000000-0000-4000-8000-{index:012d}'
+    destination = tmp_path / 'destination.json'
+    destination.write_text(json.dumps({'count': len(rows), 'activities': rows}, default=float))
+    config['snapshot']['sha256'] = migration.digest(destination.read_bytes())
+    config['snapshot']['destination_version'] = '3.86.0'
+    inputs.write_text(yaml.safe_dump(config))
+    manifest_hash = migration.preview(inputs, tmp_path / 'review')
+    manifest = tmp_path / 'review/manifest.yaml'
+    reviewed = migration.keyed_yaml(manifest.read_bytes())
+    state = tmp_path / 'state'
+    state.mkdir(mode=0o700)
+    approval = {'schema': 'degiro-migration-approval-v1', 'authorization': 'apply-reviewed-comments',
+        'host': 'https://portfolio.example', 'owner_id': 'synthetic-owner',
+        'manifest_sha256': manifest_hash, 'destination_version': '3.86.0',
+        'destination_image': 'sha256:' + 'a' * 64,
+        'target_source_commit': 'ef47c0d1b2c48fa4e97fb381561b514e657928cf',
+        'state_dir': str(state), 'writers_stopped': True, 'requests_settled': True,
+        'operation_plan_ref': 'synthetic-plan', 'backup_ref': 'synthetic-recoverable-backup',
+        'writer_exclusion_ref': 'synthetic-exclusive-writers', 'settlement_ref': 'synthetic-settled',
+        'write_count': len(reviewed['replacements']), 'batch_size': 1, 'pause_seconds': '0',
+        'qualifications': {migration.update_class(row): {
+            key: {'status': 'pass', 'source_refs': ['synthetic-lab-exact-image']}
+            for key in ('source_identity', 'target_dto', 'manual_zero_uuid', 'background_effects', 'pacing', 'reversal')}
+            for row in rows if row['id'] in reviewed['replacements']}}
+    permit = tmp_path / 'approval.yaml'
+    permit.write_bytes(migration.yaml_bytes(approval))
+    return inputs, manifest, manifest_hash, permit, migration.digest(permit.read_bytes()), tmp_path / 'operation.yaml', rows
+
+
+def apply_fake(tmp_path, snapshot, monkeypatch, effect=None):
+    args = prepare_apply(tmp_path, snapshot)
+    rows = migration.exact_json((tmp_path / 'destination.json').read_bytes())['activities']
+    puts = []
+    def request(method, host, token, row_id=None, payload=None):
+        assert host == 'https://portfolio.example' and token == 'synthetic-token'
+        if method == 'GET':
+            return {'count': len(rows), 'activities': deepcopy(rows)}
+        journal = migration.keyed_yaml(args[5].read_bytes())
+        assert journal['rows'][row_id]['status'] == 'pending'
+        assert journal['rows'][row_id]['request_body_sha256'] == migration.digest(migration.numeric_json(payload))
+        puts.append(row_id)
+        if effect:
+            effect(rows, row_id, payload)
+        else:
+            next(row for row in rows if row['id'] == row_id)['comment'] = payload['comment']
+    monkeypatch.setattr(migration, 'maintenance_request', request)
+    return args, rows, puts
+
+
+def test_apply_only_changes_reviewed_comments_with_intent_first(tmp_path, snapshot, monkeypatch):
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch)
+    before = deepcopy(rows)
+    migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    assert len(puts) == 3
+    assert [{**row, 'comment': old['comment']} for row, old in zip(rows, before)] == before
+    assert migration.keyed_yaml(args[5].read_bytes())['status'] == 'complete'
+    with pytest.raises(RuntimeError, match='Existing'):
+        migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+
+
+@pytest.mark.parametrize('failure', ['timeout', 'normalization', 'protected', 'partial'])
+def test_apply_stops_pending_without_retry(tmp_path, snapshot, monkeypatch, failure):
+    def effect(rows, row_id, payload):
+        if failure == 'timeout':
+            raise RuntimeError('Uncertain request')
+        next(row for row in rows if row['id'] == row_id)['comment'] = (
+            'changed-by-target' if failure == 'normalization' else payload['comment'])
+        if failure == 'protected':
+            rows[0]['fee'] = 999
+        if failure == 'partial' and row_id == 'old-1':
+            raise RuntimeError('Lost response after commit')
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch, effect)
+    with pytest.raises(RuntimeError):
+        migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    record = migration.keyed_yaml(args[5].read_bytes())
+    assert any(row['status'] == 'pending' for row in record['rows'].values())
+    assert len(puts) == (2 if failure == 'partial' else 1)
+    with pytest.raises(RuntimeError):
+        migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    assert len(puts) == (2 if failure == 'partial' else 1)
+
+
+def test_apply_pending_qualification_stale_snapshot_and_decimal_loss_refuse(tmp_path, snapshot, monkeypatch):
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch)
+    permit = migration.keyed_yaml(args[3].read_bytes())
+    for qualification in permit['qualifications'].values():
+        qualification['target_dto']['status'] = 'pending'
+    args[3].write_bytes(migration.yaml_bytes(permit))
+    args = (*args[:4], migration.digest(args[3].read_bytes()), *args[5:])
+    with pytest.raises(RuntimeError, match='qualification'):
+        migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    assert not puts
+    row = rows[1]
+    from decimal import Decimal
+    row['unitPrice'] = Decimal('10.00000000000000001')
+    with pytest.raises(RuntimeError, match='preserved'):
+        migration.comment_payload(row, 'DEGIRO#v1#123:TRADE:10')
+
+
+def test_apply_manual_uuid_zero_and_stale_protected_state(tmp_path, snapshot, monkeypatch):
+    from test_degiro_cash_yield import yield_row
+    snapshot['cash_movements'] += [yield_row(), yield_row('interest', 602)]
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch)
+    # The first fresh snapshot includes all protected rows and rejects drift.
+    rows[0]['fee'] = 1
+    with pytest.raises(RuntimeError, match='context'):
+        migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    assert puts == []
+    second = tmp_path / 'second'
+    second.mkdir(mode=0o700)
+    args, rows, puts = apply_fake(second, snapshot, monkeypatch)
+    migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    assert len(puts) == 5
+    zero = next(row for row in rows if str(row['comment']).endswith(':INTEREST:602'))
+    assert zero['unitPrice'] == zero['fee'] == 0
+    assert zero['assetProfile']['symbol'].startswith('00000000-0000-4000-8000-')
+
+
+def test_apply_numeric_tokens_are_exact_and_normal_sync_stays_separate():
+    from decimal import Decimal
+    assert migration.numeric_json({'value': Decimal('0.165'), 'zero': Decimal('0.00')}) == b'{"value":0.165,"zero":0.00}'
+    with pytest.raises(RuntimeError, match='numeric'):
+        migration.numeric_json({'value': 0.165})
+    with pytest.raises(RuntimeError, match='boundary'):
+        migration.maintenance_request('DELETE', 'https://portfolio.example', 'synthetic-token', 'row')
+
+
+def test_apply_refuses_concurrent_destination_lock(tmp_path, snapshot, monkeypatch):
+    from ghostfolio_degiro_sync.journal import account_journal
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch)
+    permit = migration.keyed_yaml(args[3].read_bytes())
+    with account_journal({'state_dir': permit['state_dir'], 'ghost_host': permit['host'],
+                          'source_account': '123', 'target_account': TARGET['id']}):
+        with pytest.raises(RuntimeError, match='Another synchronization'):
+            migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    assert puts == []
+
