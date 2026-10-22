@@ -3,44 +3,80 @@
 This document is the single authoritative provenance record. The YAML block is
 read by the checker; do not maintain a second pin in a workflow or generated file.
 The selected function list below defines the maintained broker-agnostic boundary.
-The source pin tracks the reviewed IBKR main commit below. This project never modifies
+The source pin tracks the reviewed IBKR v3.0.0 commit below. This project never modifies
 the IBKR sibling; propagation remains explicit and human-controlled.
 
 ```yaml
-format: 1
+format: 2
 repository: https://github.com/flowcool/ghostfolio-ibkr-sync.git
-commit: 5749146ff297133a6a85d9006bba60b65d9f7cde
-source_path: ibkr_to_ghostfolio.py
-source_sha256: 638fbd77c6cb36bd6a5d60d86c6587a0570df282dade1161f47d30424dfc169a
+commit: 403b4ccf13dcce076c2dc4c08633905c96c1a898
+sources:
+- path: ghostfolio_ibkr_sync/ghostfolio.py
+  sha256: 68013f405dc9f00a994034b1cbde355287211fc7bfc04b31260ed1d44b599f2c
+- path: ghostfolio_ibkr_sync/ibkr.py
+  sha256: f4478c2cce928abf232e57ba26cb0725dfeb69dd79d301574c954808b8fcb4ce
 imports:
-  - import logging
-  - import re
-  - from datetime import datetime, timezone
-  - from math import ceil, isfinite
-  - import requests
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: import json
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: import logging
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: import re
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: from collections.abc import Mapping
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: from datetime import UTC, datetime
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: from math import isfinite
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: from typing import Any
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: import requests
 constants:
-  - log
-  - _UNRESOLVED_SYMBOL_RE
-  - GHOST_REDIRECT_ERROR
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: log
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: Config
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: GHOST_REDIRECT_ERROR
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: _UNRESOLVED_SYMBOL_RE
 functions:
-  - ghost_headers
-  - ghost_response_is_redirect
-  - activity_date_is_current
-  - activity_is_active
-  - ghost_get_accounts
-  - ghost_find_account_id
-  - parse_unresolved_symbol
-  - accepted_import_subset
-  - mark_import_uncertain
-  - ghost_import_activities
-  - ghost_update_cash_balance
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: ghost_headers
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: ghost_response_is_redirect
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: activity_date_is_current
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: activity_is_active
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: ghost_get_accounts
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: ghost_find_account_id
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: parse_unresolved_symbol
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: accepted_import_subset
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: mark_import_uncertain
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: ghost_import_activities
+- source: ghostfolio_ibkr_sync/ghostfolio.py
+  name: ghost_update_cash_balance
+- source: ghostfolio_ibkr_sync/ibkr.py
+  name: log_lab_evidence
 ```
 
 ## Byte identity contract
 
-`ghostfolio_core.py` is the deterministic projection of the pinned Git blob.
+`ghostfolio_core.py` is the deterministic projection of the pinned Git blobs.
+Format 1 remains readable for historical verification. Format 2 records complete
+source-file SHA256 hashes and source-qualified units. The checker rejects name
+collisions and unresolved globals or lazy annotations before writing any output.
 AST identifies top-level units; original byte slices preserve signatures, bodies,
-comments and line endings. Units are sorted by source position and joined with
+comments and line endings. Format 2 orders imports, assignments, then functions. Each group follows the
+declared source order and each source file's line order. Units are joined with
 exactly two LF bytes. There is no generated header or reformatted code. The whole
 file must equal the reconstructed projection, not merely a stored local hash.
 The original logging setup/config/broker code is excluded; adapter logging is its
@@ -72,9 +108,9 @@ permissions and runs weekly as well as on PR, push and manual dispatch.
 1. In a scratch checkout of the canonical IBKR repository, inspect the proposed
    commit and the diff of selected functions and dependency units. Do not fetch,
    checkout or modify the frozen production sibling for this procedure.
-2. Update `commit` to the full reviewed SHA and `source_sha256` to the SHA256 of
-   `git show <new-sha>:ibkr_to_ghostfolio.py`. Review additions/removals in the
-   lists if dependencies or the broker-agnostic boundary changed.
+2. Update `commit` to the full reviewed SHA. Record the SHA256 of the complete
+   bytes returned by `git show <new-sha>:<source-path>` for each ordered source.
+   Review source-qualified units if dependencies or the maintained boundary change.
 3. Explicitly regenerate using that scratch checkout:
 
    ```sh

@@ -161,7 +161,7 @@ def test_authenticated_recovery_holds_lock_and_uses_only_get(config, snapshot, m
         assert request.method == 'GET'
         assert request.headers['Authorization'] == 'Bearer TOKEN-SENTINEL'
         assert session.trust_env is False and options['allow_redirects'] is False
-        assert options['timeout'] == (10, 60)
+        assert options['timeout'] == (10, 120 if request.url.endswith('/target-a') else 60)
         with pytest.raises(RuntimeError, match='Another synchronization'):
             with journal_module.account_journal(config):
                 pytest.fail('Recovery failed to hold account lock across readback')

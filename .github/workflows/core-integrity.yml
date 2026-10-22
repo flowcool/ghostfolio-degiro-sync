@@ -21,7 +21,7 @@ jobs:
           python-version: "3.14"
       - name: Install test dependencies
         run: python -m pip install -r requirements-dev.txt
-      - name: Verify canonical bytes and signal upstream main changes
+      - name: Verify source hashes, projection closure and upstream main changes
         run: python scripts/check_core.py --check-main
       - name: Offline core and guard regressions
         run: python -m pytest -q

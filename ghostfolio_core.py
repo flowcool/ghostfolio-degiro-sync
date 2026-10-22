@@ -1,13 +1,22 @@
+import json
+
+
 import logging
 
 
 import re
 
 
-from datetime import datetime, timezone
+from collections.abc import Mapping
 
 
-from math import ceil, isfinite
+from datetime import UTC, datetime
+
+
+from math import isfinite
+
+
+from typing import Any
 
 
 import requests
@@ -16,7 +25,17 @@ import requests
 log = logging.getLogger(__name__)
 
 
-def ghost_headers(token):
+Config = dict[str, Any]
+
+
+GHOST_REDIRECT_ERROR = "Ghostfolio request redirected"
+
+
+_UNRESOLVED_SYMBOL_RE = re.compile(
+    r'symbol \(\\?"([^"\\]+)\\?"\) cannot be resolved by the data source')
+
+
+def ghost_headers(token: str | None) -> dict[str, str]:
     """Return common headers for Ghostfolio API calls."""
     return {
         "Authorization": f"Bearer {token}",
@@ -24,24 +43,21 @@ def ghost_headers(token):
     }
 
 
-GHOST_REDIRECT_ERROR = "Ghostfolio request redirected"
-
-
-def ghost_response_is_redirect(resp):
+def ghost_response_is_redirect(resp: requests.Response) -> bool:
     """Return whether a Ghostfolio response is a redirect."""
     return 300 <= resp.status_code < 400
 
 
-def activity_date_is_current(activity):
+def activity_date_is_current(activity: Mapping[str, Any]) -> bool:
     """Conservatively refuse future instants (server drafts use local end of day)."""
     try:
         instant = datetime.fromisoformat(activity["date"].replace("Z", "+00:00"))
-        return instant.tzinfo is not None and instant <= datetime.now(timezone.utc)
+        return instant.tzinfo is not None and instant <= datetime.now(UTC)
     except (KeyError, TypeError, AttributeError, ValueError):
         return False
 
 
-def activity_is_active(activity):
+def activity_is_active(activity: Any) -> bool:
     """Follow Ghostfolio draft/exclusion tags; refuse malformed active context."""
     if not isinstance(activity, dict):
         raise RuntimeError("Invalid activity eligibility context")
@@ -67,10 +83,10 @@ def activity_is_active(activity):
                        for context in (activity, account) for tag in context.get("tags", [])))
 
 
-def ghost_get_accounts(config):
+def ghost_get_accounts(config: Config) -> Any:
     """Fetch all accounts from Ghostfolio."""
     url = f"{config['ghost_host']}/api/v1/account"
-    resp = requests.get(url, headers=ghost_headers(config["ghost_token"]), timeout=30,
+    resp = requests.get(url, headers=ghost_headers(config["ghost_token"]), timeout=120,
                         allow_redirects=False)
     if ghost_response_is_redirect(resp):
         raise RuntimeError(GHOST_REDIRECT_ERROR)
@@ -78,7 +94,7 @@ def ghost_get_accounts(config):
     return resp.json()
 
 
-def ghost_find_account_id(config, account_name):
+def ghost_find_account_id(config: Config, account_name: str) -> str | None:
     """Find a Ghostfolio account ID by name.
 
     Returns None if no account matches, so the caller can skip this account and
@@ -90,17 +106,14 @@ def ghost_find_account_id(config, account_name):
         if acc.get("name") == account_name:
             if not activity_is_active({"account": acc}):
                 raise RuntimeError("Ghostfolio target account is excluded; refusing sync")
-            return acc["id"]
+            account_id: str = acc["id"]
+            return account_id
     log.error("Ghostfolio account '%s' not found. Available: %s",
               account_name, [a["name"] for a in accounts])
     return None
 
 
-_UNRESOLVED_SYMBOL_RE = re.compile(
-    r'symbol \(\\?"([^"\\]+)\\?"\) cannot be resolved by the data source')
-
-
-def parse_unresolved_symbol(body, text=""):
+def parse_unresolved_symbol(body: Any, text: str = "") -> str | None:
     """Return the ticker Ghostfolio could not resolve from an import 400, else None.
 
     None means the 400 is not a per-symbol resolution error (too many
@@ -119,7 +132,9 @@ def parse_unresolved_symbol(body, text=""):
     return match.group(1) if match else None
 
 
-def accepted_import_subset(submitted, body):
+def accepted_import_subset(
+    submitted: list[dict[str, Any]], body: Any,
+) -> list[dict[str, Any]]:
     """Map server-created rows to unique submitted identities, never sent counts."""
     if not isinstance(body, dict) or not isinstance(body.get("activities"), list):
         raise RuntimeError("Import response has no accepted activity list")
@@ -172,13 +187,15 @@ def accepted_import_subset(submitted, body):
     return accepted
 
 
-def mark_import_uncertain(config, activities):
+def mark_import_uncertain(config: Config, activities: list[dict[str, Any]]) -> None:
     """A POST may have written records; block later queries to these accounts."""
     config.setdefault("_uncertain_import_accounts", set()).update(
         a["accountId"] for a in activities if a.get("accountId"))
 
 
-def ghost_import_activities(config, activities):
+def ghost_import_activities(
+    config: Config, activities: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], bool]:
     """Import activities into Ghostfolio.  Returns (imported, ok).
 
     imported — the activities Ghostfolio accepted, for the caller's dedup
@@ -195,9 +212,12 @@ def ghost_import_activities(config, activities):
     visible.  Other 400s (too many activities, premium, ...) are not per-symbol
     and fail hard without retrying.
 
-    Ghostfolio reports its own duplicate detection per activity in a 2xx and
-    silently skips those, so a short accepted count is not a failure.
+    A 2xx response is clean only when it proves every submitted activity.  A
+    shorter valid list preserves its exact accepted subset, fails the account
+    without retrying, and tells the operator which comments need inspection.
     """
+    if config.get("dry_run"):
+        log_lab_evidence("preview", activities)
     if not activities:
         log.info("No new activities to import")
         return [], True
@@ -211,7 +231,7 @@ def ghost_import_activities(config, activities):
         return list(activities), True
     url = f"{config['ghost_host']}/api/v1/import"
     remaining = list(activities)
-    dropped_symbols = []
+    dropped_symbols: list[str] = []
     # Each iteration drops one symbol, so the loop can never run more times than
     # there are distinct symbols (+1 for the final accepting POST).
     max_attempts = len({a.get("symbol") for a in activities}) + 1
@@ -244,11 +264,27 @@ def ghost_import_activities(config, activities):
                 mark_import_uncertain(config, remaining)
                 return [], False
             log.info("Ghostfolio created %d of %d submitted activities", len(imported), len(remaining))
+            short_response = len(imported) < len(remaining)
+            if short_response:
+                accepted_keys = {
+                    (activity["accountId"], activity["comment"])
+                    for activity in imported
+                }
+                omitted_comments = [
+                    activity["comment"] for activity in remaining
+                    if (activity["accountId"], activity["comment"]) not in accepted_keys
+                ]
+                log.error(
+                    "Ghostfolio accepted only %d of %d submitted activities; omitted comments: "
+                    "%s — inspect Ghostfolio before rerun; the account failed and the batch "
+                    "was not retried",
+                    len(imported), len(remaining), ", ".join(omitted_comments),
+                )
             if dropped_symbols:
                 log.warning("Imported without %d unresolved symbol(s): %s — add a mapping entry "
                             "(symbol_mapping) so they are recognised next run",
                             len(dropped_symbols), ", ".join(dropped_symbols))
-            return imported, not dropped_symbols
+            return imported, not dropped_symbols and not short_response
 
         symbol = parse_unresolved_symbol(body, resp.text)
         if symbol is None:
@@ -277,7 +313,9 @@ def ghost_import_activities(config, activities):
     return [], False
 
 
-def ghost_update_cash_balance(config, account_id, balance):
+def ghost_update_cash_balance(
+    config: Config, account_id: str, balance: float, base_currency: str | None,
+) -> bool:
     """Update the cash balance on a Ghostfolio account.  Returns True on success.
 
     The GET response carries far more than the update DTO accepts (aggregations,
@@ -291,18 +329,34 @@ def ghost_update_cash_balance(config, account_id, balance):
     omitting them preserves the stored values.  For isExcluded that also keeps
     the payload portable: it was a deprecated DTO field up to Ghostfolio 3.38.0
     and removed in 3.39.0, so sending it fails outright on newer instances.
+
+    The balance is the IBKR base-currency figure with no conversion, so the
+    Ghostfolio account must have the same currency: a mismatch, or a report
+    without a base currency, sends no PUT and returns False.  A dry run still
+    does the read-only GET and the check, so the preview matches a live run.
     """
-    if config.get("dry_run"):
-        log.info("[DRY RUN] would set cash balance for account %s to %.2f (no PUT sent)",
-                 account_id, balance)
-        return True
+    if not base_currency:
+        log.error("Cash balance not updated for account %s: the report has no base currency "
+                  "(Account Information CurrencyPrimary missing from the Flex Query)", account_id)
+        return False
     url = f"{config['ghost_host']}/api/v1/account/{account_id}"
-    resp = requests.get(url, headers=ghost_headers(config["ghost_token"]), timeout=30,
+    resp = requests.get(url, headers=ghost_headers(config["ghost_token"]), timeout=120,
                         allow_redirects=False)
     if ghost_response_is_redirect(resp):
         raise RuntimeError(GHOST_REDIRECT_ERROR)
     resp.raise_for_status()
     account_data = resp.json()
+
+    if account_data["currency"] != base_currency:
+        log.error("Cash balance not updated for account %s: IBKR base currency %s differs "
+                  "from Ghostfolio account currency %s", account_id, base_currency,
+                  account_data["currency"])
+        return False
+    log_lab_evidence("cash", {"accountId": account_id, "balance": balance, "currency": base_currency})
+    if config.get("dry_run"):
+        log.info("[DRY RUN] would set cash balance for account %s to %.2f (no PUT sent)",
+                 account_id, balance)
+        return True
 
     payload = {
         "balance": balance,
@@ -321,3 +375,15 @@ def ghost_update_cash_balance(config, account_id, balance):
         return False
     log.info("Updated cash balance for account %s to %.2f", account_id, balance)
     return True
+
+
+def log_lab_evidence(kind: str, value: object) -> None:
+    """Expose existing targets at DEBUG without changing financial behavior."""
+    if not log.isEnabledFor(logging.DEBUG):
+        return
+    try:
+        message = json.dumps({"kind": kind, "value": value}, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError):
+        # Missing evidence fails lab acceptance; it must not change the operation.
+        return
+    log.debug("LAB_EVIDENCE %s", message)

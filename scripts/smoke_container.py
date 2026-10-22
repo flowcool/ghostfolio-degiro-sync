@@ -34,7 +34,7 @@ def main():
     health_hash = hashlib.sha256(Path("scripts/check_scheduler.py").read_bytes()).hexdigest()
     provenance = Path("docs/connector-provenance.yaml").read_text()
     probe = f'''
-import hashlib, importlib.metadata, importlib.util, json, os, sys
+import annotationlib, inspect, hashlib, importlib.metadata, importlib.util, json, os, sys
 from pathlib import Path
 import yaml
 import degiro_connector
@@ -51,6 +51,9 @@ assert sys.version_info[:2] == (3, 14), sys.version
 assert importlib.util.find_spec("pip") is None
 assert "/site-packages/" in ghostfolio_degiro_sync.__file__
 assert "/site-packages/" in ghostfolio_core.__file__
+for value in vars(ghostfolio_core).values():
+    if inspect.isfunction(value) and value.__module__ == ghostfolio_core.__name__:
+        annotationlib.get_annotations(value, format=annotationlib.Format.VALUE)
 assert hashlib.sha256(Path(ghostfolio_core.__file__).read_bytes()).hexdigest() == {core_hash!r}
 assert yaml.safe_load(files("ghostfolio_degiro_sync").joinpath("cash-rules.yaml").read_text())["format"] == 1
 assert degiro_to_ghostfolio.load_cash_rules()

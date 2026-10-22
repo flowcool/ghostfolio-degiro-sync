@@ -156,3 +156,54 @@ def test_adapter_scaffold_sends_no_calls(monkeypatch):
     for name in ("get", "post", "put", "delete"):
         monkeypatch.setattr(adapter.core.requests, name, forbidden)
     assert adapter.main() == 1
+
+
+def multi_provenance(sources):
+    return {'format': 2, 'repository': provenance()['repository'], 'commit': '1' * 40,
+        'sources': [{'path': name, 'sha256': hashlib.sha256(body).hexdigest()}
+                    for name, body in sources.items()],
+        'imports': [{'source': 'a.py', 'name': 'import logging'}],
+        'constants': [{'source': 'a.py', 'name': 'log'}],
+        'functions': [{'source': 'b.py', 'name': 'emit'}]}
+
+
+def test_multi_source_projection_preserves_bytes_and_group_order():
+    sources = {'a.py': b'log = logging.getLogger(__name__)\r\nimport logging\r\n',
+        'b.py': b'def emit(value: object) -> None:\r\n    log.info(value)\r\n'}
+    data = multi_provenance(sources)
+    projected = guard.project_core(sources, data)
+    assert projected == (b'import logging\r\n\n\nlog = logging.getLogger(__name__)\r\n\n\n'
+        b'def emit(value: object) -> None:\r\n    log.info(value)\r\n')
+
+
+@pytest.mark.parametrize('annotation', ['Missing', "'Missing'"])
+def test_multi_source_refuses_lazy_annotation_gap(annotation):
+    sources = {'a.py': b'import logging\nlog = logging.getLogger(__name__)\n',
+        'b.py': f'def emit(value: {annotation}) -> None:\n    log.info(value)\n'.encode()}
+    with pytest.raises(RuntimeError, match='dependency'):
+        guard.project_core(sources, multi_provenance(sources))
+
+
+def test_multi_source_rejects_global_gap_collision_and_changed_hash():
+    sources = {'a.py': b'import logging\nlog = logging.getLogger(__name__)\n',
+        'b.py': b'def emit(value):\n    missing(value)\n'}
+    data = multi_provenance(sources)
+    with pytest.raises(RuntimeError, match='dependency'):
+        guard.project_core(sources, data)
+    sources['b.py'] = b'def emit(value):\n    log.info(value)\n'
+    with pytest.raises(RuntimeError, match='source blob'):
+        guard.project_core(sources, data)
+    sources['b.py'] = b'def log(value):\n    return value\n'
+    data = multi_provenance(sources)
+    data['functions'] = [{'source': 'b.py', 'name': 'log'}]
+    with pytest.raises(RuntimeError, match='collision'):
+        guard.project_core(sources, data)
+
+
+def test_adopted_projection_resolves_all_python314_annotations():
+    import annotationlib
+    import inspect
+    import ghostfolio_core
+    for value in vars(ghostfolio_core).values():
+        if inspect.isfunction(value) and value.__module__ == ghostfolio_core.__name__:
+            annotationlib.get_annotations(value, format=annotationlib.Format.VALUE)

@@ -92,7 +92,9 @@ def ghost_transport(config: Any, target_account: Any) -> Iterator[Any]:
                    not dry_run and request.method == "PUT" and parts.path == account_path)
         if origin != host or parts.query or parts.fragment or not allowed:
             raise RuntimeError("Ghostfolio request outside the approved sync boundary")
-        kwargs.update(timeout=(10, 60), allow_redirects=False, verify=True, stream=False)
+        read_timeout = (120 if request.method == "GET" and parts.path in ("/api/v1/account", account_path)
+                        else 30 if request.method == "PUT" else 60)
+        kwargs.update(timeout=(10, read_timeout), allow_redirects=False, verify=True, stream=False)
         try:
             response = original_send(request, **kwargs)
         except requests.RequestException:

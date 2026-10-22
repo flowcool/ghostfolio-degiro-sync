@@ -362,7 +362,7 @@ def test_core_cash_writer_rechecks_current_currency_before_put(monkeypatch):
     config = transport_config(False)
     with ghostfolio_module.ghost_transport(config, TARGET):
         with pytest.raises(RuntimeError, match='changed'):
-            core.ghost_update_cash_balance(config, 'target-a', 12.3)
+            core.ghost_update_cash_balance(config, 'target-a', 12.3, 'EUR')
     assert calls == ['GET']
 
 
@@ -527,7 +527,7 @@ def test_fresh_cash_read_rejects_changed_account_context(monkeypatch, field, val
     config = transport_config(False)
     with ghostfolio_module.ghost_transport(config, TARGET):
         with pytest.raises(RuntimeError):
-            core.ghost_update_cash_balance(config, 'target-a', 12.3)
+            core.ghost_update_cash_balance(config, 'target-a', 12.3, 'EUR')
     assert calls == ['GET']
 
 

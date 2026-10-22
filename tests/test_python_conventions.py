@@ -45,7 +45,7 @@ def test_all_project_python_obeys_functional_unannotated_style():
         'tests/test_python_conventions.py'} <= names
     failures = [(str(path.relative_to(root)), line, reason) for path in files
         for line, reason in convention_violations(path.read_text(encoding="utf-8"),
-            typed='ghostfolio_degiro_sync' in path.parts)]
+            typed='ghostfolio_degiro_sync' in path.parts or path.name == 'ghostfolio_core.py')]
     assert not failures, failures
 
 

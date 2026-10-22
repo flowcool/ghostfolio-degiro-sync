@@ -546,4 +546,4 @@ def run_sync_locked(config: Any, mapping: Any, quotes: Any, from_date: Any, to_d
                 journal_module.recover_confirmed_import(journal, config, existing)
             return synchronize_locked(config, snapshot, target, existing, mapping, quotes,
                 lambda activities: core.ghost_import_activities(config, activities),
-                lambda account, balance: core.ghost_update_cash_balance(config, account, balance), journal=journal)
+                lambda account, balance: core.ghost_update_cash_balance(config, account, balance, snapshot["account_info"]["baseCurrency"]), journal=journal)
