@@ -220,8 +220,9 @@ def reconcile_trade_holdings(activities: Any, existing: Any, quantities: Any) ->
     manual = []
     for activity in existing:
         key = (activity.get("accountId"), activity.get("comment"))
-        if isinstance(key[1], str) and re.fullmatch(r"DEGIRO#[1-9][0-9]*:TRADE:[1-9][0-9]*", key[1]):
-            signature = trade_signature(activity)
+        if activity.get("type") in ("BUY", "SELL") and identity_module.parse_identity(key[1], activity.get("type")) is not None:
+            key = (activity.get("accountId"), identity_module.canonical_comment(key[1], activity.get("type")))
+            signature = trade_signature({**activity, "comment": key[1]})
             if key in identities and identities[key] != signature:
                 raise RuntimeError("Conflicting existing DEGIRO identity")
             if key in identities:
@@ -233,8 +234,8 @@ def reconcile_trade_holdings(activities: Any, existing: Any, quantities: Any) ->
     pending: list[dict[str, Any]] = []
     seen: dict[tuple[Any, Any], Any] = {}
     for activity in sorted(activities, key=lambda item: (broker_instant(item["date"]), item["comment"])):
-        key = (activity["accountId"], activity["comment"])
-        signature = trade_signature(activity)
+        key = (activity["accountId"], identity_module.canonical_comment(activity["comment"], activity["type"]))
+        signature = trade_signature({**activity, "comment": key[1]})
         if key in seen:
             if seen[key] != signature:
                 raise RuntimeError("Conflicting pending DEGIRO identity")
@@ -597,7 +598,7 @@ def activity_signature(activity: dict[str, Any]) -> tuple[Any, ...]:
 
 def validate_cash_yield_identity(activity: dict[str, Any], namespace: str) -> None:
     """Canonical yield identities retain exact type, units and source symbol."""
-    comment = activity.get("comment")
+    comment = identity_module.canonical_comment(activity.get("comment"), activity.get("type"))
     for kind, label in (("INTEREST", "FLATEX_INTEREST"), ("COMPENSATION", "MMF_COMPENSATION")):
         if not isinstance(comment, str) or not comment.startswith(namespace + kind + ":"):
             continue

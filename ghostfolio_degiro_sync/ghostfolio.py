@@ -138,6 +138,7 @@ def index_existing_activities(body: Any, target_account: Any, *, now: datetime |
     rows = body["activities"]
     if type(body.get("count")) is not int or body["count"] != len(rows):
         raise RuntimeError("Incomplete Ghostfolio activity list")
+    global_ownership_index(rows)
     identities = set()
     result = []
     balances: dict[tuple[str, str], Decimal] = {}
@@ -215,39 +216,36 @@ def match_manual_activity(activity: Any, entries: Any) -> Any:
 def pending_activities(activities: Any, existing: Any, target_account: Any, source_account: Any, manual_matching: Any=False,
                        exclusions: Any=None) -> Any:
     """Canonical identities never fall back to proximity or another account."""
-    namespace = f"DEGIRO#{identity_module.broker_identity(source_account)}:"
-    known = {}
-    for row in existing:
-        comment = row.get("comment")
-        if not isinstance(comment, str) or not comment.startswith(namespace):
-            continue
-        if row.get("accountId") != target_account["id"]:
-            raise RuntimeError("DEGIRO identity is owned by another target account")
-        if identity_module.parse_legacy_identity(comment) is None:
-            raise RuntimeError("Malformed existing DEGIRO canonical identity")
-        if comment in known:
-            raise RuntimeError("Duplicate existing DEGIRO canonical identity")
-        accounting_module.validate_cash_yield_identity(row, namespace)
-        known[comment] = row
+    source = identity_module.broker_identity(source_account)
+    namespace = f"DEGIRO#{source}:"
+    known = global_ownership_index(existing)
+    for owned_key, row in known.items():
+        if owned_key[0] == source:
+            accounting_module.validate_cash_yield_identity(row, namespace)
     result = []
-    seen: dict[str, Any] = {}
+    seen: dict[tuple[str, str, str], Any] = {}
     manual = [row for row in existing if not str(row.get("comment") or "").startswith("DEGIRO#")]
     ordered = sorted(activities, key=lambda row: (accounting_module.broker_instant(row["date"]), row["comment"])) if manual_matching else activities
     for activity in ordered:
         if activity.get("accountId") != target_account["id"]:
             raise RuntimeError("Candidate target account mismatch")
         comment = activity["comment"]
+        key = identity_module.parse_identity(comment, activity.get("type"))
+        if key is None or key[0] != source:
+            raise RuntimeError("Candidate DEGIRO source identity mismatch")
         accounting_module.validate_cash_yield_identity(activity, namespace)
-        signature = accounting_module.activity_signature(activity)
-        if comment in seen:
-            if signature != seen[comment]:
+        signature = ownership_signature(activity)
+        if key in seen:
+            if signature != seen[key]:
                 raise RuntimeError("Conflicting candidate DEGIRO identity")
             if exclusions is not None:
                 exclusions["duplicate_candidate"] += 1
             continue
-        seen[comment] = signature
-        if comment in known:
-            if signature != accounting_module.activity_signature(known[comment]):
+        seen[key] = signature
+        if key in known:
+            if known[key].get("accountId") != target_account["id"]:
+                raise RuntimeError("DEGIRO identity is owned by another target account")
+            if signature != ownership_signature(known[key]):
                 raise RuntimeError("Existing DEGIRO identity changed financial evidence")
             if exclusions is not None:
                 exclusions["already_imported"] += 1
@@ -352,3 +350,23 @@ def record_accepted_activities(accepted: list[dict[str, Any]],
 
 # Transitional import for existing callers; both names share the pure index.
 existing_activity_context = index_existing_activities
+
+
+def global_ownership_index(rows: list[dict[str, Any]]) -> dict[tuple[str, str, str], dict[str, Any]]:
+    """Reserve all source identities before destination-account filtering."""
+    result = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            raise RuntimeError("Invalid Ghostfolio activity list")
+        key = identity_module.parse_identity(row.get("comment"), row.get("type"))
+        if key is None:
+            continue
+        if key in result:
+            raise RuntimeError("Duplicate existing DEGIRO canonical identity")
+        result[key] = row
+    return result
+
+
+def ownership_signature(activity: dict[str, Any]) -> tuple[Any, ...]:
+    return accounting_module.activity_signature({**activity,
+        "comment": identity_module.canonical_comment(activity.get("comment"), activity.get("type"))})

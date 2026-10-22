@@ -89,13 +89,14 @@ def select_account_activities(config: Any, snapshot: Any, target_account: Any, e
                 1 if activity["type"] == "BUY" else -1)
         if nonzero_holdings(expected) != broker_stock_holdings(snapshot, target_account, mapping, quote_currencies):
             raise RuntimeError("Rolling broker holdings do not reconcile")
-        known = {a["comment"]: accounting_module.activity_signature(a) for a in activities}
+        known = {identity_module.parse_identity(a["comment"], a["type"]): ghostfolio_module.ownership_signature(a) for a in activities}
         start = date.fromisoformat(snapshot["from_date"])
-        namespace = f"DEGIRO#{source}:"
+
         for row in existing:
-            if (row["accountId"] == target_account["id"] and str(row.get("comment") or "").startswith(namespace)
+            if (row["accountId"] == target_account["id"] and (owned_key := identity_module.parse_identity(row.get("comment"), row.get("type"))) is not None
+                    and owned_key[0] == source
                     and accounting_module.prospective_instant(row["date"]).astimezone(ZoneInfo("Europe/Zurich")).date() >= start
-                    and known.get(row["comment"]) != accounting_module.activity_signature(row)):
+                    and known.get(identity_module.parse_identity(row["comment"], row["type"])) != ghostfolio_module.ownership_signature(row)):
                 raise RuntimeError("Unproved rolling destination activity")
     if not dry_run and not prospective and not rolling and snapshot.get("history_completeness_verified") is not True:
         raise RuntimeError("Unverified DEGIRO history completeness blocks live writes")
@@ -473,10 +474,11 @@ def prospective_snapshot(config: Any, snapshot: Any, target: Any, existing_body:
             raise RuntimeError("Prospective date precision cannot be represented by Ghostfolio")
         # Every existing post-cutover target row must be evidenced by this full replay.
         ghostfolio_module.pending_activities(activities, prospective_existing, target, config["source_account"])
-        known = {row["comment"]: accounting_module.activity_signature(row) for row in activities}
+        known = {identity_module.parse_identity(row["comment"], row["type"]): ghostfolio_module.ownership_signature(row) for row in activities}
         for row in prospective_existing:
             if row["accountId"] == target["id"] and (
-                    row.get("comment") not in known or known[row["comment"]] != accounting_module.activity_signature(row)):
+                    identity_module.parse_identity(row.get("comment"), row.get("type")) not in known
+                    or known[identity_module.parse_identity(row["comment"], row["type"])] != ghostfolio_module.ownership_signature(row)):
                 raise RuntimeError("Unproved post-cutover destination activity")
         expected = dict(context["quantities"])
         for activity in activities:

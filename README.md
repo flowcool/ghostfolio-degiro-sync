@@ -236,3 +236,11 @@ Keep DRY_RUN enabled while resolving failures. Details: [read-only captures](doc
 ## Development and compatibility
 
 [Documentation index](docs/README.md) separates user contracts from contributor material. [CONTRIBUTING.md](CONTRIBUTING.md) covers offline tests and contributor builds. See [architecture](docs/architecture.md) for module contracts and [upstreams](docs/upstreams.md) for compatibility monitoring. Host Python is a developer workflow. Release notices do not deploy or establish compatibility automatically.
+
+The connector reads both legacy DEGIRO comments and generation-1 comments
+(`DEGIRO#v1#<source-account>:<kind>:<source-id>`). Both forms identify the same
+source event. Conflicting or duplicate ownership stops the account. Ownership is
+checked across the complete destination, so changing the target account cannot
+make an old event new. Normal synchronization does not move or rewrite history.
+Source lifetime identity and target-image compatibility require separate
+qualification; see the [source contract](docs/source-contract.md).

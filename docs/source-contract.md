@@ -237,3 +237,24 @@ The local immutable statement characterization now classifies all 88 movements a
 finds the 10 observed unique dividend/withholding pairs without network requests.
 Normalizing that full snapshot still fails at the preserved unsupported-category
 account gate. Synthetic tests own regression coverage; private data stays off Git.
+
+## Versioned ownership qualification
+
+The reader accepts legacy DEGIRO comments and `DEGIRO#v1#<account>:<kind>:<id>`.
+Both spellings reserve the same numeric source account, event kind and positive
+source-row ID. The full destination snapshot reserves these identities before
+account filtering. A duplicate claim or a changed financial payload blocks sync.
+Moving the configured target does not move ownership or borrow old holdings.
+Inactive rows still reserve identities. Normal sync does not rewrite comments.
+
+Comments must be ASCII and at most 2000 characters. TRADE maps to BUY/SELL;
+DIVIDEND and FEE retain their types. INTEREST and COMPENSATION map to INTEREST
+while remaining distinct source kinds. Reserved malformed or unknown versions
+fail closed. Identical IDs in different source accounts remain distinct.
+
+Synthetic overlap fixtures prove only the reader and local overlap checks.
+They do not establish broker lifetime uniqueness. Live writer qualification must
+record source-account scope, repeated overlapping source windows, event-kind
+uniqueness and exact target comment/readback preservation on the candidate image.
+Any missing account, window or target-image proof remains pending in the operation
+record. No fixture or single observed source window fills that gap.
