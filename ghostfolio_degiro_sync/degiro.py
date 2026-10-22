@@ -13,10 +13,10 @@ from ghostfolio_degiro_sync import vault
 from ghostfolio_degiro_sync.accounting import (
     API_FORMAT_ERRORS,
     CASH_CURRENCIES,
-    broker_identity,
     cash_wrapper_rows,
     check_api_import_format,
     financial_decimal,
+    merge_history,
     named_values,
 )
 from ghostfolio_degiro_sync.diagnostics import (
@@ -25,6 +25,7 @@ from ghostfolio_degiro_sync.diagnostics import (
     private_broker_logs,
     tag_failure,
 )
+from ghostfolio_degiro_sync.identity import broker_identity
 
 BROKER_TIMEOUT = (10, 30)
 MAX_HISTORY_WINDOWS = 120
@@ -152,27 +153,7 @@ def raw_rows(envelope: Any, collection: str | None=None) -> list[dict[str, Any]]
     return rows
 
 
-def merge_history(existing: Any, rows: Any, require_ids: Any=True, cash: Any=False, identity_field: Any="id") -> Any:
-    """Keep equal overlap rows once; reject missing identities or conflicting content."""
-    for row in rows:
-        if cash and row.get("type") in ("CASH_FUND_NAV_CHANGE", "CASH_FUND_TRANSACTION"):
-            raise RuntimeError(API_FORMAT_ERRORS["legacy_cash"])
-        identity = row.get(identity_field)
-        if (isinstance(identity, bool) or not isinstance(identity, (str, int))
-                or not str(identity).strip()):
-            if require_ids:
-                raise RuntimeError("DEGIRO history row has no stable identity")
-            existing.append(row)
-            continue
-        matched = [item for item in existing if str(item.get(identity_field)) == str(identity)]
-        if matched:
-            first = {key: value for key, value in matched[0].items() if not cash or key != "balance"}
-            second = {key: value for key, value in row.items() if not cash or key != "balance"}
-            if first != second:
-                raise RuntimeError("Conflicting DEGIRO overlap identity")
-        else:
-            existing.append(row)
-    return existing
+
 
 
 def history_product_ids(rows: list[dict[str, Any]]) -> list[int]:
