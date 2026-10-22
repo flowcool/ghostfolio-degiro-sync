@@ -129,6 +129,10 @@ def synchronize_locked(config: Any, snapshot: Any, target_account: Any, existing
     prospective, rolling = plan.prospective, plan.rolling
     dry_run, source = config.get("dry_run", True), config["source_account"]
     if dry_run:
+        diagnostics_module.emit_window_evidence(diagnostic_snapshot)
+        diagnostics_module.emit_lab_evidence("preview", pending)
+        diagnostics_module.emit_lab_evidence("cash", {"accountId": target_account["id"],
+            "balance": balance, "currency": snapshot["account_info"]["baseCurrency"]})
         reconciliation = diagnostics_module.snapshot_reconciliation(diagnostic_snapshot, existing_body, target_account["id"], mapping, quote_currencies)
         return {"reconciliation": reconciliation, "proposed": pending, "accepted": [], "cash": balance, "dry_run": True,
                 "cash_before": float(accounting_module.financial_decimal(target_account["balance"])),

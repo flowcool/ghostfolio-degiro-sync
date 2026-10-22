@@ -310,3 +310,25 @@ def render_reconciliation(findings: list[dict[str, Any]]) -> str:
         lines.append('Action: ' + action)
     lines.append('End DEGIRO reconciliation')
     return '\n'.join(lines)
+
+
+def emit_lab_evidence(kind: str, value: object) -> None:
+    """Use the pinned JSON grammar once through the adapter's own logger."""
+    import ghostfolio_core as core
+    previous = core.log
+    try:
+        core.log = log
+        core.log_lab_evidence(kind, value)
+    finally:
+        core.log = previous
+
+
+def emit_window_evidence(snapshot: dict[str, Any]) -> None:
+    from datetime import date
+    try:
+        start, end = snapshot.get('from_date'), snapshot.get('to_date')
+        if not isinstance(start, str) or not isinstance(end, str) or date.fromisoformat(start) > date.fromisoformat(end):
+            return
+        emit_lab_evidence('window', {'from_date': start, 'to_date': end, 'timezone': 'Europe/Zurich'})
+    except ValueError:
+        return

@@ -279,3 +279,15 @@ Validate a retained simulation log for lab acceptance with:
 The checker rejects an Action that names a different activity from its comparison.
 It validates report structure and consistency, not financial truth or live target
 qualification. Keep the exact candidate, inputs and clock with the lab evidence.
+
+
+`LOG_LEVEL` accepts `INFO` (default) or `DEBUG`, ignoring case and surrounding
+spaces. Other values stop before network access. DEBUG enables only connector
+logging. Broker, HTTP and generated-core diagnostics keep their existing privacy
+controls. At DEBUG, one-line `LAB_EVIDENCE ` records contain compact finite JSON
+with exactly `kind` and `value`: the proven DEGIRO `window`, complete simulated
+`preview` (including an empty list), and validated `cash` target. A cash target
+is not proof of a write. Missing/nonfinite evidence emits no invented record and
+fails candidate qualification. These logs contain private financial payloads and
+source/account identities. Store them privately; never share them without review.
+INFO emits no machine-evidence records. DEBUG adds no broker or Ghostfolio reads.

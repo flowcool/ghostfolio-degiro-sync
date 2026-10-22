@@ -429,6 +429,7 @@ def main(argv=None):
     if not os.environ.get("DRY_RUN", "").strip():
         log.warning("DRY_RUN not set: simulation, nothing written")
     try:
+        config_module.configure_logging(os.environ)
         unused_dry_run, forced = config_module.simulation_policy(os.environ)
     except RuntimeError as error:
         diagnostics_module.log_failure("Invalid synchronization configuration", error)

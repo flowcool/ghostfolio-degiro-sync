@@ -151,6 +151,7 @@ def verified_mapping_document(document: Any) -> Any:
 
 def load_sync_config() -> Any:
     """Operator configuration only; credentials are read verbatim from environment."""
+    configure_logging(os.environ)
     dry_run, unused_forced = simulation_policy(os.environ)
     sync_mode = os.environ.get("SYNC_MODE")
     if sync_mode is None or not sync_mode.strip():
@@ -198,3 +199,12 @@ def simulation_policy(values: Mapping[str, str]) -> tuple[bool, bool]:
     requested_live = mode in ("0", "false", "no", "off")
     forced = requested_live and not valid_timezone(values.get("TZ"))
     return not requested_live or forced, forced
+
+
+def configure_logging(values: Mapping[str, str]) -> None:
+    """Set only the connector logger; never enable credential-bearing libraries."""
+    import logging
+    level = values.get('LOG_LEVEL', 'INFO').strip().upper()
+    if level not in ('INFO', 'DEBUG'):
+        raise diagnostics_module.tag_failure(RuntimeError('Invalid LOG_LEVEL'), 'config', 'arguments')
+    logging.getLogger('ghostfolio_degiro_sync').setLevel(getattr(logging, level))
