@@ -6,9 +6,9 @@
 
 The supported deployment SHALL be `compose.yaml`: settings from ENV, DEGIRO login only from one Bitwarden/Vaultwarden item, exactly one Ghostfolio credential, `SYNC_MODE=rolling`, 90 days, `TZ=Europe/Zurich`. `DRY_RUN` absent, blank or `1`/`true`/`yes`/`on` SHALL simulate; `0`/`false`/`no`/`off` SHALL write; another value SHALL stop before broker access. Empty `CRON` SHALL run once; a `CRON` that is not five numeric fields SHALL stop before the connector starts. `APPRISE_URLS` SHALL send failure alerts without secrets.
 
-The image and CI SHALL use Python 3.14. The image SHALL install the connector package and run `python -m ghostfolio_degiro_sync`. Entrypoint options SHALL retain their meaning. CRON SHALL invoke the installed module with `--sync`. Remove the old script path and document its replacement. Preserve ENV names, supported modes, exit meanings, snapshot formats and recovery commands.
+The image and CI SHALL use Python 3.14 after the pinned runtime dependency set passes import, offline application and native container checks on both supported architectures. Align all Python workflow pins and Renovate ranges. The image SHALL install the connector package and run `python -m ghostfolio_degiro_sync`. Every intermediate extraction SHALL remain runnable in Docker; package installation, build-context inclusion and resources precede imports into the old command. Entrypoint options SHALL retain their meaning. CRON SHALL invoke the installed module with `--sync`. Remove the old script path only at final cutover. Preserve ENV names, supported modes, exit meanings, snapshot formats and recovery commands.
 
-The notification worker SHALL use isolated module execution, bounded lifetime, restricted ENV and stdin payloads. Worker mode SHALL never synchronize or load broker credentials. Developer tools SHALL stay outside the image. Missing or invalid IANA TZ SHALL force simulation before financial dispatch and emit one fixed warning; broker offset timestamps SHALL retain their existing validation.
+The notification worker SHALL use isolated module execution, bounded lifetime, restricted ENV and stdin payloads. Worker mode SHALL never synchronize or load broker credentials. Developer tools SHALL stay outside the image. Missing or invalid IANA TZ SHALL force simulation before financial dispatch and emit one fixed warning. This is a common runtime safety contract for local-day diagnostics, not a claim that DEGIRO needs Flex suffix parsing. Preserve the existing Europe/Zurich broker window and explicit offset validation. README SHALL declare the changed TZ prerequisite as BREAKING.
 
 #### Scenario: Invalid schedule
 
@@ -78,7 +78,7 @@ Baseline: `tests/test_rolling.py`, `tests/test_degiro_recovery.py` and `docs/rec
 
 ### Requirement: Separate read, selection and confirmation contracts
 
-The Ghostfolio adapter SHALL fetch existing activities once per established execution phase. Pure indexing SHALL validate completeness, masking, ownership, profiles and exact numeric evidence without HTTP or writes. The synchronization module SHALL select and validate imports from those indexes and broker inputs without dispatching them. It SHALL preserve DEGIRO's whole-account gate, event classification and sell coverage.
+Normal sync SHALL fetch one complete existing-activity snapshot before selection; existing exact post-write/recovery readbacks remain separate phases. Diagnostics SHALL add no reads. Pure indexing SHALL validate completeness, masking, ownership, profiles and exact numeric evidence without HTTP or writes. Selection SHALL use an injected clock and produce typed results containing proposals, rejected/deferred outcomes and holdings evidence, without dispatch. Preserve DEGIRO's whole-account gate, classification and sell coverage. Journal operations SHALL be functions over typed records, not stateful business classes.
 
 Accepted-result recording SHALL receive only rows proven accepted by response or exact recovery readback. It SHALL update only the matching source identities and holdings. Pending or omitted rows SHALL NOT enter confirmed state. Simulation SHALL update only disposable proposal state and SHALL NOT certify journal coverage. Durable intent SHALL precede dispatch. Diagnostics SHALL observe pre-deduplication inputs without mutating selection.
 
@@ -91,18 +91,63 @@ These contracts adapt IBKR v3.0.0 `ghost_get_existing_orders`, `index_existing_a
 
 ### Requirement: Versioned DEGIRO ownership
 
-The common identity grammar SHALL be `<BROKER>#v<N>#<source-account>:<KIND>:<source-id>`. The first versioned DEGIRO writer SHALL use generation 1. Account/source segments SHALL match `[A-Za-z0-9._-]+`; retain DEGIRO's existing stronger numeric-ID validation. Writer comments SHALL contain at most 2000 ASCII characters. TRADE SHALL map only to BUY/SELL; DIVIDEND, FEE, INTEREST and COMPENSATION SHALL retain their existing event-kind distinctions and source-row IDs. No trimming, hashing, truncation, calendar grouping or inferred identity is allowed.
+The common identity grammar SHALL be `<BROKER>#v<N>#<source-account>:<KIND>:<source-id>`. The first versioned DEGIRO writer SHALL use generation 1. Account/source segments SHALL match `[A-Za-z0-9._-]+`; retain DEGIRO's stronger numeric-ID validation. Comments SHALL contain at most 2000 ASCII characters. Map TRADE to BUY/SELL, DIVIDEND to DIVIDEND, FEE to FEE, and INTEREST/COMPENSATION to INTEREST while retaining their distinct source kinds. Preserve exact source-row IDs. No trimming, hashing, truncation, calendar grouping or inferred identity is allowed.
 
 Writer qualification SHALL establish account scope, source-row ID stability across overlapping windows, relevant event-kind uniqueness and exact destination comment/readback preservation on the qualified image. Keep the evidence and any limits in the existing source contract and operation record. Offline fixtures or a single observed window SHALL NOT establish broker lifetime uniqueness. Unresolved identity ambiguity SHALL block writer qualification.
 
 Readers SHALL accept current unversioned DEGIRO comments and generation 1. Malformed or unknown reserved `DEGIRO#v` identities SHALL block before financial writes. Legacy and versioned forms of one event SHALL resolve to the same source ownership. Exact unchanged legacy ownership SHALL suppress reimport. Conflicting values or duplicate claims SHALL block; proximity or equal amounts SHALL NOT resolve ownership. Newly accepted rows SHALL update only their proper activity/holding state.
 
-No stored comment SHALL be rewritten by sync. After generation-1 rows exist, rollback SHALL use a qualified dual reader; older binaries are not a safe rollback. Historical conversion remains a separate future operation.
+Index reserved DEGIRO identities across the complete destination snapshot by source account/kind/ID, before selecting the destination account. A known event in an old destination account SHALL NOT become a new import after target remapping. Report the conflict without moving a row or borrowing its holdings. Inactive/excluded rows still occupy identities but SHALL NOT authorize sales.
+
+Normal sync SHALL never rewrite stored comments. The explicit historical conversion below ships with the dual reader and writer in this delivery; no prior reader-only release is required. After generation-1 rows exist, use the exact qualified candidate forced to simulation as the safe-halt floor. This stops financial writes; it does not undo data or guarantee fallback to an older executable. If the candidate cannot start, keep writers stopped until a compatible repair is qualified. An old binary is not a safe fallback merely because source commits can be reverted.
 
 #### Scenario: Dual-reader and source scope
 
-- **WHEN** `.venv/bin/python -m pytest -q tests/test_foundation_identity.py tests/test_rolling.py` runs equal IDs in different source accounts, both generations, mixed rows, unknown versions and changed payloads
-- **THEN** independent source accounts stay distinct, unchanged legacy rows produce no duplicate, malformed/ambiguous ownership blocks, accepted buys alone affect holdings, and no historical row is changed.
+- **WHEN** `.venv/bin/python -m pytest -q tests/test_foundation_identity.py tests/test_rolling.py` runs different source accounts, both generations, destination remapping, unknown versions, changed payloads and forced simulation with mixed history
+- **THEN** independent source accounts stay distinct, remapping cannot expose duplicates, conflicting ownership blocks, accepted buys alone affect holdings, normal sync changes no historical row, and the qualified candidate in simulation sends no financial writes.
+
+### Requirement: Complete historical identity inventory and offline preview
+
+The maintenance preview SHALL inventory every existing DEGIRO-owned activity in the complete target snapshot, including history older than rolling 90 days and inactive/excluded rows. It SHALL not claim that DEGIRO can return all past events. Use exact saved source evidence, mappings, existing ownership and durable records where qualified. Record missing source coverage explicitly. Classify each row exactly once as eligible, already versioned, manual/other broker, unsupported, unproven, ambiguous or conflicting. Preserve every ineligible row and report its reason. Do not invent identity from amounts, dates or symbols alone, accept id0 as stable, or convert another broker's/manual activity.
+
+Only a unique proven legacy-to-v1 association with unchanged financial context SHALL be eligible. The proposed new comment SHALL be unoccupied elsewhere. Already occupied, duplicate or changed ownership blocks affected conversions. All proposed replacements SHALL preserve Ghostfolio activity IDs, source account/kind/ID, dates, type, exact quantity/price/fee/currency, tags, account and profile identity. The user-visible change is only the connector identity stored in `comment`.
+
+Preview SHALL run offline without credentials or network, regardless of inherited DRY_RUN. It SHALL preserve input bytes and write only a new private output directory. Publish a deterministic keyed YAML manifest with rows keyed by activity ID, old/new comments, eligibility/reasons, exact fingerprints, complete inventory counts, input/mapping/tool hashes, declared source windows, scope and destination image/version. Keep volatile timestamps outside the hashed decisions. Reject input/output overlap, duplicate YAML keys, incomplete or redacted evidence. Do not duplicate canonical configuration into hand-edited prose.
+
+Replay the complete import selection against original and proposed snapshots with the same fixed clock, source windows and mapping. Payloads, duplicate decisions, holdings and failure outcomes SHALL remain identical, not just counts. Missing proof SHALL remove affected replacements; no account remapping or previously suppressed event may become a new import. Unconverted rows remain readable by the dual reader. They SHALL NOT bypass normal whole-account guards.
+
+#### Scenario: All-history preview without mutation
+
+- **WHEN** `.venv/bin/python -m pytest -q tests/test_identity_migration.py -k preview` runs old history, incomplete windows, exact/mismatched source evidence, zero-value MANUAL events, duplicate claims, remapped targets and before/after selection replay
+- **THEN** every row has one decision, only unique proven comments are eligible, every input remains byte-identical, no network or credential is used, output is deterministic, and changed selection blocks the affected conversion.
+
+Baseline: current `docs/source-contract.md`, canonical legacy comments, saved fixture schemas and `docs/recovery.md`; all-history inventory does not establish complete broker history. The migration engine adapts IBKR v3.0.0's explicit maintenance mechanism, not its Flex associations or Yahoo-only update restriction.
+
+### Requirement: Guarded historical identity conversion
+
+The versioned maintenance command SHALL convert eligible historical identities in the same delivery as the new writer. It SHALL be separate from scheduled sync and from DRY_RUN=false. Preview approval does not authorize real writes. An operation plan validated once SHALL bind exact executable commands, manifest hash, owner/account scope, destination image/version, backup, writer exclusion, unsettled-request checks, expected write count, measured pacing, stop rules and recovery. Prepare this operation during the delivery; do not require a separate reader-only release or waiting period.
+
+Before the first write, stop competing writers, verify a recoverable backup and re-read complete unredacted destination state. Reject stale fingerprints, changed mappings/image, occupied identities or scope drift. Use existing private authentication and bounded transport with a dedicated maintenance allowlist for `PUT /api/v1/activities/{id}`. The normal sync transport SHALL NOT gain permission to modify historical activities.
+
+Qualify the exact target UpdateOrderDto and update effects from its pinned implementation and the lab before enabling conversion. An API request may require financial fields even though only the comment may change. Construct an explicit allowlist; never echo a GET object. Preserve exact numeric transport, activity currency, tags, account and profile identity. Prove MANUAL fee/interest/compensation, valid zero values and returned UUID profiles, not just Yahoo BUY/SELL/DIVIDEND. If any activity class cannot be preserved, mark it unqualified and leave its rows intact. Background/profile effects or unproven pacing block that class; no financial correction, insert, delete, cash or platform write is permitted.
+
+Persist each original row fingerprint, comment and bounded request as pending in a locked private YAML journal before dispatch. Prove exact post-write readback and unchanged protected rows before advancing. Stop on failed/uncertain HTTP, normalization, partial completion or changed context. Retain pending state and confirmed subsets; never retry automatically. An unchanged/old readback alone does not prove that a delayed request cannot complete. Independent completion/cancellation evidence is required before retry or reversal; otherwise keep the operation stopped.
+
+#### Scenario: Conversion and uncertain completion
+
+- **WHEN** `.venv/bin/python -m pytest -q tests/test_identity_migration.py -k apply` exercises exact qualified DTOs, MANUAL/zero values, stale manifests, concurrent writers, decimal loss, profile effects, partial success, delayed writes and timeouts
+- **THEN** only approved comments change, every other stored field is preserved, journal intent precedes each request, exact readback verifies confirmed rows, and every uncertain result stops without retry.
+
+### Requirement: Historical conversion inspection and reversal
+
+Inspection SHALL use saved snapshots and the journal without network or writes. It SHALL report original, converted, changed and uncertain rows, distinguishing request settlement from observed state. Reversal SHALL use the same engine and independent request-settlement evidence under the approved operation's exact recovery scope. Restore only original comments of journal-owned converted rows whose full financial/ownership context remains unchanged. Drift SHALL block the affected reversal.
+
+Record reversal intent before each request and prove exact readback. Never reverse new imports, delete rows or restore an entire database automatically. Retain every newly imported v1 activity. Before resuming sync, prove the exact mixed-history preview, unchanged source selection and zero duplicates. Comment reversal alone does not qualify old code when any new v1 row remains. A source Git revert is applicable only before versioned data exists, or after separately proving that the selected binary reads all retained data. No global database restore is the default recovery.
+
+#### Scenario: Mixed-history inspection and reversal
+
+- **WHEN** `.venv/bin/python -m pytest -q tests/test_identity_migration.py -k 'inspect or rollback'` runs confirmed/uncertain conversions, delayed requests, manual edits, newly imported v1 rows and reversal interruption
+- **THEN** offline inspection changes nothing, only unchanged journal-owned comments can be restored after settlement, new rows remain, reversal is journaled, and unsafe old-binary restart remains blocked.
 
 ### Requirement: Exact read-only reconciliation
 
@@ -120,6 +165,8 @@ Reporting SHALL reuse the existing reads without writes, extra broker/Ghostfolio
 ### Requirement: Native acceptance evidence
 
 At DEBUG, the connector SHALL emit single-line `LAB_EVIDENCE ` followed by compact finite JSON with exactly `kind` and `value`. Emit `window` from the proven DEGIRO interval, `preview` from each complete simulated batch including empty batches, and `cash` from the validated target. Cash evidence is a target, not proof of a write. INFO SHALL gain no machine-evidence lines. Evidence SHALL exclude credentials, ENV, headers, raw responses and URLs. Missing or nonfinite evidence SHALL not change financial operations; incomplete evidence SHALL fail lab qualification.
+
+Implement ENV `LOG_LEVEL` with default INFO and explicit DEBUG support. Invalid values SHALL fail configuration before network access. Configure the connector logger only; do not turn on third-party HTTP/broker loggers or bypass existing redaction boundaries. Emit native records once through the adapter while core logs remain suppressed. README SHALL explain DEBUG and its private-output boundary.
 
 #### Scenario: Native evidence without extra access
 

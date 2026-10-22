@@ -2,28 +2,28 @@
 
 ## Why
 
-DEGIRO still uses a large untyped script and an old IBKR core. Adopt the complete common foundation defined and implemented in IBKR v3.0.0. A file split alone does not meet this goal.
+DEGIRO uses an untyped script and an old core. Adopt the applicable IBKR v3.0.0 foundation and convert proven historical DEGIRO identities in the same delivery.
 
 ## What Changes
 
-- Adopt typed modules, immutable data classes, strict checks and the installed Docker module command. Use Python 3.14 as IBKR does.
-- Extend the byte projection to selected units from multiple source files. Adopt the reviewed v3.0.0 Ghostfolio helpers and their required dependencies in this change.
-- Adopt applicable authentication, simulation, identity, exact acceptance, reporting, notification and native evidence contracts. Map every IBKR requirement to an implementation task or an explicit broker-specific difference.
-- Introduce versioned DEGIRO identities with a dual reader. Keep existing rows. Report differences before deduplication hides them.
-- Adopt candidate/stable publication rules. Reuse the existing connector lab with a dedicated DEGIRO container, private state and credentials. Require empty and golden-copy acceptance.
-- **BREAKING:** replace the old script command with `python -m ghostfolio_degiro_sync`; align blank simulation settings and failure notifications with IBKR. Preserve DEGIRO's stronger financial fences.
+- Adopt typed modules, frozen data records, strict checks, Python 3.14 and installed module execution. Keep every intermediate Docker build runnable.
+- Adopt the actual v3.0.0 core through an explicit multi-source byte projection. Separate reads, indexing, selection and confirmed-result recording.
+- Adopt applicable authentication, simulation, identity, acceptance, reporting, notification and evidence contracts. Map all 41 upstream requirements and explicit DEGIRO differences.
+- Use `DEGIRO#v1#<account>:<KIND>:<id>`. Deliver offline migration preview, guarded conversion, inspection and rollback with the dual reader and new writer. Inventory all DEGIRO history, beyond 90 days. Convert only proven identities; report and preserve uncertain rows. Preserve activity IDs, financial fields and profiles.
+- Keep image tags `vX.Y.Z` and `vX.Y.Z-rc.N`. Adopt stricter candidate/stable publication rules. Qualify the same candidate in the existing empty/golden lab with dedicated DEGIRO execution and checks. No reader-only release is required.
+- **BREAKING:** replace the script path with `python -m ghostfolio_degiro_sync`; align blank simulation and failure alerts; missing/invalid TZ forces simulation. Converted/new identities require the qualified dual reader. Historical conversion remains an explicit operation, never an automatic sync effect.
 
-Inventory: existing observed-data record `docs/source-contract.md`, accepted accounting spec and `cash-rules.yaml`. Broker source unchanged; no new real-data claim.
+Inventory: observed-data record `docs/source-contract.md`, accounting spec and `cash-rules.yaml`. Broker source unchanged; no new real-data claim.
 
 | DEGIRO event | Scope |
 | --- | --- |
-| BUY/SELL | Preserve conversion and units |
-| Paid dividend; withholding | Preserve exact pairing |
+| BUY/SELL | Preserve amounts and units |
+| Paid dividend; withholding | Preserve pairing |
 | Brokerage; AutoFX | Preserve execution fees |
 | Exchange connection charge | Preserve FEE and prove UUID readback |
 | Flatex interest; fund compensation | Preserve INTEREST and prove UUID readback |
-| FX debit/credit; withdrawal/funding | Preserve cash-only rules and unknown-funding refusal |
-| Sweep notice/transfer; execution cash | Preserve classification and checks |
+| FX debit/credit; withdrawal/funding | Preserve cash-only rules and refusal |
+| Sweep notice/transfer; execution cash | Preserve classification |
 | Announced dividend | Preserve exclusion |
 | Legacy fund NAV/transaction; corporate action; unknown event | Preserve refusal; new support excluded |
 
@@ -36,12 +36,12 @@ Inventory: existing observed-data record `docs/source-contract.md`, accepted acc
 
 ### Modified Capabilities
 
-- `degiro-synchronization`: common runtime, identities, acceptance, diagnostics and native evidence, with DEGIRO accounting retained.
+- `degiro-synchronization`: common runtime, identities, historical conversion, acceptance, diagnostics and evidence; DEGIRO accounting retained.
 
 ## Non-goals
 
-IBKR Flex parsing, new DEGIRO financial products, a shared library, automatic historical conversion, production deployment or financial writes.
+Flex parsing, new financial products, a shared library, financial corrections, automatic conversion, and live operations without explicit authorization.
 
 ## Impact
 
-Runtime, generated core, tests, image, CI and existing guidance. Approval changes the implementation scope; it does not authorize publication or live operations.
+Runtime, core, maintenance commands, tests, image, CI and existing guidance. Publication and real conversion require their recorded GO.
