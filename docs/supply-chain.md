@@ -26,7 +26,7 @@ review; they do not independently establish publisher authenticity.
 
 Recommend adopting hash-required, wheel-only runtime installation in a separate
 maintenance change that includes deterministic lock regeneration and native
-Python 3.12 amd64/arm64 resolution. Include every approved compatible wheel hash,
+Python 3.14 amd64/arm64 resolution. Include every approved compatible wheel hash,
 preserve the reviewed connector wheel pin, and keep dependency updates and hashes
 atomic. Reject unavailable wheels rather than silently building sdists, which
 would add a build-dependency and build-code trust boundary. Check how Renovate

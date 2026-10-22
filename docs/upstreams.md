@@ -14,7 +14,7 @@ image, merges a dependency PR, deploys a service or accesses financial accounts.
 | [Supercronic](https://github.com/aptible/supercronic) | Runtime scheduler version and architecture SHA256 pins in Dockerfile | Daily dependency watch 07:29 UTC; full-image advisory scan |
 | Python runtime and its complete closure | requirements.txt pins DEGIRO, PyOTP, requests, YAML, Apprise and every transitive package | Weekly grouped Renovate proposals; pip-audit on PR/release/weekly checks; blocking image scan |
 | Python developer/CI tools | requirements-dev.txt pins pip-audit and pytest | Weekly grouped Renovate proposals; complete CI environment audit |
-| Python/Debian base image | Digest-pinned Python 3.12 slim in Dockerfile, OS packages inherited from it | Weekly Renovate proposals within Python 3.12; native image security checks |
+| Python/Debian base image | Digest-pinned Python 3.14 slim in Dockerfile, OS packages inherited from it | Weekly Renovate proposals within Python 3.14; native image security checks |
 | GitHub Actions: checkout/setup-python, CodeQL, dependency-review, Trivy, Docker build/login, artifacts | Exact SHA in workflows | Weekly grouped Renovate proposals; reviewed CI and native scan gates |
 
 The optional operator notification destinations, Docker Engine/Compose, existing
@@ -67,7 +67,7 @@ Python and npm releases wait 14 days; Actions and images wait three days. Missin
 release timestamps do not bypass those delays. Runtime and developer Python,
 npm, Actions, and image minor/patch or digest changes use separate groups. All
 installed Python versions stay exact, images retain digests and Actions retain
-commit SHAs. Interpreter proposals stay within Python 3.12. The repository's
+commit SHAs. Interpreter proposals stay within Python 3.14. The repository's
 own image is excluded; changing the public default image belongs to release work.
 
 Major upgrades and every connector update need Dependency Dashboard approval

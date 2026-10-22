@@ -34,15 +34,21 @@ def main():
     health_hash = hashlib.sha256(Path("scripts/check_scheduler.py").read_bytes()).hexdigest()
     provenance = Path("docs/connector-provenance.yaml").read_text()
     probe = f'''
-import hashlib, importlib.metadata, json, os
+import hashlib, importlib.metadata, importlib.util, json, os, sys
 from pathlib import Path
 import yaml
 import degiro_connector
 import degiro_to_ghostfolio
+import orjson, pydantic_core, wrapt
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from degiro_connector.trading.models.credentials import Credentials
 assert os.getuid() == 10001
+assert sys.version_info[:2] == (3, 14), sys.version
+assert importlib.util.find_spec("pip") is None
+assert orjson.loads(orjson.dumps({{"value": 1}})) == {{"value": 1}}
+assert pydantic_core.SchemaValidator({{"type": "int"}}).validate_python(1) == 1
+assert wrapt.ObjectProxy(1) + 1 == 2
 zone = ZoneInfo("Europe/Zurich")
 assert datetime(2026, 1, 15, 6, 15, tzinfo=zone).utcoffset() == timedelta(hours=1)
 assert datetime(2026, 7, 15, 6, 15, tzinfo=zone).utcoffset() == timedelta(hours=2)
@@ -68,7 +74,7 @@ assert hashlib.sha256(Path("/app/scripts/recover_degiro.py").read_bytes()).hexdi
 assert hashlib.sha256(Path("/app/scripts/check_scheduler.py").read_bytes()).hexdigest() == {health_hash!r}
 from scripts.check_scheduler import check_scheduler
 check_scheduler("")
-print("Runtime UID, dependency closure, source-equivalent connector, immutable core and explicit app file set: PASS")
+print("Python 3.14, native dependencies, no pip, runtime UID, source-equivalent connector, immutable core and explicit app file set: PASS")
 '''
     print(run(*options, "-i", args.image, "python", "-", input_text=probe).strip())
     output = run(*options, "-e", "BITWARDENCLI_APPDATA_DIR=/tmp/vault-smoke",

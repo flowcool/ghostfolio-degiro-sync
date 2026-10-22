@@ -42,7 +42,7 @@ Mondays before 09:00 Europe/Zurich, with at most three open PRs and two new PRs
 per hour. Python and npm releases wait 14 days; Actions and images wait three
 days. Runtime Python, developer Python, npm, Actions and image changes use
 separate groups. Dependabot version PR limits are zero while its security
-updates remain enabled. Python stays on 3.12. Major updates require prior
+updates remain enabled. Python stays on 3.14. Major updates require prior
 dashboard approval, and connector updates require provenance review.
 Supercronic and Bitwarden versions require both architecture checksums and remain
 outside automatic updates. `ghostfolio_core.py` is never edited by hand or bumped
