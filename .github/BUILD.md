@@ -17,7 +17,9 @@ Both native container matrix checks are required on `main`.
 matrix and preserves these requirements when configuring the repository.
 
 PR builds never log in to a registry or publish images. `release-image.yml`
-publishes only a published semantic-version GitHub Release whose tag is on main.
+publishes only a published non-draft stable `vX.Y.Z` or prerelease
+`vX.Y.Z-rc.N` on main. Candidate N is positive without leading zeros.
+Stable source must equal the highest numbered candidate for that version.
 Its serialized preflight authenticates to the registry without requiring a
 package to exist already. Failure diagnostics report only the phase and HTTP
 status, never credentials or response bodies.
@@ -25,7 +27,7 @@ Each native architecture is built, scanned and smoke-tested before publishing by
 digest with SBOM and build provenance. This creates the package on its first
 release without creating or changing a version tag. The final job then proves
 the version tag is absent before assembling the two digests, verifies amd64/arm64
-and records the manifest. Existing version tags and ambiguous registry failures
+and proves both native manifest digests equal the checked inputs before recording the manifest. Existing version tags and ambiguous registry failures
 abort publication of the version manifest.
 Only the current stable release can update `latest`; prereleases cannot do so.
 A release rerun never silently overwrites an existing version. Runtime code,

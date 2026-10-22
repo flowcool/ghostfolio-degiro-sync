@@ -291,3 +291,35 @@ is not proof of a write. Missing/nonfinite evidence emits no invented record and
 fails candidate qualification. These logs contain private financial payloads and
 source/account identities. Store them privately; never share them without review.
 INFO emits no machine-evidence records. DEBUG adds no broker or Ghostfolio reads.
+
+
+### Candidate and stable images
+
+Use an unused `vX.Y.Z-rc.N` tag, with a positive candidate number and no leading
+zeros, for an approved candidate publication. Publish a non-draft GitHub
+prerelease from main. Candidates publish only their exact `v` image tag. They do
+not change `latest` or existing stable/minor aliases. Existing aliases stay
+frozen; this cutover does not delete them. Record the installed image digest and
+configuration before an upgrade.
+
+Before stable promotion, qualify the exact candidate digest in both the empty
+and golden-copy labs. Keep the fixed source inputs, clock, mapping, migration
+and readback evidence. Incomplete or failed proof blocks promotion. Replace a
+failed digest with an unused candidate version and replay both scenarios.
+Lab writes, candidate publication and stable promotion each need their own GO.
+
+Stable `vX.Y.Z` must use the same source commit as the highest numbered candidate
+for that version. The preflight names both tags if their commits differ. Only a
+published non-draft stable release on main can publish its stable version tag;
+only the current stable release can update `latest`. Every version is immutable.
+If latest promotion fails, first verify the stable digest and that the release
+is still current, then explicitly promote that digest. Do not rebuild or replace
+the occupied version. Publication never deploys the connector.
+
+Renovate excludes prereleases by default through
+[`ignoreUnstable`](https://docs.renovatebot.com/configuration-options/#ignoreunstable).
+The Compose and README pins keep the `v` prefix. Select security releases as a
+maintainer decision; use PATCH for compatibility-neutral fixes. Digest rollback
+must preserve configuration and journals. It does not reverse financial records.
+After v1 imports, use the qualified candidate in simulation for safe halt as
+described above; an older binary is not an assumed recovery path.
