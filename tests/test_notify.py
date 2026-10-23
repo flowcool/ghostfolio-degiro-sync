@@ -307,6 +307,7 @@ def test_manual_dry_run_and_invalid_failures_deliver_once(monkeypatch, mode):
     monkeypatch.setattr(sync_module, 'run_sync', lambda *a: (_ for _ in ()).throw(RuntimeError(SYNC_SECRET)))
     assert m.main(['--sync']) == 1
     assert len(calls) == 1
+    assert SYNC_SECRET not in calls[0][1] and URL_SECRET not in calls[0][1]
     assert SYNC_SECRET not in calls[0][2] and URL_SECRET not in calls[0][2]
 
 
@@ -324,6 +325,7 @@ def test_one_sanitized_failure_and_preserved_exit(monkeypatch, caplog, status, m
     monkeypatch.setattr(sync_module, 'run_sync', lambda *a: (_ for _ in ()).throw(RuntimeError(SYNC_SECRET)))
     assert m.main(['--sync']) == 1
     assert len(calls) == 1
+    assert SYNC_SECRET not in calls[0][1] and URL_SECRET not in calls[0][1]
     assert SYNC_SECRET not in calls[0][2] and URL_SECRET not in calls[0][2]
     assert SYNC_SECRET not in caplog.text and URL_SECRET not in caplog.text
 

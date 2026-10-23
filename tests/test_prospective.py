@@ -384,6 +384,7 @@ def test_pre_cutover_unmapped_trade_report_preserves_success(prospective_account
         assert adapter.main(['--sync', '--from-date', '2025-12-31', '--to-date', '2026-01-04']) == 0
     assert calls == []
     assert results[0]['proposed'] == list(baseline.selection.proposals)
+    assert len(results[0]['proposed']) == 3
     assert results[0]['accepted'] == []
     assert (snapshot, destination) == before
     assert 'Source normalization unavailable' in caplog.text
