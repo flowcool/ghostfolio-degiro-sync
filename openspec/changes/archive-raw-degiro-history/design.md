@@ -2,31 +2,30 @@
 
 ## Context
 
-`degiro.read_degiro` merges history and checks accounting before returning. `accounting.merge_history` rejects legacy cash-fund records. The CLI saves afterward. Changing that path changes the candidate under qualification.
+`degiro.read_degiro` checks accounting before returning. Legacy cash-fund rows stop capture before saving. Keep that candidate unchanged.
 
 ## Goals / Non-Goals
 
-Retain evidence with the existing candidate. No legacy import or scheduled archive replay.
+Retain source evidence. No legacy import, filtered sync input or scheduled archive replay.
 
 ## Decisions
 
-Mount `scripts/archive_degiro_history.py` read-only into the pinned image. Reuse its installed package, like `scripts/prepare_cutover.py`. No second credential mechanism.
+Mount `scripts/archive_degiro_history.py` read-only into the pinned image. Reuse its installed package, like `scripts/prepare_cutover.py`. Reuse `vault.broker_credentials`, `degiro.history_windows`, bounded transport, quiet logging and pinned vendor actions. No sibling or new credential mechanism.
 
-Reuse `vault.broker_credentials`, `degiro.history_windows`, `bounded_broker_session`, `broker_call`, quiet logging and the pinned connector action APIs. Use one login and client discovery. Collect transactions and cash overview by window, then product metadata and current account/update evidence. Optional statement locale remains explicit. Do not call `read_degiro`, row-merging or financial selection. A separate archive operation cannot certify sync acceptance.
+Use one login and client discovery. Collect transactions/overview by window, current account/update evidence, bounded referenced products and optional locale-specific CSV. Do not call `read_degiro`, row merging or selection.
 
-Wrap the bounded session response boundary to write permitted successful financial response bodies before the vendor action decodes them. Do not archive login, client-discovery or logout responses. Validate JSON structure for credential-field absence without changing saved bytes. Validate optional CSV encoding. Refuse credential-bearing bodies rather than rewriting them. Keep endpoint kinds and dates; discard URLs and headers.
+Capture eligible financial `response.content` bytes after HTTP decoding, before row interpretation. Never save authentication/client-discovery/logout bodies, URLs or headers. Parse UTF-8 JSON with duplicate-aware key inspection and depth bounds. Reject credential keys using the existing redaction vocabulary. CSV needs valid UTF-8 and an explicit credential-material check. Invalid encoding, unparseable JSON, sensitive material or oversized bodies produce metadata only and stop.
 
-Use exclusive private file creation and an atomic keyed YAML index. Record intent before each request, response hash after durable publication, and final collection status. Reuse private-file mechanisms from `app.save_private_snapshot` and migration journal publication, without altering them. A crash or failed index update leaves an incomplete archive; no resume or automatic retry is supported.
+Record intent before dispatch. Require one response per collection intent. Preserve archive failures independently of vendor exception handling; `broker_call` already rejects None. Write response staging files exclusively, fsync, publish without replacement and fsync the directory. Then atomically publish the keyed YAML index. A crash may leave an orphan or pending entry; inspection reports both. No automatic resume/retry.
 
-Add offline inspection to the same script. Verify archive hashes before reading rows. Identify each row by response and offset; do not merge overlapping windows. Report known legacy exclusions and malformed or unknown input with reasons. Keep other rows unassessed where full accounting evidence is absent. Report blocked import status, not a safe subset. Do not invoke financial writers or replace source bytes.
+Limit each decoded body to16MiB, retained bodies to512MiB, product IDs to10000 and product requests to100. Clear inherited diagnostic accumulation after each request. Product extraction follows durable capture; invalid identifiers become findings. Existing transport buffers bodies before this limit; use an explicit container memory limit and do not claim a bounded download.
+
+Offline inspection validates private regular basename-only files, sizes and hashes. Report per-response counts with offsets for flagged rows; conserve rows without merging overlap. Use excluded_legacy, malformed, unknown and unassessed. Index/report keep history_completeness_verified:false and import_status:archive_not_importable. requests_finished means only all requested steps returned.
 
 ## Risks / Trade-offs
 
-- Broker truncation is unknown → record requested ranges without claiming complete history.
-- Legacy identifiers are unstable → preserve response boundaries and duplicate rows.
-- Network or disk failure → retain partial evidence, stop and attempt logout.
-- Real responses can contain personal financial data → private permissions, no raw logs, protected authentication boundary.
+Broker truncation remains unknown. Retain partial evidence on network/storage failure and attempt logout. Never certify completeness or accounting.
 
 ## Delivery and recovery
 
-Prove synthetic transport and network-disabled pinned-image execution. Bind commit/hash, dates, private path and credential source in the approved operation. Source rollback is one Git revert. Recovery retains the archive; deletion, production changes and financial writes need separate authority.
+Use isolated synthetic tests and network-disabled pinned-image proof. Bind reviewed commit/hash, dates, private path, limits and credential source before real acquisition. Roll back source with Git revert. Retain archives; deletion and financial writes need separate authority.

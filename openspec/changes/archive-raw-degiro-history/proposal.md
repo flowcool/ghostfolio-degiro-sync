@@ -7,10 +7,10 @@ The current read-only command rejects legacy cash-fund records before it saves a
 ## What Changes
 
 - Add an explicit history archive command outside the shipped runtime image. Run its versioned script with the pinned connector image.
-- Save each successful financial response before accounting checks. Keep original response bytes, request dates and hashes in private files.
+- Save eligible successful financial responses before accounting checks. Keep HTTP-decoded body bytes, numeric text, request dates and hashes in private files.
 - Use one vault retrieval and broker login per archive. Keep bounded requests, no retries, logout and secret-free diagnostics.
-- Keep incomplete archives after failure. Report requested coverage separately from proven completeness.
-- Add an offline inventory that identifies exclusions and reasons without discarding their source evidence. Unsupported or ambiguous required input keeps imports blocked.
+- Keep partial archives after failure. Reject unsafe, unreadable or oversized bodies with explicit metadata. Bound retained bytes and metadata requests.
+- Add offline counts and flagged-row references with exclusion reasons. Preserve source evidence. Every archive remains non-importable; diagnostics certify no safe subset.
 
 Observed event scope comes from the saved 2000–2026 broker response collection inspected on 2026-10-23. These names describe source evidence, not new import support.
 
@@ -24,7 +24,9 @@ Observed event scope comes from the saved 2000–2026 broker response collection
 | `COMPENSATION_BOOKING` | Retain | Unchanged |
 | `CASH_FUND_NAV_CHANGE` | Retain | Still unsupported |
 | `CASH_FUND_TRANSACTION` | Retain | Still unsupported |
-| Unknown or malformed financial rows | Retain with the original response | No new permission |
+| Unknown or malformed rows inside readable JSON | Retain with the response | No new permission |
+
+Unparseable, invalid-encoding, credential-bearing or oversized bodies are not retained. The index records their status, available byte count/hash and refusal reason.
 
 ## Capabilities
 

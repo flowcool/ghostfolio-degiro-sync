@@ -8,7 +8,7 @@ Let an operator retain the requested DEGIRO history as private source evidence, 
 
 ### Requirement: Explicit bounded archive
 
-The archive command SHALL accept explicit start and end dates, a window size from 2 through 366 days and a new output directory. It SHALL reject more than 120 overlapping windows before credential access. It SHALL require financial simulation mode. It SHALL use one vault credential retrieval and broker login per execution, sequential bounded requests, no retries and a bounded logout attempt. Direct broker credential variables SHALL remain rejected. It SHALL never contact Ghostfolio or submit financial changes.
+The archive command SHALL accept explicit start and end dates, a window size from 2 through 366 days and a new output directory. It SHALL reject more than 120 overlapping windows before credential access. It SHALL require financial simulation mode using the existing simulation parser. It SHALL use one vault credential retrieval and broker login per execution, sequential bounded requests, no retries and a bounded logout attempt. Direct broker credential variables SHALL remain rejected. It SHALL never contact Ghostfolio or submit financial changes.
 
 #### Scenario: Invalid scope and bounded access
 
@@ -17,9 +17,9 @@ The archive command SHALL accept explicit start and end dates, a window size fro
 
 ### Requirement: Preserve source evidence before interpretation
 
-The archive SHALL retain each successful financial response before row interpretation. It SHALL preserve the original response body bytes and their SHA256, including original numeric text. It SHALL retain transactions and cash overview responses for every requested window, current account information and portfolio/cash updates, and available referenced product metadata. An explicitly requested statement SHALL retain its original UTF-8 CSV bytes. A private index SHALL bind each response to endpoint kind, requested dates, HTTP status, source account and fetch timestamps. It SHALL omit request URLs, headers and authentication responses. Detected credential fields SHALL cause refusal before that body is published.
+The archive SHALL retain each eligible successful financial response before row interpretation. Retained bytes SHALL be the HTTP-decoded response body, not compressed network bytes. It SHALL preserve those bytes and their SHA256, including original numeric text. It SHALL retain transactions and cash overview responses for every requested window, current account information and portfolio/cash updates, and available referenced product metadata. An explicitly requested statement SHALL retain its original UTF-8 CSV bytes. A private index SHALL bind each response to endpoint kind, requested dates, HTTP status, source account and fetch timestamps. It SHALL omit request URLs, headers and authentication responses. JSON bodies SHALL be valid UTF-8 and parseable, with duplicate-aware key inspection and bounded nesting. Credential-key checks SHALL use the existing snapshot-redaction vocabulary. CSV SHALL pass UTF-8 and credential-material checks. Authentication values SHALL never be retained. Unparseable, invalid-encoding, credential-bearing or oversized bodies SHALL not be published. The index SHALL record the step, HTTP status if available, available byte count/hash and refusal reason, without the body.
 
-Unsupported legacy rows, repeated id0 rows, unknown types, empty or malformed financial row shapes SHALL remain in their original successful response. The archive SHALL not merge, deduplicate, normalize, repair or silently remove them. An archive is not a synchronization snapshot or evidence of complete broker history.
+Unsupported legacy rows, repeated id0 rows, unknown types and malformed row shapes inside eligible parseable responses SHALL remain in their original response. Readable envelopes with missing or empty collections SHALL remain available. This preservation guarantee SHALL NOT cover unparseable or otherwise refused bodies. The archive SHALL not merge, deduplicate, normalize, repair or silently remove them. An archive is not a synchronization snapshot or evidence of complete broker history.
 
 #### Scenario: Legacy and malformed rows remain available
 
@@ -28,14 +28,25 @@ Unsupported legacy rows, repeated id0 rows, unknown types, empty or malformed fi
 
 ### Requirement: Private retained partial output
 
-The archive SHALL refuse pre-existing output, symlinks and input/output overlap before broker login. The output directory SHALL be mode 0700 and files mode 0600, owned by the executing user. It SHALL publish each response without replacement and update one private index atomically. The index SHALL distinguish pending, completed and failed collection. Completion SHALL mean only that all requested collection steps succeeded. Historical completeness SHALL remain unverified.
+The archive SHALL refuse pre-existing output, symlinks and input/output overlap before broker login. The output directory SHALL be mode 0700 and files mode 0600, owned by the executing user. It SHALL publish each response without replacement from an exclusively created private staging file, fsync the file and containing directory, and update one private index atomically with durable intent before dispatch. Each collection intent SHALL bind exactly one response. Archive/storage failures SHALL remain visible even if a vendor action catches their exceptions. The index SHALL distinguish pending, requests_finished and failed collection. requests_finished SHALL mean only that all requested collection steps succeeded. The index and inspection report SHALL always contain history_completeness_verified: false and import_status: archive_not_importable.
 
 On failed HTTP, timeout, invalid encoding, credential-bearing body or storage failure, the command SHALL stop without retry, attempt logout, return nonzero and retain all previously published files. Logs SHALL contain only sanitized stages, counts and statuses. A later run SHALL require a new output directory; it SHALL not overwrite or resume the uncertain attempt.
 
 #### Scenario: Failure preserves earlier evidence
 
 - **WHEN** `.venv/bin/python -m pytest -q tests/test_history_archive.py -k retention` injects failures after successful windows
-- **THEN** earlier bytes remain unchanged, partial status is explicit, authentication material stays absent, overwrite is refused, and no request is retried.
+- **THEN** earlier bytes remain unchanged, partial status is explicit, authentication material stays absent, overwrite is refused, and no request is retried; crash points produce detectable pending entries or orphan files rather than accepted complete evidence.
+
+### Requirement: Bounded retention and metadata collection
+
+Each decoded body SHALL be limited to 16 MiB before publication. Retained response bodies SHALL total at most 512 MiB. The command SHALL limit distinct valid referenced product IDs to 10000 and product metadata requests to 100. It SHALL stop with retained partial evidence when a limit is exceeded. It SHALL clear inherited diagnostic body accumulation after each request. Product identifier extraction SHALL run only after source publication; invalid identifiers SHALL be reported without discarding their source rows or generating metadata requests for them.
+
+The operation SHALL pin window size and a container memory limit. Existing buffered transport can allocate a response before its decoded-size check; documentation SHALL disclose this limit and SHALL NOT claim a bounded download. It SHALL NOT override the existing transport boundary to hide that limitation.
+
+#### Scenario: Oversized or excessive input stops retention
+
+- **WHEN** `.venv/bin/python -m pytest -q tests/test_history_archive.py -k limits` exercises oversized bodies, cumulative size, invalid product IDs and excessive product requests
+- **THEN** unsafe bodies are unpublished, prior evidence survives, metadata requests stay bounded and diagnostic bodies do not accumulate across requests.
 
 ### Requirement: Archive grants no import permission
 
@@ -50,11 +61,11 @@ Baseline: `docs/read-only.md` describes the current normalized capture; `docs/so
 
 ### Requirement: Explicit offline exclusions
 
-Offline archive inspection SHALL verify the index and response hashes without credentials or network access. Its private report SHALL retain a stable source reference for each locatable row using response identity and row offset. It SHALL report recognized unsupported legacy records as excluded, with reasons. It SHALL distinguish malformed, unknown and unassessed evidence from supported accounting. Unreadable envelopes SHALL receive an explicit response-level finding; missing rows or values SHALL not be invented.
+Offline archive inspection SHALL verify the index and response hashes without credentials or network access. Inspection SHALL treat the index as untrusted: response paths MUST be basenames without traversal; files MUST be private regular files without symlinks or hardlinks, with matching size and hash. It SHALL report pending intents and unindexed files without adopting them. Its private report SHALL give per-response row/type counts and stable response/offset references for flagged rows. Each locatable row SHALL contribute once to a closed classification count: excluded_legacy, malformed, unknown or unassessed. Overlapping windows remain separate observations. It SHALL report recognized unsupported legacy records as excluded, with reasons. It SHALL distinguish malformed, unknown and unassessed evidence from supported accounting. Refused/unreadable responses SHALL receive an explicit index-level finding; their unavailable bodies SHALL not be invented. Inspection SHALL not call the normal accounting-format check or history merger.
 
-Inspection SHALL not remove rows from the archive, merge overlap records, create a filtered synchronization input, or authorize a supposedly safe import subset. Unsupported or ambiguous required evidence SHALL keep the account's import status blocked. A row without a diagnostic SHALL not be described as valid or fully reconciled. The report SHALL explain that no financial write occurred and that full-account synchronization guards still apply.
+Inspection SHALL not remove rows from the archive, merge overlap records, create a filtered synchronization input, or authorize a supposedly safe import subset. Every archive SHALL have import_status: archive_not_importable, including archives without exclusion findings. Normal synchronization SHALL retain its whole-account guards for unsupported or ambiguous required evidence. A row without a diagnostic SHALL not be described as valid or fully reconciled. The report SHALL explain that no financial write occurred and that full-account synchronization guards still apply.
 
 #### Scenario: Exclusions are visible and imports remain blocked
 
 - **WHEN** `.venv/bin/python -m pytest -q tests/test_history_archive.py -k exclusions` inspects a hashed archive with supported-looking, legacy, unknown and malformed inputs
-- **THEN** every locatable row has one source-bound inventory result, exclusion reasons remain visible, all archive bytes stay unchanged, no credential or network is used, and no subset is made importable.
+- **THEN** per-response classification counts conserve every locatable row and flagged rows have exact source references, exclusion reasons remain visible, all archive bytes stay unchanged, no credential or network is used, and no subset is made importable.
