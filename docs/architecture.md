@@ -7,10 +7,10 @@ configuration; the topical contracts below own financial and recovery behavior.
 
 ## Module responsibilities
 
-The installed `ghostfolio_degiro_sync` package starts the staged extraction.
+The installed `ghostfolio_degiro_sync` package owns the connector modules.
 `config.py` validates the configuration boundary and constructs frozen settings
-from `models.py`. The command uses an explicit dictionary conversion while its
-execution functions remain in the legacy module. New package modules use strict
+from `models.py`. The command uses an explicit dictionary conversion for the
+execution modules listed below. Package modules use strict
 typing. Frozen data records carry settings and results; business operations
 remain module-level functions. Credentials stay out of record representations.
 The generated core remains outside this convention change.
@@ -25,7 +25,7 @@ The generated core remains outside this convention change.
 | Journal and recovery | `journal.py` | Lock account state, persist intents and confirm exact readback. |
 | Diagnostics and notifications | `diagnostics.py`, `notify.py` | Compare exact evidence, render private reports and run the isolated notification worker. |
 
-These are conceptual modules, mostly implemented as functions in the adapter.
+Each module owns the functions listed above.
 Moving functions to files alone would not reduce their interface knowledge.
 
 ## Execution order

@@ -349,6 +349,46 @@ def test_actual_dry_run_command_exercises_config_and_orchestration(prospective_a
     assert adapter.main(["--sync", "--from-date", "2025-12-31", "--to-date", "2026-01-04"]) == 1
 
 
+def test_pre_cutover_unmapped_trade_report_preserves_success(prospective_account, tmp_path, monkeypatch, caplog):
+    from ghostfolio_degiro_sync import notify
+
+    config, snapshot, destination = prospective_account
+    # A closed historical instrument needs no mapping for opening inventory.
+    old_trade = {**snapshot['transactions'][0], 'id': 999, 'productId': 99,
+        'date': '2025-12-30T10:00:00Z'}
+    snapshot['transactions'].append(old_trade)
+    snapshot['products']['99'] = {**snapshot['products']['20'], 'isin': 'US5949181045'}
+    path = Path(config['cutover_manifest'])
+    manifest = yaml.safe_load(path.read_bytes())
+    capture_path = path.parent / manifest['opening']['broker']['path']
+    capture = json.loads(capture_path.read_bytes())
+    capture['transactions'].append(old_trade)
+    capture['products'] = snapshot['products']
+    manifest['opening']['broker']['sha256'] = private_file(capture_path, json.dumps(capture).encode())
+    config['cutover_sha256'] = private_file(path, yaml.safe_dump(manifest).encode())
+    baseline = sync_module.select_account_activities(config, snapshot, destination['account'],
+        destination['activities'], MAPPING, QUOTES, now=datetime.fromisoformat(snapshot['fetched_at']),
+        prospective_evidence=journal_module.load_prospective_evidence(path, config['cutover_sha256']))
+    calls, results = [], []
+    monkeypatch.setenv('DRY_RUN', '1')
+    monkeypatch.setenv('TZ', 'Europe/Zurich')
+    monkeypatch.setenv('APPRISE_URLS', '["json://notify.invalid/hook"]')
+    monkeypatch.setattr(notify, 'send_notification', lambda *args: calls.append(args))
+    def acquired(*args):
+        result = sync_account(prospective_account)
+        results.append(result)
+        return result
+    monkeypatch.setattr(sync_module, 'run_sync', acquired)
+    before = deepcopy((snapshot, destination))
+    with caplog.at_level('INFO'):
+        assert adapter.main(['--sync', '--from-date', '2025-12-31', '--to-date', '2026-01-04']) == 0
+    assert calls == []
+    assert results[0]['proposed'] == list(baseline.selection.proposals)
+    assert results[0]['accepted'] == []
+    assert (snapshot, destination) == before
+    assert 'Source normalization unavailable' in caplog.text
+
+
 @pytest.mark.parametrize('credential_mode', ['bearer', 'access'])
 def test_dry_run_command_keeps_acquisition_scope_and_read_only_transports(prospective_account, tmp_path, monkeypatch, caplog, credential_mode):
     config, snapshot, destination = prospective_account

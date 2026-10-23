@@ -2,9 +2,31 @@
 from copy import deepcopy
 from decimal import Decimal
 
+import pytest
+
 from ghostfolio_degiro_sync import diagnostics
 from test_foundation_identity import candidate
 from test_degiro_sync import snapshot
+
+
+@pytest.mark.parametrize('error', [RuntimeError, KeyError, TypeError, ValueError])
+def test_unavailable_source_normalization_remains_visible(snapshot, monkeypatch, error):
+    from ghostfolio_degiro_sync import accounting
+    from test_degiro_sync import MAPPING, QUOTES, opening_holding
+    def unavailable(*args):
+        raise error('SYNTHETIC-PRIVATE-SOURCE')
+    monkeypatch.setattr(accounting, 'normalize_dividends', unavailable)
+    body = {'activities': [opening_holding()], 'count': 1}
+    before = deepcopy((snapshot, body))
+    report = diagnostics.snapshot_reconciliation(snapshot, body, 'target-a', MAPPING, QUOTES)
+    assert sum(len(block['observed_ids']) for block in report) == 1
+    assert sum(block['source_count'] for block in report) == len(snapshot['transactions']) + len(snapshot['cash_movements'])
+    assert all(not block['exact'] and block['target'] is None for block in report)
+    assert report[-1]['status'] == 'uncertain'
+    assert report[-1]['reason'] == 'Source normalization unavailable'
+    text = diagnostics.render_reconciliation(report)
+    assert 'SYNTHETIC-PRIVATE-SOURCE' not in text
+    assert (snapshot, body) == before
 
 
 def test_exact_comparison_retains_wire_decimals_and_zero_tolerance():

@@ -40,19 +40,17 @@ reviews:
         functions. Classes are frozen dataclasses or TypedDict data records only.
         Validate external inputs before typing; exclude secrets from repr.
         Preserve exact decimals, ownership, pending-write and transport guards.
-    - path: "ghostfolio_core.py"
-      instructions: >-
-        Immutable byte projection of the pinned IBKR core: any hand edit is a
-        defect. Changes must come only from scripts/check_core.py regeneration
-        with CORE_PROVENANCE.md updated.
-    - path: "degiro_to_ghostfolio.py"
-      instructions: >-
         DEGIRO is a private, reverse-engineered API: validate response shapes
         and fail loud, never guess. Check account isolation, idempotent import
         and cash handling, exact Decimal/currency semantics, durable
         uncertain-write journal and lock behavior across restarts, exact
         Ghostfolio origin allow-listing without redirects, and that no password,
         TOTP secret, session id, token or account data reaches logs or errors.
+    - path: "ghostfolio_core.py"
+      instructions: >-
+        Immutable byte projection of the pinned IBKR core: any hand edit is a
+        defect. Changes must come only from scripts/check_core.py regeneration
+        with CORE_PROVENANCE.md updated.
     - path: "scripts/**/*.py"
       instructions: >-
         Operator and lab tooling: no production endpoint or credential, no

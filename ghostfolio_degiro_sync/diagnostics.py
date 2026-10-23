@@ -250,10 +250,20 @@ def snapshot_reconciliation(snapshot: dict[str, Any], existing: dict[str, Any],
             ('id', 'accountId', 'type', 'comment', 'date'))
             for raw, parsed in zip(observed, existing.get('activities', []), strict=True)))
     if expected is None:
-        expected = accounting.normalize_trades(snapshot, target, mapping, quotes)
-        expected += accounting.normalize_dividends(snapshot, target, mapping, quotes)
-        expected += accounting.normalize_fees(snapshot, target)
-        expected += accounting.normalize_cash_yield(snapshot, target)
+        try:
+            expected = accounting.normalize_trades(snapshot, target, mapping, quotes)
+            expected += accounting.normalize_dividends(snapshot, target, mapping, quotes)
+            expected += accounting.normalize_fees(snapshot, target)
+            expected += accounting.normalize_cash_yield(snapshot, target)
+        except (RuntimeError, KeyError, TypeError, ValueError):
+            # Historical report limits must not invalidate the selected interval.
+            findings = reconcile_activities([], observed, snapshot.get('from_date'), snapshot.get('to_date'), exact=False)
+            findings.append({'identity': None, 'status': 'uncertain', 'expected': None,
+                'observed': None, 'observed_ids': [], 'source_count':
+                    len(snapshot.get('transactions', [])) + len(snapshot.get('cash_movements', [])),
+                'target': None, 'checks': {}, 'security_quantity': None,
+                'reason': 'Source normalization unavailable', 'exact': False})
+            return findings
     return reconcile_activities(expected, observed, snapshot.get('from_date'), snapshot.get('to_date'), exact=exact)
 
 
