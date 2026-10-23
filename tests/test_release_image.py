@@ -180,3 +180,20 @@ def test_release_manifest_requires_both_native_gates_and_no_pr_publication():
     assert base["restart"] == "${RESTART_POLICY:-no}"
     contributor = yaml.safe_load(Path("compose.build.yaml").read_text())["services"]["degiro-sync"]
     assert contributor["build"]["context"] == "." and contributor["pull_policy"] == "build"
+
+
+@pytest.mark.parametrize("tag", ["v1.2.3-alpha.1", "v1.2.3-rc.0", "v1.2.3-rc.01", "v1.2.3-rc.1.extra"])
+def test_only_positive_exact_rc_channel(tag):
+    with pytest.raises(RuntimeError):
+        release.release_metadata(event(tag, True))
+
+
+def test_highest_candidate_uses_numeric_order_and_names_mismatch():
+    tags = ["v1.2.3-rc.9", "v1.2.3-rc.10", "v1.2.3-rc.01", "v1.2.4-rc.99"]
+    commits = {"v1.2.3": "stable", "v1.2.3-rc.9": "stable", "v1.2.3-rc.10": "candidate"}
+    with pytest.raises(RuntimeError, match=r"v1.2.3.*v1.2.3-rc.10"):
+        release.highest_candidate_source("v1.2.3", tags, commits.__getitem__)
+    commits["v1.2.3"] = "candidate"
+    release.highest_candidate_source("v1.2.3", tags, commits.__getitem__)
+    release.highest_candidate_source("v1.2.3", [], lambda _: pytest.fail("No candidate"))
+    release.highest_candidate_source("v1.2.3-rc.11", tags, lambda _: pytest.fail("Candidate"))

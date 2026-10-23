@@ -6,15 +6,18 @@ from pathlib import Path
 import pytest
 import yaml
 
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
+from ghostfolio_degiro_sync import accounting as accounting_module
+from ghostfolio_degiro_sync import ghostfolio as ghostfolio_module
+
 from scripts import cleanup_degiro
 from test_degiro_sync import TARGET, MAPPING, QUOTES, activity_row, opening_holding, snapshot
 
 
 def inputs(snapshot):
-    activities = adapter.normalize_trades(snapshot, TARGET['id'], MAPPING, QUOTES)
-    activities += adapter.normalize_dividends(snapshot, TARGET['id'], MAPPING, QUOTES)
-    activities += adapter.normalize_fees(snapshot, TARGET['id'])
+    activities = accounting_module.normalize_trades(snapshot, TARGET['id'], MAPPING, QUOTES)
+    activities += accounting_module.normalize_dividends(snapshot, TARGET['id'], MAPPING, QUOTES)
+    activities += accounting_module.normalize_fees(snapshot, TARGET['id'])
     manifest = {'source_account': '123', 'target_account': TARGET['id'],
         'activities': {a['comment']: a for a in activities}}
     rows = [opening_holding()] + [activity_row(a, str(i)) for i, a in enumerate(activities)]
@@ -30,7 +33,7 @@ def test_preflight_selects_only_exact_manifest_ids(snapshot):
     other.update(id='foreign-keep', accountId='foreign', comment='IBKR#123')
     body['activities'].append(other)
     body['count'] = len(body['activities'])
-    result = adapter.cleanup_preflight(body, manifest)
+    result = ghostfolio_module.cleanup_preflight(body, manifest)
     assert set(result['activity_ids'].values()) == {'0', '1', '2'}
     assert len(result['snapshot_sha256']) == 64
 
@@ -60,7 +63,7 @@ def test_unproved_cleanup_never_produces_ids(snapshot, mutation):
     else:
         body['activities'][-1]['quantity'] = None
     with pytest.raises(RuntimeError):
-        adapter.cleanup_preflight(body, manifest)
+        ghostfolio_module.cleanup_preflight(body, manifest)
 
 
 def test_cli_outputs_private_new_file_and_never_overwrites(snapshot, tmp_path, capsys):

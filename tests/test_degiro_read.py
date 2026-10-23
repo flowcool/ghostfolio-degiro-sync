@@ -10,7 +10,13 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 import requests
 
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
+from ghostfolio_degiro_sync import accounting as accounting_module
+from ghostfolio_degiro_sync import degiro as degiro_module
+from ghostfolio_degiro_sync import diagnostics as diagnostics_module
+from ghostfolio_degiro_sync import vault as vault_module
+
+from ghostfolio_degiro_sync import vault as vault_module
 
 
 USERNAME = "USERNAME_SENTINEL_934"
@@ -23,7 +29,7 @@ SEED = "JBSWY3DPEHPK3PXP"
 @pytest.fixture
 def credentials(monkeypatch):
     # Broker action tests isolate the already-tested vault boundary.
-    monkeypatch.setattr(adapter, "vault_broker_credentials", lambda: [USERNAME, PASSWORD, SEED])
+    monkeypatch.setattr(vault_module, "vault_broker_credentials", lambda: [USERNAME, PASSWORD, SEED])
     for key in ("DEGIRO_USERNAME", "DEGIRO_PASSWORD", "DEGIRO_TOTP_SECRET"):
         monkeypatch.delenv(key, raising=False)
     import pyotp
@@ -105,7 +111,7 @@ def assert_no_secrets(text):
 
 
 def test_vault_credentials_construct_connector_model(credentials):
-    model = adapter.broker_credentials()
+    model = vault_module.broker_credentials()
     assert model.username == USERNAME and model.password == PASSWORD
     assert model.totp_secret_key == SEED and model.int_account is None
 
@@ -115,13 +121,13 @@ def test_vault_credentials_construct_connector_model(credentials):
 def test_direct_credentials_fail_before_network(credentials, monkeypatch, name, value):
     monkeypatch.setenv(name, value)
     with pytest.raises(RuntimeError, match="Direct DEGIRO credentials are unsupported"):
-        adapter.broker_credentials()
+        vault_module.broker_credentials()
 
 
 def test_real_actions_preserve_raw_fields_and_fractional_quantity(credentials, monkeypatch, caplog):
     caplog.set_level(logging.DEBUG)
     calls = broker_http(monkeypatch)
-    data = adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 5), window_days=3)
+    data = degiro_module.read_degiro(date(2026, 1, 1), date(2026, 1, 5), window_days=3)
     assert len(data["transactions"]) == len(data["cash_movements"]) == 1
     assert data["transactions"][0]["quantity"] == 0.5
     assert data["cash_movements"][0]["orderId"] == "opaque"
@@ -139,7 +145,7 @@ def test_real_actions_preserve_raw_fields_and_fractional_quantity(credentials, m
 
 def test_observed_empty_account_overview_is_acquired_without_history_claim(credentials, monkeypatch):
     calls = broker_http(monkeypatch, '/accountoverview', response({'data': {}}))
-    data = adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2))
+    data = degiro_module.read_degiro(date(2026, 1, 1), date(2026, 1, 2))
     assert data['cash_movements'] == []
     assert data['transactions']  # Acquisition is not evidence of complete reconciliation.
     assert data['history_completeness_verified'] is False
@@ -158,11 +164,11 @@ def test_read_failures_are_secret_free_and_logout_is_attempted(
     caplog.set_level(logging.DEBUG)
     calls = broker_http(monkeypatch, path, failure)
     if path == "/logout;" and isinstance(failure, requests.Response) and failure.status_code == 200:
-        adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2))
+        degiro_module.read_degiro(date(2026, 1, 1), date(2026, 1, 2))
         assert_no_secrets(caplog.text)
         return
     with pytest.raises(RuntimeError) as caught:
-        adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2))
+        degiro_module.read_degiro(date(2026, 1, 1), date(2026, 1, 2))
     assert "/logout;" in calls[-1][0].url
     assert caught.value.__suppress_context__
     assert_no_secrets(str(caught.value) + caplog.text)
@@ -180,7 +186,7 @@ def test_login_no_retry_no_maintenance_scrape_no_secret_logs(credentials, monkey
     calls = broker_http(monkeypatch, "/login/totp", failure)
     monkeypatch.setattr(requests, "get", lambda *a, **k: pytest.fail("Maintenance scrape forbidden"))
     with pytest.raises(RuntimeError) as caught:
-        adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2))
+        degiro_module.read_degiro(date(2026, 1, 1), date(2026, 1, 2))
     assert len(calls) == 1
     assert_no_secrets(str(caught.value) + caplog.text)
 
@@ -194,7 +200,7 @@ def test_login_no_retry_no_maintenance_scrape_no_secret_logs(credentials, monkey
 ])
 def test_transport_refuses_other_hosts_and_trading_endpoints(monkeypatch, method, url):
     monkeypatch.setattr(requests.Session, "send", lambda *a, **k: pytest.fail("Forbidden request sent"))
-    session = adapter.bounded_broker_session()
+    session = degiro_module.bounded_broker_session()
     with pytest.raises(RuntimeError, match="outside read-only"):
         session.send(session.prepare_request(requests.Request(method, url)))
     session.close()
@@ -202,7 +208,7 @@ def test_transport_refuses_other_hosts_and_trading_endpoints(monkeypatch, method
 
 def test_bounded_session_preserves_canonical_connector_headers():
     from degiro_connector.core.constants.headers import HEADERS
-    session = adapter.bounded_broker_session()
+    session = degiro_module.bounded_broker_session()
     assert all(session.headers[key] == value for key, value in HEADERS.items())
     assert session.trust_env is False
     assert session.get_adapter("https://").max_retries.total == 0
@@ -210,32 +216,32 @@ def test_bounded_session_preserves_canonical_connector_headers():
 
 
 def test_history_overlaps_one_day_and_is_bounded():
-    assert adapter.history_windows(date(2026, 1, 1), date(2026, 1, 5), 3) == [
+    assert degiro_module.history_windows(date(2026, 1, 1), date(2026, 1, 5), 3) == [
         (date(2026, 1, 1), date(2026, 1, 3)), (date(2026, 1, 3), date(2026, 1, 5))]
     with pytest.raises(RuntimeError, match="budget"):
-        adapter.history_windows(date(2020, 1, 1), date(2026, 1, 1), 2)
+        degiro_module.history_windows(date(2020, 1, 1), date(2026, 1, 1), 2)
 
 
 def test_overlap_conflicts_fail_and_unknown_ids_are_not_synthesized():
     rows = [{"id": 1, "price": 10}]
-    assert adapter.merge_history(rows, [{"id": 1, "price": 10}]) == rows
+    assert accounting_module.merge_history(rows, [{"id": 1, "price": 10}]) == rows
     with pytest.raises(RuntimeError, match="Conflicting"):
-        adapter.merge_history(rows, [{"id": 1, "price": 11}])
+        accounting_module.merge_history(rows, [{"id": 1, "price": 11}])
     with pytest.raises(RuntimeError, match="stable identity"):
-        adapter.merge_history(rows, [{"price": 11}])
+        accounting_module.merge_history(rows, [{"price": 11}])
 
 
 def test_connector_none_is_failure():
     def no_data():
         return None
     with pytest.raises(RuntimeError, match="returned no data"):
-        adapter.broker_call(no_data)
+        degiro_module.broker_call(no_data)
 
 
 def test_overlapping_cash_without_identity_fails_with_logout(credentials, monkeypatch):
     calls = broker_http(monkeypatch, cash_without_id=True)
     with pytest.raises(RuntimeError):
-        adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 5), 3)
+        degiro_module.read_degiro(date(2026, 1, 1), date(2026, 1, 5), 3)
     assert "/logout;" in calls[-1][0].url
 
 
@@ -253,7 +259,7 @@ def test_private_snapshot_redacts_auth_and_refuses_overwrite(tmp_path):
 def test_logging_settings_restored():
     logger = logging.getLogger("urllib3.connectionpool")
     before = (logger.level, logger.disabled, logger.propagate)
-    with adapter.private_broker_logs():
+    with diagnostics_module.private_broker_logs():
         assert logger.disabled
     assert (logger.level, logger.disabled, logger.propagate) == before
 
@@ -261,7 +267,7 @@ def test_logging_settings_restored():
 def test_optional_statement_is_bounded_and_private(credentials, monkeypatch, caplog):
     caplog.set_level(logging.DEBUG)
     calls = broker_http(monkeypatch)
-    data = adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2), report_locale=("nl", "en"))
+    data = degiro_module.read_degiro(date(2026, 1, 1), date(2026, 1, 2), report_locale=("nl", "en"))
     assert data["account_report_csv"].startswith("Date,Description")
     assert "Impôts" in data["account_report_csv"]
     assert any("cashAccountReport/csv" in r.url for r, _ in calls)
@@ -275,7 +281,7 @@ def test_statement_failure_logs_out(credentials, monkeypatch, caplog, failure):
     if isinstance(failure, requests.Response) and failure.status_code == 200:
         failure._content = b"<html>invalid report</html>"
     with pytest.raises(RuntimeError, match="account_report") as caught:
-        adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2), report_locale=("nl", "en"))
+        degiro_module.read_degiro(date(2026, 1, 1), date(2026, 1, 2), report_locale=("nl", "en"))
     assert "/logout;" in calls[-1][0].url
     assert_no_secrets(str(caught.value) + caplog.text)
 
@@ -283,13 +289,13 @@ def test_statement_failure_logs_out(credentials, monkeypatch, caplog, failure):
 @pytest.mark.parametrize("identity", [True, 1.2, "12.0", 0, -1, "garbage"])
 def test_product_identity_is_never_truncated(identity):
     with pytest.raises(RuntimeError, match="product identity"):
-        adapter.history_product_ids([{"productId": identity}])
+        degiro_module.history_product_ids([{"productId": identity}])
 
 
 def test_cli_checks_private_destination_before_authentication(monkeypatch, tmp_path):
     path = tmp_path / "existing.json"
     path.write_text("{}")
-    monkeypatch.setattr(adapter, "read_degiro", lambda *a, **k: pytest.fail("Must validate locally first"))
+    monkeypatch.setattr(degiro_module, "read_degiro", lambda *a, **k: pytest.fail("Must validate locally first"))
     assert adapter.main(["--read-only", "--from-date", "2026-01-01", "--to-date", "2026-01-02",
                          "--output", str(path)]) == 1
 
@@ -297,7 +303,7 @@ def test_cli_checks_private_destination_before_authentication(monkeypatch, tmp_p
 def test_cli_never_logs_uncontrolled_exception(monkeypatch, caplog, tmp_path):
     def fail(*args, **kwargs):
         raise RuntimeError(PASSWORD + SESSION)
-    monkeypatch.setattr(adapter, "read_degiro", fail)
+    monkeypatch.setattr(degiro_module, "read_degiro", fail)
     assert adapter.main(["--read-only", "--from-date", "2026-01-01", "--to-date", "2026-01-02",
                          "--output", str(tmp_path / "unused.json")]) == 1
     assert_no_secrets(caplog.text)
@@ -315,23 +321,23 @@ def test_cli_never_logs_uncontrolled_exception(monkeypatch, caplog, tmp_path):
 def test_login_diagnostics_are_fixed_codes(credentials, monkeypatch, body, status, expected):
     broker_http(monkeypatch, "/login/totp", response(body, status))
     with pytest.raises(RuntimeError, match=f"DEGIRO login failed: {expected}") as caught:
-        adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2))
+        degiro_module.read_degiro(date(2026, 1, 1), date(2026, 1, 2))
     assert_no_secrets(str(caught.value))
 
 
 def test_cash_overlap_ignores_only_window_dependent_balance():
     rows = [{"id": 1, "change": 2, "currency": "EUR", "balance": {"EUR": 100}}]
-    adapter.merge_history(rows, [{**rows[0], "balance": {"EUR": 200}}], cash=True)
+    accounting_module.merge_history(rows, [{**rows[0], "balance": {"EUR": 200}}], cash=True)
     assert len(rows) == 1
     with pytest.raises(RuntimeError, match="Conflicting"):
-        adapter.merge_history(rows, [{**rows[0], "change": 3}], cash=True)
+        accounting_module.merge_history(rows, [{**rows[0], "change": 3}], cash=True)
     with pytest.raises(RuntimeError, match="Conflicting"):
-        adapter.merge_history(rows, [{**rows[0], "balance": {"EUR": 200}}])
+        accounting_module.merge_history(rows, [{**rows[0], "balance": {"EUR": 200}}])
 
 
 def test_optional_order_history_and_snapshot_freshness(credentials, monkeypatch):
     broker_http(monkeypatch)
-    result = adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 5), 3, orders=True)
+    result = degiro_module.read_degiro(date(2026, 1, 1), date(2026, 1, 5), 3, orders=True)
     assert len(result["orders"]) == 1
     assert result["fetch_started_at"] <= result["fetched_at"]
     assert result["fetched_at"].endswith("+00:00")
@@ -340,7 +346,7 @@ def test_optional_order_history_and_snapshot_freshness(credentials, monkeypatch)
 def test_order_history_failure_logs_out(credentials, monkeypatch):
     calls = broker_http(monkeypatch, "/order-history", response({}, 500))
     with pytest.raises(RuntimeError, match="order_history"):
-        adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2), orders=True)
+        degiro_module.read_degiro(date(2026, 1, 1), date(2026, 1, 2), orders=True)
     assert "/logout;" in calls[-1][0].url
 
 
@@ -373,12 +379,12 @@ def test_prospective_reader_fetches_held_metadata_and_captures_destination_insid
         return {"captured_at": datetime.now(timezone.utc).isoformat(), "account": {"id": "synthetic"}}
     if closed_identity != "99" or cash_identity == "XYZ":
         with pytest.raises(RuntimeError, match="products|update"):
-            adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2), holdings=True,
+            degiro_module.read_degiro(date(2026, 1, 1), date(2026, 1, 2), holdings=True,
                 cutover_target_reader=destination)
         assert extra_products == [] and observed == []
         assert "/logout;" in calls[-1][0].url
         return
-    data = adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2), holdings=True,
+    data = degiro_module.read_degiro(date(2026, 1, 1), date(2026, 1, 2), holdings=True,
         cutover_target_reader=destination)
     assert extra_products == [21] and data['products']['21']['isin'] == 'TESTHELD'
     assert observed == ['read-only target']
@@ -392,6 +398,6 @@ def test_cutover_destination_failure_is_private_and_still_logs_out(credentials, 
     def destination():
         raise RuntimeError(PASSWORD + SESSION)
     with pytest.raises(RuntimeError, match='cutover_destination') as error:
-        adapter.read_degiro(date(2026, 1, 1), date(2026, 1, 2), cutover_target_reader=destination)
+        degiro_module.read_degiro(date(2026, 1, 1), date(2026, 1, 2), cutover_target_reader=destination)
     assert '/logout;' in calls[-1][0].url
     assert_no_secrets(str(error.value) + caplog.text)

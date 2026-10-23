@@ -19,7 +19,7 @@ existing scratch checkout at tag `3.81.0`, commit
 ## Adapter policy
 
 Only observed annual exchange-connection debits become standalone fees. Rules
-remain canonical in `cash-rules.yaml`. The row must have no product or order
+remain canonical in `ghostfolio_degiro_sync/cash-rules.yaml`. The row must have no product or order
 relation, EUR currency equal to the observed EUR base currency, a negative change,
 and an exact cent amount representable as a JSON number. Positive refunds, zero
 amounts, unknown fee categories, mixed currencies or unverified units block.

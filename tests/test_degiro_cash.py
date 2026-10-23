@@ -6,8 +6,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
 
+
+from ghostfolio_degiro_sync import accounting as accounting_module
 
 NOW = datetime(2026, 10, 8, 20, 0, tzinfo=timezone.utc)
 TARGET = {'id': 'target-a', 'currency': 'EUR'}
@@ -25,7 +27,7 @@ def snapshot():
 
 
 def extract(snapshot, target=None):
-    return adapter.current_cash_balance(snapshot, TARGET if target is None else target, '123', NOW)
+    return accounting_module.current_cash_balance(snapshot, TARGET if target is None else target, '123', NOW)
 
 
 def set_total(snapshot, name, value):
@@ -97,7 +99,7 @@ def test_unusable_current_time_or_old_snapshot_blocks(snapshot, now):
     if now is None:
         snapshot['fetched_at'] = snapshot['fetch_started_at'] = '2000-01-01T00:00:00Z'
     with pytest.raises(RuntimeError):
-        adapter.current_cash_balance(snapshot, TARGET, '123', now)
+        accounting_module.current_cash_balance(snapshot, TARGET, '123', now)
 
 
 @pytest.mark.parametrize('target', [{}, {'id': '', 'currency': 'EUR'},
@@ -109,7 +111,7 @@ def test_missing_target_or_different_currency_blocks(snapshot, target):
 
 def test_source_identity_and_base_currency_must_match(snapshot):
     with pytest.raises(RuntimeError, match='source account'):
-        adapter.current_cash_balance(snapshot, TARGET, '456', NOW)
+        accounting_module.current_cash_balance(snapshot, TARGET, '456', NOW)
     snapshot['account_info']['baseCurrency'] = 'USD'
     with pytest.raises(RuntimeError, match='currencies'):
         extract(snapshot)
@@ -235,7 +237,7 @@ def test_clean_evidence_invokes_writer_once(snapshot):
     def put(account, balance):
         calls.append((account, balance))
         return True
-    assert adapter.apply_cash_balance(snapshot, TARGET, '123', put,
+    assert accounting_module.apply_cash_balance(snapshot, TARGET, '123', put,
         dry_run=False, import_ok=True, now=NOW) == 12.3
     assert calls == [('target-a', 12.3)]
 
@@ -243,7 +245,7 @@ def test_clean_evidence_invokes_writer_once(snapshot):
 def test_default_dry_run_does_not_invoke_writer(snapshot):
     def forbidden(*args):
         pytest.fail('DRY_RUN attempted PUT')
-    assert adapter.apply_cash_balance(snapshot, TARGET, '123', forbidden,
+    assert accounting_module.apply_cash_balance(snapshot, TARGET, '123', forbidden,
         import_ok=True, now=NOW) == 12.3
 
 
@@ -254,7 +256,7 @@ def test_ambiguous_import_or_flags_never_invoke_writer(snapshot, kwargs):
     def forbidden(*args):
         pytest.fail('Ambiguous state attempted PUT')
     with pytest.raises(RuntimeError, match='blocks cash update'):
-        adapter.apply_cash_balance(snapshot, TARGET, '123', forbidden, now=NOW, **kwargs)
+        accounting_module.apply_cash_balance(snapshot, TARGET, '123', forbidden, now=NOW, **kwargs)
 
 
 def test_invalid_cash_never_invokes_writer(snapshot):
@@ -262,12 +264,12 @@ def test_invalid_cash_never_invokes_writer(snapshot):
         pytest.fail('Invalid cash attempted PUT')
     set_total(snapshot, 'totalCash', None)
     with pytest.raises(RuntimeError):
-        adapter.apply_cash_balance(snapshot, TARGET, '123', forbidden,
+        accounting_module.apply_cash_balance(snapshot, TARGET, '123', forbidden,
             dry_run=False, import_ok=True, now=NOW)
 
 
 @pytest.mark.parametrize('result', [False, None, 1, {}])
 def test_unconfirmed_writer_result_fails(snapshot, result):
     with pytest.raises(RuntimeError, match='confirm success'):
-        adapter.apply_cash_balance(snapshot, TARGET, '123', lambda *args: result,
+        accounting_module.apply_cash_balance(snapshot, TARGET, '123', lambda *args: result,
             dry_run=False, import_ok=True, now=NOW)

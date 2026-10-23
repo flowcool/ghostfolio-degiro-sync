@@ -168,7 +168,9 @@ jobs:
       - name: Assemble version manifest and verify both architectures
         run: |
           python - <<'PY'
-          import json, os, re, subprocess
+          import json, os, re, subprocess, sys
+          sys.path.insert(0, "scripts")
+          from verify_release_image import native_manifest_digest
           from pathlib import Path
           image, tag = os.environ['IMAGE'], os.environ['RELEASE_TAG']
           digests = [Path('digests', arch + '.txt').read_text() for arch in ('amd64', 'arm64')]
@@ -179,6 +181,10 @@ jobs:
           manifest = json.loads(raw)
           platforms = {(entry['platform']['os'], entry['platform']['architecture']) for entry in manifest['manifests']}
           assert {('linux', 'amd64'), ('linux', 'arm64')} <= platforms
+          for arch, digest in zip(('amd64', 'arm64'), digests, strict=True):
+              checked = json.loads(subprocess.check_output([
+                  'docker', 'buildx', 'imagetools', 'inspect', '--raw', image + '@' + digest]))
+              assert native_manifest_digest(manifest, arch) == native_manifest_digest(checked, arch)
           Path('release-manifest.json').write_bytes(raw)
           PY
       - name: Promote only the current stable release to latest

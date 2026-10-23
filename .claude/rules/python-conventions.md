@@ -3,10 +3,10 @@ description: Python conventions for the DEGIRO adapter and immutable Ghostfolio 
 globs: ["*.py"]
 ---
 
-- No type hints — match existing style
+- Package modules use strict type hints. Validate external inputs before constructing records. Legacy code keeps its style until extraction. Never rewrite generated core bytes.
 - Logging: `log.warning` for operational skips, `log.error` for failures, `log.debug` for verbose
 - Never log a token or credential
 - Errors: `raise RuntimeError(...)` with explicit message, never silent `return` on failure
-- Core/adapter split: `degiro_to_ghostfolio.py` owns broker logic; `ghostfolio_core.py` is the immutable byte projection of pinned IBKR broker-agnostic functions. Never hand-edit the guarded core. Checker/tests/cleanup keep their utility boundaries; no shared package or sibling refactor.
+- Core/adapter split: `ghostfolio_degiro_sync` owns broker logic; `ghostfolio_core.py` is the immutable byte projection of pinned IBKR broker-agnostic functions. Never hand-edit the guarded core. Checker/tests/cleanup use the defining package modules. Do not refactor the canonical sibling.
 - Tests: `pytest` in `tests/` (offline, pure functions, requests mocked; dev-only deps in `requirements-dev.txt`, never in the image). Run `.venv/bin/python -m pytest -q` before commit. A logic change ships with a test; real-data checks require explicit operator authorization outside pytest
-- No classes — functional style with module-level functions
+- Business operations stay module-level functions. Classes are limited to frozen dataclasses and TypedDict data records. Secrets use repr=False.

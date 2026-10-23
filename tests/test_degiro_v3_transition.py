@@ -6,7 +6,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
+from ghostfolio_degiro_sync import accounting as accounting_module
+from ghostfolio_degiro_sync import ghostfolio as ghostfolio_module
+
 from test_degiro_sync import NOW, TARGET, MAPPING, QUOTES, activity_row, opening_holding, snapshot
 
 
@@ -17,7 +20,7 @@ def conversion():
 
 def test_native_v3_foreign_commission_is_not_adapter_fee_evidence(conversion, snapshot):
     generated, = conversion['cases']['foreign_fee']['output']['activities']
-    trade, = adapter.normalize_trades(snapshot, TARGET['id'], MAPPING, QUOTES)
+    trade, = accounting_module.normalize_trades(snapshot, TARGET['id'], MAPPING, QUOTES)
     assert generated['currency'] == trade['currency'] == 'USD'
     assert generated['quantity'] == trade['quantity'] == 2
     assert generated['unitPrice'] == trade['unitPrice'] == 10
@@ -25,10 +28,10 @@ def test_native_v3_foreign_commission_is_not_adapter_fee_evidence(conversion, sn
     assert Decimal(str(trade['fee'])) == Decimal('0.165')
     assert Decimal(str(generated['fee'])) == Decimal('0.15')
     generated['accountId'] = TARGET['id']
-    rows, _ = adapter.existing_activity_context(
+    rows, _ = ghostfolio_module.existing_activity_context(
         {'activities': [opening_holding(), activity_row(generated, 'csv-trade')], 'count': 2}, TARGET)
     with pytest.raises(RuntimeError, match='Manual or CSV'):
-        adapter.pending_activities([trade], rows, TARGET, snapshot['source_account'])
+        ghostfolio_module.pending_activities([trade], rows, TARGET, snapshot['source_account'])
 
 
 def test_api_preserves_payment_omitted_by_native_v3_same_day_dedup(conversion, snapshot):
@@ -39,17 +42,17 @@ def test_api_preserves_payment_omitted_by_native_v3_same_day_dedup(conversion, s
         row['date'] = '2026-01-03T14:00:00+01:00'
         row['change'] *= 2
     snapshot['cash_movements'].extend(second)
-    candidates = adapter.normalize_dividends(snapshot, TARGET['id'], MAPPING, QUOTES)
+    candidates = accounting_module.normalize_dividends(snapshot, TARGET['id'], MAPPING, QUOTES)
     generated, = conversion['cases']['same_day_payments']['output']['activities']
     assert [a['unitPrice'] for a in candidates] == [10, 20]
     assert [a['fee'] for a in candidates] == [1.5, 3]
     assert len({a['comment'] for a in candidates}) == 2
     assert generated['unitPrice'] == 10 and generated['fee'] == 1.5
     generated['accountId'] = TARGET['id']
-    rows, _ = adapter.existing_activity_context(
+    rows, _ = ghostfolio_module.existing_activity_context(
         {'activities': [activity_row(generated, 'csv-dividend')], 'count': 1}, TARGET)
     with pytest.raises(RuntimeError, match='Manual or CSV'):
-        adapter.pending_activities(candidates, rows, TARGET, snapshot['source_account'])
+        ghostfolio_module.pending_activities(candidates, rows, TARGET, snapshot['source_account'])
 
 
 def test_empty_v3_output_cannot_remove_whole_ledger_category_gate(conversion, snapshot):
@@ -61,6 +64,6 @@ def test_empty_v3_output_cannot_remove_whole_ledger_category_gate(conversion, sn
         row.setdefault('valueDate', row['date'])
     snapshot['cash_movements'][-1]['change'] = -1
     with pytest.raises(RuntimeError, match='blocks account writes'):
-        adapter.normalize_dividends(snapshot, TARGET['id'], MAPPING, QUOTES)
+        accounting_module.normalize_dividends(snapshot, TARGET['id'], MAPPING, QUOTES)
     with pytest.raises(RuntimeError, match='blocks account writes'):
-        adapter.current_cash_balance(snapshot, TARGET, snapshot['source_account'], now=NOW)
+        accounting_module.current_cash_balance(snapshot, TARGET, snapshot['source_account'], now=NOW)

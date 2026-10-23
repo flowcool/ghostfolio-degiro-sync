@@ -9,7 +9,14 @@ import pytest
 import requests
 import yaml
 
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
+from ghostfolio_degiro_sync import notify as notify_module
+from ghostfolio_degiro_sync import config as config_module
+from ghostfolio_degiro_sync import degiro as degiro_module
+from ghostfolio_degiro_sync import ghostfolio as ghostfolio_module
+from ghostfolio_degiro_sync import journal as journal_module
+from ghostfolio_degiro_sync import sync as sync_module
+
 from scripts import prepare_cutover, recover_degiro
 from test_degiro_sync import NOW, TARGET, configure, opening_holding, response, snapshot
 from test_degiro_recovery import config, document, pending_import
@@ -34,7 +41,7 @@ def test_exactly_one_nonempty_credential(monkeypatch, token, access):
         if value is not None:
             monkeypatch.setenv(key, value)
     with pytest.raises(RuntimeError, match='exactly one'):
-        adapter.load_ghost_credentials()
+        config_module.load_ghost_credentials()
 
 
 @pytest.mark.parametrize('key,other', [('GHOST_TOKEN', 'GHOST_ACCESS_TOKEN'),
@@ -43,7 +50,7 @@ def test_blank_other_credential_and_verbatim_value(monkeypatch, key, other):
     value = ' unicode-é ' if key == 'GHOST_ACCESS_TOKEN' else BEARER
     monkeypatch.setenv(key, value)
     monkeypatch.setenv(other, ' \t')
-    credentials = adapter.load_ghost_credentials()
+    credentials = config_module.load_ghost_credentials()
     assert credentials['ghost_host'] == HOST
     assert credentials['ghost_access_token' if key == 'GHOST_ACCESS_TOKEN' else 'ghost_token'] == value
 
@@ -65,7 +72,7 @@ def test_exchange_uses_only_approved_origin_and_no_ambient_credentials(monkeypat
         assert options['proxies'] == {} and options['verify'] is True
         return response({'authToken': BEARER}, 201)
     monkeypatch.setattr(requests.Session, 'send', send)
-    assert adapter.ghost_exchange_access_token(HOST, ACCESS) == BEARER
+    assert ghostfolio_module.ghost_exchange_access_token(HOST, ACCESS) == BEARER
     assert calls == [HOST + '/api/v1/auth/anonymous']
 
 
@@ -74,7 +81,7 @@ def test_exchange_uses_only_approved_origin_and_no_ambient_credentials(monkeypat
 def test_bad_origin_prevents_exchange(monkeypatch, host):
     monkeypatch.setattr(requests.Session, 'send', lambda *a, **kw: pytest.fail('HTTP attempted'))
     with pytest.raises(RuntimeError, match='origin policy'):
-        adapter.ghost_exchange_access_token(host, ACCESS)
+        ghostfolio_module.ghost_exchange_access_token(host, ACCESS)
 
 
 @pytest.mark.parametrize('status', [301, 302, 307, 308, 400, 401, 403, 429, 500, 503])
@@ -85,7 +92,7 @@ def test_http_failure_no_retry_or_response_disclosure(monkeypatch, caplog, statu
         return response({'private': ACCESS + BEARER}, status)
     monkeypatch.setattr(requests.Session, 'send', send)
     with pytest.raises(RuntimeError, match=f'HTTP {status}') as error:
-        adapter.ghost_exchange_access_token(HOST, ACCESS)
+        ghostfolio_module.ghost_exchange_access_token(HOST, ACCESS)
     assert calls == [True]
     assert ACCESS not in str(error.value) + caplog.text and BEARER not in str(error.value) + caplog.text
 
@@ -98,7 +105,7 @@ def test_network_failure_is_private_and_not_retried(monkeypatch, caplog, error):
         raise error(ACCESS + BEARER)
     monkeypatch.setattr(requests.Session, 'send', send)
     with pytest.raises(RuntimeError, match='network error') as caught:
-        adapter.ghost_exchange_access_token(HOST, ACCESS)
+        ghostfolio_module.ghost_exchange_access_token(HOST, ACCESS)
     rendered = ''.join(traceback.format_exception(caught.type, caught.value, caught.tb)) + caplog.text
     assert ACCESS not in rendered and BEARER not in rendered and calls == [True]
 
@@ -109,7 +116,7 @@ def test_network_failure_is_private_and_not_retried(monkeypatch, caplog, error):
 def test_unusable_bearer_rejected_without_disclosure(monkeypatch, body):
     monkeypatch.setattr(requests.Session, 'send', lambda *a, **kw: response(body, 201))
     with pytest.raises(RuntimeError, match='no usable authToken') as error:
-        adapter.ghost_exchange_access_token(HOST, ACCESS)
+        ghostfolio_module.ghost_exchange_access_token(HOST, ACCESS)
     assert ACCESS not in str(error.value) and BEARER not in str(error.value)
 
 
@@ -118,7 +125,7 @@ def test_invalid_json_is_private(monkeypatch):
     result._content = (ACCESS + BEARER).encode()
     monkeypatch.setattr(requests.Session, 'send', lambda *a, **kw: result)
     with pytest.raises(RuntimeError, match='not JSON') as error:
-        adapter.ghost_exchange_access_token(HOST, ACCESS)
+        ghostfolio_module.ghost_exchange_access_token(HOST, ACCESS)
     assert ACCESS not in str(error.value) and BEARER not in str(error.value)
 
 
@@ -137,9 +144,9 @@ def test_http_debug_logs_muted_and_restored(monkeypatch, caplog, failure):
     monkeypatch.setattr(requests.Session, 'send', send)
     if failure:
         with pytest.raises(RuntimeError):
-            adapter.ghost_exchange_access_token(HOST, ACCESS)
+            ghostfolio_module.ghost_exchange_access_token(HOST, ACCESS)
     else:
-        assert adapter.ghost_exchange_access_token(HOST, ACCESS) == BEARER
+        assert ghostfolio_module.ghost_exchange_access_token(HOST, ACCESS) == BEARER
     assert ACCESS not in caplog.text and BEARER not in caplog.text
     for name in names:
         logger = logging.getLogger(name)
@@ -169,8 +176,8 @@ def test_sync_authenticates_once_before_broker_and_dry_run_reads_only(
         snapshot['fetched_at'] = datetime.now(timezone.utc).isoformat()
         return snapshot
     monkeypatch.setattr(requests.Session, 'send', send)
-    monkeypatch.setattr(adapter, 'read_degiro', read)
-    result = adapter.run_sync(NOW.date(), NOW.date())
+    monkeypatch.setattr(degiro_module, 'read_degiro', read)
+    result = sync_module.run_sync(NOW.date(), NOW.date())
     expected = [('POST', '/api/v1/auth/anonymous')] if mode == 'access' else []
     assert events == expected + [('BROKER', 'read'), ('GET', '/api/v1/account/target-a'), ('GET', '/api/v1/activities')]
     assert result['dry_run'] is True and result['accepted'] == []
@@ -195,9 +202,9 @@ def test_preflight_or_auth_failure_prevents_broker_and_financial_operations(monk
         assert failure == 'auth' and request.path_url == '/api/v1/auth/anonymous'
         return response({'private': ACCESS}, 403)
     monkeypatch.setattr(requests.Session, 'send', send)
-    monkeypatch.setattr(adapter, 'read_degiro', lambda *a, **kw: pytest.fail('Broker contacted'))
+    monkeypatch.setattr(degiro_module, 'read_degiro', lambda *a, **kw: pytest.fail('Broker contacted'))
     with pytest.raises(RuntimeError):
-        adapter.run_sync(NOW.date(), NOW.date() - timedelta(days=1) if failure == 'dates' else NOW.date())
+        sync_module.run_sync(NOW.date(), NOW.date() - timedelta(days=1) if failure == 'dates' else NOW.date())
     assert calls == ([('POST', '/api/v1/auth/anonymous')] if failure == 'auth' else [])
 
 
@@ -205,14 +212,14 @@ def test_no_refresh_after_target_rejects_new_bearer(monkeypatch, tmp_path):
     configure(monkeypatch, tmp_path)
     monkeypatch.delenv('GHOST_TOKEN')
     monkeypatch.setenv('GHOST_ACCESS_TOKEN', ACCESS)
-    monkeypatch.setattr(adapter, 'read_degiro', lambda *a, **kw: {'account_info': {'baseCurrency': 'EUR'}})
+    monkeypatch.setattr(degiro_module, 'read_degiro', lambda *a, **kw: {'account_info': {'baseCurrency': 'EUR'}})
     calls = []
     def send(session, request, **kwargs):
         calls.append(request.path_url)
         return response({'authToken': BEARER}, 201) if len(calls) == 1 else response({}, 401)
     monkeypatch.setattr(requests.Session, 'send', send)
     with pytest.raises(requests.HTTPError):
-        adapter.run_sync(NOW.date(), NOW.date())
+        sync_module.run_sync(NOW.date(), NOW.date())
     assert calls == ['/api/v1/auth/anonymous', '/api/v1/account/target-a']
 
 
@@ -251,7 +258,7 @@ def test_recovery_wrong_intent_fails_before_auth(config, snapshot, monkeypatch):
     credentials = {**config, 'ghost_access_token': ACCESS, 'ghost_token': None}
     monkeypatch.setattr(requests.Session, 'send', lambda *a, **kw: pytest.fail('HTTP attempted'))
     with pytest.raises(RuntimeError):
-        adapter.readback_import_intent(credentials, expected_intent_id='f' * 32)
+        journal_module.readback_import_intent(credentials, expected_intent_id='f' * 32)
 
 
 def test_recovery_auth_failure_retains_intent_without_reads(config, snapshot, monkeypatch):
@@ -265,7 +272,7 @@ def test_recovery_auth_failure_retains_intent_without_reads(config, snapshot, mo
         return response({}, 403)
     monkeypatch.setattr(requests.Session, 'send', send)
     with pytest.raises(RuntimeError, match='HTTP 403'):
-        adapter.readback_import_intent({**config, 'ghost_access_token': ACCESS, 'ghost_token': None},
+        journal_module.readback_import_intent({**config, 'ghost_access_token': ACCESS, 'ghost_token': None},
             expected_intent_id=intent['id'], confirm=True)
     assert calls == ['/api/v1/auth/anonymous'] and path.read_bytes() == before
 
@@ -273,7 +280,7 @@ def test_recovery_auth_failure_retains_intent_without_reads(config, snapshot, mo
 def test_capture_auth_failure_prevents_broker(monkeypatch, tmp_path):
     cfg = {'dry_run': True, 'ghost_host': HOST, 'ghost_access_token': ACCESS, 'ghost_token': None}
     monkeypatch.setattr(requests.Session, 'send', lambda *a, **kw: response({}, 403))
-    monkeypatch.setattr(adapter, 'read_degiro', lambda *a, **kw: pytest.fail('Broker contacted'))
+    monkeypatch.setattr(degiro_module, 'read_degiro', lambda *a, **kw: pytest.fail('Broker contacted'))
     with pytest.raises(RuntimeError, match='HTTP 403'):
         prepare_cutover.capture(tmp_path / 'new', cfg)
 
@@ -284,9 +291,9 @@ def test_auth_failure_notification_and_cli_do_not_disclose_secrets(monkeypatch, 
     monkeypatch.setenv('GHOST_ACCESS_TOKEN', ACCESS)
     monkeypatch.setenv('APPRISE_URLS', '["json://notify.invalid/hook"]')
     monkeypatch.setattr(requests.Session, 'send', lambda *a, **kw: response({'secret': ACCESS + BEARER}, 403))
-    monkeypatch.setattr(adapter, 'read_degiro', lambda *a, **kw: pytest.fail('Broker contacted'))
+    monkeypatch.setattr(degiro_module, 'read_degiro', lambda *a, **kw: pytest.fail('Broker contacted'))
     notifications = []
-    monkeypatch.setattr(adapter, 'send_notification', lambda settings, title, body: notifications.append(body) or 'sent')
+    monkeypatch.setattr(notify_module, 'send_notification', lambda settings, title, body: notifications.append(body) or 'sent')
     assert adapter.main(['--sync']) == 1
     assert len(notifications) == 1
     assert ACCESS not in caplog.text + notifications[0] and BEARER not in caplog.text + notifications[0]

@@ -23,6 +23,11 @@ Imports supported executions, paid dividends, characterized fees and cash yield 
 
 ## Prerequisites
 
+The Python 3.14 image installs `ghostfolio_degiro_sync`, the pinned core and
+its cash-rules resource. `python -m ghostfolio_degiro_sync` accepts the same
+options as documented below. The module works from any directory in
+the image. Compose continues to select the command and schedule automatically.
+
 - Docker Compose v2, an existing Ghostfolio instance and a Docker network reaching it.
 - A DEGIRO account using **TOTP** and a Bitwarden or Vaultwarden Login item containing its username, password and TOTP seed. App confirmation (`in_app_required`) and captcha (`captcha_required`) are unsupported.
 - Vault API credentials, exactly one Ghostfolio credential, and explicitly selected source and destination accounts.
@@ -114,6 +119,8 @@ Start with `DRY_RUN=1` and an empty `CRON`. In Portainer, use absolute host path
 | `APPRISE_URLS` | Failure alerts | Empty: disabled | Recommended for scheduled runs; JSON list, e.g. `'["ntfy://notification-host/topic"]'` |
 | `APPRISE_TIMEOUT` | Alert deadline | `10` seconds | Keep the default; allowed range 1–30 |
 | `DEGIRO_IMAGE` | Published image tag or digest | `ghcr.io/flowcool/ghostfolio-degiro-sync:v0.4.1` | Follow a reviewed release, pin an immutable digest for controlled upgrades, or explicitly choose `:latest` |
+
+**BREAKING:** a valid IANA `TZ` is required for financial writes. Missing or invalid `TZ` forces simulation and emits a fixed warning. Absent or blank `DRY_RUN` also simulates and emits `DRY_RUN not set: simulation, nothing written`. Values are trimmed and case-insensitive: `1`/`true`/`yes`/`on` simulate; `0`/`false`/`no`/`off` request writes. Any other value stops before broker or Ghostfolio access.
 
 Compose fixes `SYNC_MODE=rolling`, `LOOKBACK_DAYS=90`, `TZ=Europe/Zurich`, `/config/mapping.yaml` and `/state`. Both cron and the broker date boundary use Europe/Zurich. The container runs as UID/GID 10001 with a read-only root filesystem and no Linux capabilities.
 
@@ -207,7 +214,7 @@ Images published from `v0.4.0` include a local healthcheck. The probe verifies t
 
 After reviewing a successful simulation and verifying your Ghostfolio backup, set `DRY_RUN=0` and recreate the service to enable imports and cash updates. Existing activities are not automatically corrected or deleted. Preserve state: removing the journal cannot resolve an uncertain import, and image rollback cannot undo financial changes.
 
-Apprise sends a sanitized alert for failed scheduled runs, including dry runs, and failed live synchronization. Successful runs and manual simulations are silent. No separate Apprise server is required; configure destinations through `APPRISE_URLS`. See [notifications](docs/notifications.md) and [recovery](docs/recovery.md).
+Apprise sends one sanitized alert for each failed invocation, including manual and scheduled simulations. Successful simulations are silent. An explicit live request forced into simulation by missing or invalid `TZ` sends one summary. A failure takes precedence over that summary. No separate Apprise server is required; configure destinations through `APPRISE_URLS`. See [notifications](docs/notifications.md) and [recovery](docs/recovery.md).
 
 ## Troubleshooting
 
@@ -229,3 +236,90 @@ Keep DRY_RUN enabled while resolving failures. Details: [read-only captures](doc
 ## Development and compatibility
 
 [Documentation index](docs/README.md) separates user contracts from contributor material. [CONTRIBUTING.md](CONTRIBUTING.md) covers offline tests and contributor builds. See [architecture](docs/architecture.md) for module contracts and [upstreams](docs/upstreams.md) for compatibility monitoring. Host Python is a developer workflow. Release notices do not deploy or establish compatibility automatically.
+
+The connector reads both legacy DEGIRO comments and generation-1 comments
+(`DEGIRO#v1#<source-account>:<kind>:<source-id>`). Both forms identify the same
+source event. Conflicting or duplicate ownership stops the account. Ownership is
+checked across the complete destination, so changing the target account cannot
+make an old event new. Normal synchronization does not move or rewrite history.
+Source lifetime identity and target-image compatibility require separate
+qualification; see the [source contract](docs/source-contract.md).
+
+New imports write generation 1. Historical comments remain unchanged until an
+explicit, qualified maintenance operation. After any v1 rows exist, safe halt uses
+the exact qualified candidate digest with `DRY_RUN=1` and the existing Compose
+target. If that candidate cannot start, leave writers stopped for a compatible
+repair. A Git revert or comment reversal alone does not qualify an older binary.
+Candidate lab proof and historical conversion require their own authorization.
+
+Simulation reconciliation compares source events with owned destination rows before
+import deduplication. It uses the original JSON decimals when both read phases
+provide them. Missing wire evidence, ownership contention or unsupported units
+remain uncertain; no amount threshold hides a difference. Dividend activity
+quantity `1` does not prove a security quantity. The report adds no reads or
+writes and does not change import selection, exit status or notifications. Private
+captures may retain original financial JSON for this comparison; protect them as
+financial data. They are not source lifetime-coverage proof.
+
+
+Simulation prints a plain DEGIRO reconciliation report, including runs without
+dividends. Each finding names its source identity, exact compared destination ID,
+expected and observed values, coverage and one Action line. Unavailable evidence
+is explicit. Display uses currency minor units; comparison keeps the original
+decimals and zero quantity tolerance. An inspection action does not authorize an
+update. Weak evidence never recommends a row to keep. This report can contain
+private account and activity identities; do not post raw logs publicly.
+
+Validate a retained simulation log for lab acceptance with:
+
+```sh
+.venv/bin/python scripts/check_degiro_report.py private-simulation.log
+```
+
+The checker rejects an Action that names a different activity from its comparison.
+It validates report structure and consistency, not financial truth or live target
+qualification. Keep the exact candidate, inputs and clock with the lab evidence.
+
+
+`LOG_LEVEL` accepts `INFO` (default) or `DEBUG`, ignoring case and surrounding
+spaces. Other values stop before network access. DEBUG enables only connector
+logging. Broker, HTTP and generated-core diagnostics keep their existing privacy
+controls. At DEBUG, one-line `LAB_EVIDENCE ` records contain compact finite JSON
+with exactly `kind` and `value`: the proven DEGIRO `window`, complete simulated
+`preview` (including an empty list), and validated `cash` target. A cash target
+is not proof of a write. Missing/nonfinite evidence emits no invented record and
+fails candidate qualification. These logs contain private financial payloads and
+source/account identities. Store them privately; never share them without review.
+INFO emits no machine-evidence records. DEBUG adds no broker or Ghostfolio reads.
+
+
+### Candidate and stable images
+
+Use an unused `vX.Y.Z-rc.N` tag, with a positive candidate number and no leading
+zeros, for an approved candidate publication. Publish a non-draft GitHub
+prerelease from main. Candidates publish only their exact `v` image tag. They do
+not change `latest` or existing stable/minor aliases. Existing aliases stay
+frozen; this cutover does not delete them. Record the installed image digest and
+configuration before an upgrade.
+
+Before stable promotion, qualify the exact candidate digest in both the empty
+and golden-copy labs. Keep the fixed source inputs, clock, mapping, migration
+and readback evidence. Incomplete or failed proof blocks promotion. Replace a
+failed digest with an unused candidate version and replay both scenarios.
+Lab writes, candidate publication and stable promotion each need their own GO.
+
+Stable `vX.Y.Z` must use the same source commit as the highest numbered candidate
+for that version. The preflight names both tags if their commits differ. Only a
+published non-draft stable release on main can publish its stable version tag;
+only the current stable release can update `latest`. Every version is immutable.
+If latest promotion fails, first verify the stable digest and that the release
+is still current, then explicitly promote that digest. Do not rebuild or replace
+the occupied version. Publication never deploys the connector.
+
+Renovate excludes prereleases by default through
+[`ignoreUnstable`](https://docs.renovatebot.com/configuration-options/#ignoreunstable).
+The Compose and README pins keep the `v` prefix. Select security releases as a
+maintainer decision; use PATCH for compatibility-neutral fixes. Digest rollback
+must preserve configuration and journals. It does not reverse financial records.
+After v1 imports, use the qualified candidate in simulation for safe halt as
+described above; an older binary is not an assumed recovery path.

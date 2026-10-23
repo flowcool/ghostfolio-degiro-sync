@@ -7,17 +7,25 @@ configuration; the topical contracts below own financial and recovery behavior.
 
 ## Module responsibilities
 
+The installed `ghostfolio_degiro_sync` package owns the connector modules.
+`config.py` validates the configuration boundary and constructs frozen settings
+from `models.py`. The command uses an explicit dictionary conversion for the
+execution modules listed below. Package modules use strict
+typing. Frozen data records carry settings and results; business operations
+remain module-level functions. Credentials stay out of record representations.
+The generated core remains outside this convention change.
+
 | Module | Current location | Responsibility and seam |
 | --- | --- | --- |
-| Command orchestration | `degiro_to_ghostfolio.py`: `main`, `run_sync`, `run_sync_locked` | Validate configuration and dates, select a mode, hold the applicable account lock, authenticate and acquire evidence before synchronization. |
-| Broker reading | `degiro_to_ghostfolio.py`: `read_degiro` and broker/vault helpers | Fresh vault retrieval, bounded login/read/logout, raw history overlap checks and requested statement/holdings acquisition. |
-| Ghostfolio transport | `degiro_to_ghostfolio.py`: authentication helpers and `ghost_transport` | Bind the immutable core to the configured origin and permitted routes; enforce DRY_RUN and restore the sequential per-run binding. |
-| Account evidence and proposal | `degiro_to_ghostfolio.py`: `synchronize_locked`, `rolling_snapshot`, `prospective_snapshot` | Validate ownership, source and destination evidence, normalize activities, match existing activities and prove holdings before dispatch. |
-| Cash accounting | `degiro_to_ghostfolio.py`: cash classification, dividend/fee/yield normalization and current-cash checks | Apply the rules taxonomy, preserve payment identities, associate withholding and execution costs, and verify fresh cash independently of historical balances. |
-| Journal and recovery | `degiro_to_ghostfolio.py`: `account_journal`, intent helpers and readback helpers | Lock destination ownership, persist private account state, retain pending requests and verify selected imports before local confirmation. |
-| Immutable core | `ghostfolio_core.py` | Pinned broker-independent account/import/cash behavior, projected byte-for-byte under CORE_PROVENANCE.md. |
+| Command orchestration | `ghostfolio_degiro_sync/app.py` | Validate command inputs, acquire snapshots and select execution modes. |
+| Broker reading | `degiro.py`, `vault.py` | Retrieve credentials in isolated CLI state and perform bounded broker reads. |
+| Ghostfolio transport | `ghostfolio.py` | Authenticate, enforce origins and routes, index complete destination evidence and prove accepted subsets. |
+| Selection and execution | `sync.py` | Select activities with an injected clock, prove holdings and dispatch under journal guards. |
+| Accounting and ownership | `accounting.py`, `identity.py` | Convert source events, classify cash and parse legacy/versioned ownership. |
+| Journal and recovery | `journal.py` | Lock account state, persist intents and confirm exact readback. |
+| Diagnostics and notifications | `diagnostics.py`, `notify.py` | Compare exact evidence, render private reports and run the isolated notification worker. |
 
-These are conceptual modules, mostly implemented as functions in the adapter.
+Each module owns the functions listed above.
 Moving functions to files alone would not reduce their interface knowledge.
 
 ## Execution order

@@ -33,12 +33,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl unzip tzda
 COPY requirements.txt .
 # pip is build-time only; remove its unused vendored dependencies from runtime.
 RUN python -m pip install --no-cache-dir -r requirements.txt \
-    && python -m pip check \
-    && python -m pip uninstall -y pip
+    && python -m pip check
 
 ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION} DRY_RUN=1 PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-COPY degiro_to_ghostfolio.py ghostfolio_core.py cash-rules.yaml entrypoint.sh ./
+COPY pyproject.toml ghostfolio_core.py entrypoint.sh ./
+COPY ghostfolio_degiro_sync/ ./ghostfolio_degiro_sync/
+RUN python -m pip install --no-cache-dir --no-deps . \
+    && python -m pip check \
+    && python -m pip uninstall -y pip \
+    && rm -rf build ghostfolio_degiro_sync.egg-info
 COPY scripts/recover_degiro.py ./scripts/recover_degiro.py
 COPY scripts/check_scheduler.py ./scripts/check_scheduler.py
 COPY third_party/bitwarden/ /usr/local/share/bitwarden/

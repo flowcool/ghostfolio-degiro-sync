@@ -6,8 +6,11 @@ import logging
 
 import pytest
 
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
 
+
+from ghostfolio_degiro_sync import ghostfolio as ghostfolio_module
+from ghostfolio_degiro_sync import sync as sync_module
 
 @pytest.fixture
 def review(monkeypatch, tmp_path, caplog):
@@ -23,7 +26,7 @@ def review(monkeypatch, tmp_path, caplog):
         "cash": 42.5, "cash_before": 30, "accepted": [], "history_verified": False,
         "rolling_verified": True, "candidates": 5,
         "exclusions": {"already_imported": 2, "manual_match": 1, "duplicate_candidate": 1}}
-    monkeypatch.setattr(adapter, "run_sync", lambda *a: deepcopy(result))
+    monkeypatch.setattr(sync_module, "run_sync", lambda *a: deepcopy(result))
     return result
 
 
@@ -57,7 +60,7 @@ def test_optional_plan_contains_review_context_and_preserves_previous_file(revie
 def test_failed_dry_run_saves_no_report(review, tmp_path, monkeypatch):
     def failed(*args):
         raise RuntimeError("PRIVATE RESPONSE SENTINEL")
-    monkeypatch.setattr(adapter, "run_sync", failed)
+    monkeypatch.setattr(sync_module, "run_sync", failed)
     assert adapter.main(["--sync"]) == 1
     assert not list(tmp_path.rglob("*.json"))
 
@@ -65,7 +68,7 @@ def test_failed_dry_run_saves_no_report(review, tmp_path, monkeypatch):
 def test_custom_symbol_hides_source_account_and_escapes_log_control_characters(review, monkeypatch, caplog):
     fee = {**review["proposed"][0], "type": "FEE", "symbol": "GF_DEGIRO_123_EXCHANGE_CONNECTION_EUR"}
     symbol = {**review["proposed"][0], "symbol": "TEST\nINJECTED"}
-    monkeypatch.setattr(adapter, "run_sync", lambda *a: {**review, "proposed": [fee, symbol]})
+    monkeypatch.setattr(sync_module, "run_sync", lambda *a: {**review, "proposed": [fee, symbol]})
     assert adapter.main(["--sync"]) == 0
     assert "GF_DEGIRO_EXCHANGE_CONNECTION_EUR" in caplog.text
     assert "GF_DEGIRO_123" not in caplog.text
@@ -75,14 +78,14 @@ def test_custom_symbol_hides_source_account_and_escapes_log_control_characters(r
 def test_repeated_normalized_candidate_is_counted_once(review):
     activity = review["proposed"][0]
     counts = Counter()
-    result = adapter.pending_activities([activity, deepcopy(activity)], [],
+    result = ghostfolio_module.pending_activities([activity, deepcopy(activity)], [],
         {"id": "private-target"}, "123", exclusions=counts)
     assert result == [activity] and counts == {"duplicate_candidate": 1}
 
 
 def test_live_run_does_not_publish_private_simulation_or_activity_details(review, tmp_path, monkeypatch, caplog):
     monkeypatch.setenv("DRY_RUN", "0")
-    monkeypatch.setattr(adapter, "run_sync", lambda *a: {**review, "dry_run": False})
+    monkeypatch.setattr(sync_module, "run_sync", lambda *a: {**review, "dry_run": False})
     assert adapter.main(["--sync"]) == 0
     assert not list(tmp_path.rglob("*.json"))
     assert "DIVIDEND" not in caplog.text and "TEST" not in caplog.text

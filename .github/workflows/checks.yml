@@ -23,6 +23,7 @@ jobs:
         with:
           python-version: "3.14"
       - run: pip install -r requirements-dev.txt
+      - run: PYTHON=python bash scripts/check.sh
       - run: python -m pytest -q
   dependency-audit:
     runs-on: ubuntu-latest

@@ -14,11 +14,26 @@ def release_metadata(event):
     release = event.get("release", {})
     tag = release.get("tag_name", "")
     if (event.get("action") != "published" or release.get("draft")
-            or not re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?", tag)
+            or not re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-rc\.[1-9][0-9]*)?", tag)
             or type(release.get("prerelease")) is not bool
             or release["prerelease"] != ("-" in tag)):
         raise RuntimeError("A published semantic-version release is required")
     return tag, release["prerelease"]
+
+
+def highest_candidate_source(tag, tags, resolve):
+    """Stable promotion must use the highest numbered candidate's source."""
+    if "-" in tag:
+        return
+    candidates = []
+    for candidate in tags:
+        match = re.fullmatch(re.escape(tag) + r"-rc\.([1-9][0-9]*)", candidate)
+        if match:
+            candidates.append((int(match[1]), candidate))
+    if candidates:
+        candidate = max(candidates)[1]
+        if resolve(tag) != resolve(candidate):
+            raise RuntimeError(f"Stable {tag} differs from highest candidate {candidate}")
 
 
 def registry_version_absent(repository, tag, username, password):
@@ -86,6 +101,13 @@ def main():
         tagged = subprocess.check_output(["git", "rev-parse", tag + "^{commit}"], text=True, timeout=15).strip()
         if head != tagged:
             raise RuntimeError("Release checkout does not match tag")
+        phase = "highest candidate source"
+        tags = subprocess.check_output(["git", "tag", "--list", tag + "-rc.*"],
+                                       text=True, timeout=15).splitlines()
+        def resolve(value):
+            return subprocess.check_output(["git", "rev-parse", value + "^{commit}"],
+                                           text=True, timeout=15).strip()
+        highest_candidate_source(tag, tags, resolve)
         if args.registry_login:
             phase = "registry login"
             registry_login(os.environ["GITHUB_ACTOR"], os.environ["GH_TOKEN"])
@@ -96,6 +118,10 @@ def main():
         phase = "workflow output"
         with open(os.environ["GITHUB_OUTPUT"], "a") as output:
             output.write(f"tag={tag}\nprerelease={str(prerelease).lower()}\n")
+    except RuntimeError as error:
+        if phase == "highest candidate source":
+            raise SystemExit(str(error)) from None
+        raise SystemExit(f"Release preflight failed at {phase}; version publication refused") from None
     except Exception:
         raise SystemExit(f"Release preflight failed at {phase}; version publication refused") from None
 

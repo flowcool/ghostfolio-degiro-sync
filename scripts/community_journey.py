@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+import requests
+from zoneinfo import ZoneInfo
 import sys
 import tempfile
 from unittest.mock import patch
@@ -19,8 +21,9 @@ from urllib.parse import urlsplit
 
 import yaml
 
-sys.path.insert(0, str(Path("/app") if Path("/app/degiro_to_ghostfolio.py").is_file() else Path(__file__).resolve().parents[1]))
-import degiro_to_ghostfolio as adapter
+sys.path.insert(0, str(Path("/app") if Path("/app/ghostfolio_degiro_sync/app.py").is_file() else Path(__file__).resolve().parents[1]))
+from ghostfolio_degiro_sync import app as adapter
+import re
 
 
 ITEM = "12345678-1234-4234-8234-123456789abc"
@@ -36,7 +39,7 @@ def synthetic_contract(path):
     snapshot["cash_movements"].append({"id": 110, "type": "TRANSACTION", "productId": 20,
         "description": "Vente 2 TEST", "change": 20, "currency": "USD",
         "date": fixture["transactions"][0]["date"], "valueDate": fixture["transactions"][0]["date"]})
-    today = datetime.now(adapter.ZoneInfo("Europe/Zurich")).date()
+    today = datetime.now(ZoneInfo("Europe/Zurich")).date()
     shift = today - date(2026, 1, 4)
     for row in snapshot["transactions"] + snapshot["cash_movements"]:
         for key in ("date", "valueDate"):
@@ -108,7 +111,7 @@ def main():
         elif "/update/" in path:
             body = snapshot["update"]
         elif path.endswith("cashAccountReport/csv"):
-            response = adapter.requests.Response()
+            response = requests.Response()
             response.status_code = 200
             response._content = snapshot["statement"].encode()
             response.encoding = "utf-8"
@@ -117,7 +120,7 @@ def main():
             body = {}
         else:
             raise AssertionError("Unexpected synthetic endpoint")
-        response = adapter.requests.Response()
+        response = requests.Response()
         response.status_code = 200
         response._content = json.dumps(body).encode()
         return response
@@ -136,7 +139,7 @@ def main():
             "DEGIRO_ACCOUNT_ID": "123", "DRY_RUN": "1", "SYNC_MODE": "rolling", "LOOKBACK_DAYS": "90",
             "MAPPING_FILE": str(mapping), "STATE_DIR": str(state)}
         with patch.dict(os.environ, environment, clear=True), patch.object(subprocess, "run", cli), \
-                patch.object(adapter.requests.Session, "send", send), \
+                patch.object(requests.Session, "send", send), \
                 patch.object(socket.socket, "connect", blocked), patch.object(socket, "create_connection", blocked):
             assert adapter.main(["--read-only", "--from-date", date.today().isoformat(),
                 "--to-date", (date.today() + timedelta(days=1)).isoformat(),

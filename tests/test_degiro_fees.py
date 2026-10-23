@@ -5,7 +5,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
+from ghostfolio_degiro_sync import accounting as accounting_module
+
 import ghostfolio_core as core
 
 
@@ -21,11 +23,11 @@ def snapshot():
 
 
 def normalize(snapshot):
-    return adapter.normalize_fees(snapshot, 'target-a')
+    return accounting_module.normalize_fees(snapshot, 'target-a')
 
 
 def test_only_connection_charge_is_a_standalone_fee(snapshot):
-    assert normalize(snapshot) == [{'accountId': 'target-a', 'comment': 'DEGIRO#123:FEE:104',
+    assert normalize(snapshot) == [{'accountId': 'target-a', 'comment': 'DEGIRO#v1#123:FEE:104',
         'currency': 'EUR', 'dataSource': 'MANUAL', 'date': '2025-12-31T23:00:00+00:00',
         'fee': 2.5, 'quantity': 1, 'symbol': 'GF_DEGIRO_123_EXCHANGE_CONNECTION_EUR',
         'type': 'FEE', 'unitPrice': 0}]
@@ -34,7 +36,7 @@ def test_only_connection_charge_is_a_standalone_fee(snapshot):
 def test_commission_and_autofx_are_already_execution_costs(snapshot):
     snapshot['cash_movements'].pop()
     assert normalize(snapshot) == []
-    trade = adapter.normalize_trades(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'USD'})[0]
+    trade = accounting_module.normalize_trades(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'USD'})[0]
     assert trade['fee'] == pytest.approx(.165)
 
 
@@ -44,7 +46,7 @@ def test_overlap_is_deduplicated_but_separate_fee_rows_remain(snapshot):
     snapshot['cash_movements'].append(duplicate)
     assert len(normalize(snapshot)) == 1
     duplicate['id'] = 204
-    assert [a['comment'] for a in normalize(snapshot)] == ['DEGIRO#123:FEE:104', 'DEGIRO#123:FEE:204']
+    assert [a['comment'] for a in normalize(snapshot)] == ['DEGIRO#v1#123:FEE:104', 'DEGIRO#v1#123:FEE:204']
 
 
 def test_changed_fee_identity_blocks(snapshot):
@@ -121,8 +123,8 @@ def test_cash_only_fx_does_not_become_a_fee(snapshot):
 def test_source_identity_and_target_are_scoped(snapshot):
     first = normalize(snapshot)[0]
     snapshot['source_account'] = '456'
-    second = adapter.normalize_fees(snapshot, 'target-b')[0]
-    assert second['comment'] == 'DEGIRO#456:FEE:104'
+    second = accounting_module.normalize_fees(snapshot, 'target-b')[0]
+    assert second['comment'] == 'DEGIRO#v1#456:FEE:104'
     assert first['symbol'] != second['symbol']
     assert first['accountId'] != second['accountId']
 
@@ -130,7 +132,7 @@ def test_source_identity_and_target_are_scoped(snapshot):
 @pytest.mark.parametrize('target', [None, '', ' '])
 def test_missing_target_blocks(snapshot, target):
     with pytest.raises(RuntimeError, match='target account'):
-        adapter.normalize_fees(snapshot, target)
+        accounting_module.normalize_fees(snapshot, target)
 
 
 def accepted_row(activity):

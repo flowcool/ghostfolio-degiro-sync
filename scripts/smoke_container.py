@@ -21,7 +21,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image")
     args = parser.parse_args()
-    options = ["docker", "run", "--rm", "--network=none", "--read-only",
+    options = ["docker", "run", "--rm", "--network=none", "--read-only", "--workdir=/",
                "--tmpfs", "/tmp:rw,nosuid,nodev,size=16m", "--cap-drop=ALL",
                "--security-opt=no-new-privileges"]
     expected = {}
@@ -34,11 +34,14 @@ def main():
     health_hash = hashlib.sha256(Path("scripts/check_scheduler.py").read_bytes()).hexdigest()
     provenance = Path("docs/connector-provenance.yaml").read_text()
     probe = f'''
-import hashlib, importlib.metadata, importlib.util, json, os, sys
+import annotationlib, inspect, hashlib, importlib.metadata, importlib.util, json, os, sys
 from pathlib import Path
 import yaml
 import degiro_connector
-import degiro_to_ghostfolio
+from ghostfolio_degiro_sync import accounting
+import ghostfolio_core
+import ghostfolio_degiro_sync
+from importlib.resources import files
 import orjson, pydantic_core, wrapt
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -46,6 +49,14 @@ from degiro_connector.trading.models.credentials import Credentials
 assert os.getuid() == 10001
 assert sys.version_info[:2] == (3, 14), sys.version
 assert importlib.util.find_spec("pip") is None
+assert "/site-packages/" in ghostfolio_degiro_sync.__file__
+assert "/site-packages/" in ghostfolio_core.__file__
+for value in vars(ghostfolio_core).values():
+    if inspect.isfunction(value) and value.__module__ == ghostfolio_core.__name__:
+        annotationlib.get_annotations(value, format=annotationlib.Format.VALUE)
+assert hashlib.sha256(Path(ghostfolio_core.__file__).read_bytes()).hexdigest() == {core_hash!r}
+assert yaml.safe_load(files("ghostfolio_degiro_sync").joinpath("cash-rules.yaml").read_text())["format"] == 1
+assert accounting.load_cash_rules()
 assert orjson.loads(orjson.dumps({{"value": 1}})) == {{"value": 1}}
 assert pydantic_core.SchemaValidator({{"type": "int"}}).validate_python(1) == 1
 assert wrapt.ObjectProxy(1) + 1 == 2
@@ -68,15 +79,21 @@ for path in files:
 assert len(files) == provenance["python_module_count"]
 assert tree.hexdigest() == provenance["python_tree_sha256"]
 assert not any(name.startswith(("DEGIRO_", "GHOST_TOKEN")) for name in os.environ)
-assert sorted(p.name for p in Path("/app").iterdir()) == ["cash-rules.yaml", "degiro_to_ghostfolio.py", "entrypoint.sh", "ghostfolio_core.py", "requirements.txt", "scripts"]
+assert sorted(p.name for p in Path("/app").iterdir()) == ["entrypoint.sh", "ghostfolio_core.py", "ghostfolio_degiro_sync", "pyproject.toml", "requirements.txt", "scripts"]
 assert sorted(p.name for p in Path("/app/scripts").iterdir()) == ["check_scheduler.py", "recover_degiro.py"]
 assert hashlib.sha256(Path("/app/scripts/recover_degiro.py").read_bytes()).hexdigest() == {recovery_hash!r}
 assert hashlib.sha256(Path("/app/scripts/check_scheduler.py").read_bytes()).hexdigest() == {health_hash!r}
-from scripts.check_scheduler import check_scheduler
-check_scheduler("")
+import runpy
+runpy.run_path("/app/scripts/check_scheduler.py")["check_scheduler"]("")
 print("Python 3.14, native dependencies, no pip, runtime UID, source-equivalent connector, immutable core and explicit app file set: PASS")
 '''
     print(run(*options, "-i", args.image, "python", "-", input_text=probe).strip())
+    output = run(*options, args.image, "python", "-I", "-m", "ghostfolio_degiro_sync", "--help")
+    assert "--ghost-accounts" in output and "--plan-output" in output
+    output = run(*options, "-i", args.image, "python", "-I", "-m", "ghostfolio_degiro_sync",
+        "--notify-worker", input_text="malformed", expected=10)
+    assert output == ""
+    print("Installed module and isolated worker run from /; malformed worker input is silent: PASS")
     output = run(*options, "-e", "BITWARDENCLI_APPDATA_DIR=/tmp/vault-smoke",
         args.image, "bw", "--version")
     version = re.search(r"^ARG BW_VERSION=(.+)$", Path("Dockerfile").read_text(), re.MULTILINE)[1]

@@ -9,8 +9,7 @@ import sys
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import degiro_to_ghostfolio as adapter
-
+from ghostfolio_degiro_sync import ghostfolio as ghostfolio_module
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
@@ -22,7 +21,7 @@ def main(argv=None):
     try:
         body = json.loads(Path(args.snapshot).read_text())
         manifest = yaml.safe_load(Path(args.manifest).read_text())
-        result = adapter.cleanup_preflight(body, manifest)
+        result = ghostfolio_module.cleanup_preflight(body, manifest)
         descriptor = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(descriptor, 'w') as output:
             descriptor = None

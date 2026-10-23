@@ -2,9 +2,10 @@
 **
 !Dockerfile
 !requirements.txt
-!degiro_to_ghostfolio.py
 !ghostfolio_core.py
-!cash-rules.yaml
+!pyproject.toml
+!ghostfolio_degiro_sync/
+!ghostfolio_degiro_sync/**
 !entrypoint.sh
 !scripts/
 scripts/**

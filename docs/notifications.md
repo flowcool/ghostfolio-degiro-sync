@@ -5,9 +5,10 @@ JSON list in APPRISE_URLS with destination URLs supported by Apprise. Empty or
 invalid configuration disables notification; APPRISE_TIMEOUT bounds the isolated
 worker to 1–30 seconds (default10). URLs are credentials and stay private.
 
-Each failed scheduled synchronization sends at most one sanitized alert, including
-scheduled DRY_RUN. Failed live synchronization also alerts in manual mode. Successful
-runs, manual simulations and read-only captures are silent. Delivery failure never
+Each failed invocation sends at most one sanitized alert, including manual and
+scheduled simulations. Successful simulations are silent. An explicit live request
+forced to simulation by missing or invalid TZ sends one summary naming that reason.
+A failure takes precedence and sends only the failure summary. Delivery failure never
 changes the original failure exit status and never retries recursively. Unknown
 errors map to a fixed generic reason; raw exception strings and account data are
 not included. Notifications are nonfinancial outbound operations, even in DRY_RUN.

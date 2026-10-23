@@ -4,9 +4,9 @@ The supported user deployment is Docker Compose. README.md owns the complete set
 
 ## Architecture and invariants
 
-- `degiro_to_ghostfolio.py` owns DEGIRO conversion, identities, matching, URL policy, vault retrieval and orchestration.
+- `ghostfolio_degiro_sync` owns the connector. `app.py` orchestrates commands; accounting, identity, transport, vault, journal and selection logic stay in their defining modules.
 - `ghostfolio_core.py` is the immutable byte projection defined in CORE_PROVENANCE.md. Change the adapter, never hand-edit the projection or modify the canonical sibling from this project.
-- Functional Python: module-level functions, no custom classes or type annotations. Every logic change has an offline regression.
+- Functional Python: business operations are module-level functions over typed records. Package modules use strict typing. Classes are limited to frozen dataclasses and TypedDict data records. Validate external data before constructing records. Exclude credentials from record representations. Keep generated core bytes unchanged. Every logic change has an offline regression.
 - Runtime dependencies and downloaded binaries are pinned. Pytest and developer tools stay outside the runtime image.
 - Credentials enter through environment variables; the configured vault item supplies broker credentials per execution. Use isolated temporary CLI state, bounded subprocesses and secret-free diagnostics. Broker credentials must come from the vault; direct DEGIRO credential variables are rejected.
 - Read docs/ghostfolio-auth.md before changing authentication or transport. Keep exact credential exclusivity, one token exchange per execution, strict origins, no redirects and no raw response logging.

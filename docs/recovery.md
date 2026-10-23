@@ -1,5 +1,11 @@
 # Durable write intent and explicit recovery
 
+The installed package keeps persistence, locks and recovery in `journal.py`.
+`sync.py` owns execution and coverage. Recovery, cutover and cleanup commands
+use their owning modules. The private journal schema and command options remain
+unchanged during this extraction. Every write still records durable intent
+before dispatch; an uncertain result keeps the cash and retry fences active.
+
 Live synchronization requires `STATE_DIR`: an existing persistent directory owned
 by the process UID and mode 0700. For the supported Compose deployment, follow the
 [README mount preparation](../README.md#vault-and-mapping), separate from the
@@ -143,3 +149,149 @@ This offline utility has no HTTP/delete path and provides no deletion permission
 A later authorized executor would still need fresh exact readback, unchanged
 ownership, bounded-ID confirmation and an independently tested rollback. Deleting
 rows alone does not restore asset profiles/market data or cancel old requests.
+
+Accepted import evidence remains separate from the submitted batch. A valid short
+response records only proven creations in the pending intent's `accepted` list.
+This list never proves that omitted rows were not created. The intent stays
+pending, no later sell batch or cash update runs, and automatic replay remains
+blocked. Exact full positive readback is still required to settle the request.
+A changed legacy/v1 spelling is not an exact pending-request readback.
+
+A MANUAL profile may return a UUID in place of its requested symbol. The adapter
+associates it only with the same source identity, account, timestamp, type, exact
+quantity/price/fee/currency and MANUAL data source. The generated core first proves
+the created row and profile. The adapter keeps the requested source identity and
+stores the returned UUID with an exact financial fingerprint in the private
+journal. Subsequent complete reads use unchanged source evidence or that durable
+association. Unknown or conflicting associations stop the account. Zero fees and
+zero interest remain valid evidence. Simulation can inspect an association but
+cannot certify it in the journal or advance coverage.
+
+## Historical identity preview
+
+The maintenance command stays outside the runtime image. It never runs from
+CRON. Preview reads saved files only. It does not load credentials or honor an
+inherited live mode:
+
+```sh
+.venv/bin/python scripts/migrate_degiro_identity.py preview --inputs /private/inputs.yaml --output /private/new-review
+```
+
+Use schema `degiro-migration-inputs-v1` in keyed YAML. Supply `tool_commit` as
+an exact 40-character source commit, `clock` as an aware fixed ISO timestamp,
+`inventory_complete: true`, and `accounts` keyed by each configured numeric
+source account. Each account value is the saved Ghostfolio target account.
+`mapping` references a YAML file containing `symbols` (ISIN to symbol) and
+`quote_currencies` (symbol to currency). File references have `path` (relative
+to inputs) and `sha256`. `reports` keys each saved DEGIRO source snapshot with
+its `source_account`; `replay_order` lists every report key exactly once.
+Source snapshots need actual `from_date`/`to_date` and the original financial
+JSON in `_diagnostic_wire`, as acquired by the private read command. Missing
+exact source evidence leaves rows unproven. Do not recreate wire decimals from
+rounded payloads.
+
+`snapshot` references a complete Ghostfolio activity response and declares
+`complete: true`, `unredacted: true`, exact `count`, `capture_ref`,
+`captured_at`, `destination_version` and `destination_image` (`sha256:...`).
+Every row needs its ID, comment (including null), exact quantity/price/fee,
+account/currency, date/type, `isDraft`, tags and profile context. Acquisition
+of real source/destination evidence retains its own authority.
+
+The new private directory contains deterministic `manifest.yaml` and its
+SHA256. It inventories every activity ID, including inactive and old history.
+Rows have one decision and a reason. Eligible rows require unique ownership,
+exact source association and unchanged complete runtime selection, holdings
+and failure behavior under the fixed clock. Missing proof removes replacements.
+Inputs remain byte-identical; duplicate YAML keys, aliases, incomplete snapshots,
+symlinks and output overlap are rejected. The manifest binds input, mapping,
+implementation and destination hashes. Source windows do not prove lifetime
+broker coverage. Target DTO, zero/MANUAL/UUID, background effects, pacing,
+source lifetime and reversal qualifications remain explicit pending gates.
+Preview does not authorize conversion, database restore or old-binary restart.
+
+## Approved historical comment conversion
+
+`apply` is a separate financial operation. Neither `DRY_RUN=0` nor a preview
+approves it. Supply the reviewed input/manifest hashes, a separately approved
+keyed YAML permit and a new private journal path:
+
+```sh
+.venv/bin/python scripts/migrate_degiro_identity.py apply --inputs /private/inputs.yaml --manifest /private/review/manifest.yaml --manifest-sha256 "$MANIFEST_SHA256" --approval /private/approval.yaml --approval-sha256 "$APPROVAL_SHA256" --journal /private/operation.yaml --host "$GHOST_HOST"
+```
+
+Permit schema is `degiro-migration-approval-v1`; authorization is
+`apply-reviewed-comments`. Bind `host`, `manifest_sha256`, `owner_id`,
+`destination_version`, `destination_image` and `target_source_commit`.
+The implemented UpdateOrderDto allowlist is based on Ghostfolio 3.86.0 source
+[`ef47c0d`](https://github.com/ghostfolio/ghostfolio/tree/ef47c0d1b2c48fa4e97fb381561b514e657928cf).
+Source inspection does not qualify any real target. The controller can reconnect
+profiles and the service can queue background market-data work. Every class
+(`TYPE:DATA_SOURCE`) in `qualifications` therefore needs `pass` and nonempty
+`source_refs` for `source_identity`, `target_dto`, `manual_zero_uuid`,
+`background_effects`, `pacing` and `reversal`, bound to that exact image.
+Pending or failed classes block the operation. Keep their rows intact.
+
+The operation must record `operation_plan_ref`, recoverable `backup_ref`,
+`writer_exclusion_ref`, independent `settlement_ref`, `writers_stopped: true`,
+`requests_settled: true`, exact `write_count`, measured positive `batch_size`
+and nonnegative `pause_seconds`. `state_dir` must be the normal connector's
+private state directory. Stop all competing writers and bind the actual deployed
+image/version before approval. The engine holds normal destination locks and
+refuses an unresolved normal sync intent. This does not replace external writer
+exclusion or current deployment proof.
+
+Credentials follow the existing exclusive `GHOST_TOKEN`/`GHOST_ACCESS_TOKEN`
+policy and exact `GHOST_HOST`. Exchange happens once, after local approval and
+lock checks. The dedicated transport permits only complete activities GET and
+reviewed activity PUT. Scheduled sync gains no historical PUT route. DTOs use
+stored activity currency and actual profile identity, explicit fields and exact
+numeric JSON tokens. Numbers the target cannot preserve are refused. The engine
+never copies the entire GET row into a PUT.
+
+A private YAML journal persists and flushes each pending request before dispatch.
+Complete readback must preserve every field and every protected row except the
+approved comment. A failed request, normalization, profile effect or uncertain
+completion stops further writes. Confirmed subsets and pending requests remain
+in the journal. No automatic retry is permitted, even if readback still shows
+the original comment: a delayed request may complete later. Independent
+completion/cancellation evidence is required for recovery. Retain captures and
+journal; leave writers stopped at this boundary.
+
+## Inspect and reverse a stopped conversion
+
+Inspection reads saved complete snapshots and the private journal only:
+
+```sh
+.venv/bin/python scripts/migrate_degiro_identity.py inspect --journal /private/operation.yaml --manifest /private/review/manifest.yaml --manifest-sha256 "$MANIFEST_SHA256" --snapshot /private/current.json --snapshot-sha256 "$SNAPSHOT_SHA256"
+```
+
+Each journal-owned ID is `original`, `converted`, `changed` or `absent`.
+An unresolved apply or reversal request adds `uncertain:`. Observation does not
+settle a request. Inspection writes nothing and reads no credentials.
+
+Reversal uses the same bounded transport, private locks, pending intent and
+complete readback. It restores comments only. Its separate permit uses the
+same schema and exact target/class prerequisites as apply, with authorization
+`rollback-reviewed-comments`, current `journal_sha256`, exact reversal
+`write_count` and the operation's approved recovery scope:
+
+```sh
+.venv/bin/python scripts/migrate_degiro_identity.py rollback --journal /private/operation.yaml --manifest /private/review/manifest.yaml --manifest-sha256 "$MANIFEST_SHA256" --approval /private/rollback.yaml --approval-sha256 "$ROLLBACK_APPROVAL_SHA256" --host "$GHOST_HOST"
+```
+
+For every pending request, `settlements` must key the activity ID with
+`direction` (`apply` or `rollback`), `outcome` (`completed` or `cancelled`),
+`independent: true` and an independent `evidence_ref`. The saved disposition must
+agree with exact fresh readback. An unchanged original comment alone is not
+cancellation proof. A lost reversal response remains pending; do not repeat it.
+Manual edits or any changed financial/profile context block reversal.
+New v1 imports are outside the journal and remain untouched. Protected rows are
+checked before and after every reversal.
+
+Before resuming imports, retain the exact mixed-history DRY_RUN preview and
+prove unchanged full source selection and zero duplicate creations under the
+operation. Reversal does not start writers. Safe halt uses the exact qualified
+candidate digest with `DRY_RUN=1` and the existing Compose target. If it cannot
+start, keep writers stopped until compatible repair. Neither comment reversal
+nor a source Git revert qualifies an older binary when retained v1 rows exist.
+A database restore has a separate operation boundary and is never automatic.

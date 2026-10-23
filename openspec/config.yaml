@@ -3,7 +3,10 @@ schema: spec-driven
 context: |
   Community Docker connector: DEGIRO account activities -> one existing Ghostfolio account.
   Docker-first, every setting through ENV, unattended run with `docker compose up -d`
-  and an optional CRON. Python, functional style, no classes, no type hints.
+  and an optional CRON. Python 3.14, typed package modules, functional operations.
+  Classes are frozen dataclasses or TypedDict data records only. Validate external
+  input before constructing records; exclude secrets from representations.
+  Legacy code keeps its style until extraction; generated core bytes stay unchanged.
   Sibling contract shared with ../ghostfolio-ibkr-sync and ../ghostfolio-boursedirect-sync:
   CRON, DRY_RUN, APPRISE_URLS, additive deduplicated import, ENV only.
   ghostfolio_core.py is an immutable projection of the IBKR sibling (CORE_PROVENANCE.md).

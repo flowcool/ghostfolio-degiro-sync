@@ -30,3 +30,9 @@ Compose default remains supported; redirects and ambient proxies stay disabled.
 The exchange reuses the reviewed IBKR v2.2.0 protocol at commit `54958ab1035eb97a1f67f9072b79699813ec3800`, outside the immutable core projection. See CORE_PROVENANCE.md for reviewed propagation.
 
 Positive recovery is financial GET-only and preserves its separate local-confirmation gate. Neither authentication nor source rollback authorizes replay, deletion or financial corrections. Preserve journals and private captures when changing credentials or images.
+
+The sync transport uses a 10-second connect timeout. Account reads use a
+120-second read timeout. Cash updates use 30 seconds. Activity reads and imports
+use 60 seconds. These limits also apply during exact recovery readback. The
+private adapter still rejects redirects and restores the generated core transport
+and logger after each binding.

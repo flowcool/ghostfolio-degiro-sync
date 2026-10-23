@@ -100,10 +100,10 @@ def test_import_network_error_returns_false(monkeypatch):
 
 
 
-def test_import_short_accepted_count_is_not_a_failure(monkeypatch):
+def test_import_short_accepted_count_fails_without_losing_accepted_subset(monkeypatch):
     acts = [import_candidate("IBKR#1"), import_candidate("IBKR#2")]
     monkeypatch.setattr(m.requests, "post", lambda *a, **k: Resp({"activities": [created(acts[1])]}, 201))
-    assert m.ghost_import_activities(CFG, acts) == ([acts[1]], True)
+    assert m.ghost_import_activities(CFG, acts) == ([acts[1]], False)
 
 
 
@@ -169,14 +169,15 @@ def test_cash_balance_payload_is_the_five_whitelisted_fields(monkeypatch):
         sent.update(json)
         return Resp({}, 200)
     monkeypatch.setattr(m.requests, "put", put)
-    assert m.ghost_update_cash_balance(CFG, "9", 123.456) is True
+    assert m.ghost_update_cash_balance(CFG, "9", 123.456, "EUR") is True
     assert sent == {"balance": 123.456, "currency": "EUR", "id": "9", "name": "IBKR", "platformId": "p1"}
 
 
 
-def test_cash_balance_dry_run_does_not_touch_the_api(monkeypatch):
-    monkeypatch.setattr(m.requests, "get", lambda *a, **k: pytest.fail("no API call in dry run"))
-    assert m.ghost_update_cash_balance({**CFG, "dry_run": True}, "9", 1.0) is True
+def test_cash_balance_dry_run_reads_account_without_put(monkeypatch):
+    serve(monkeypatch, {"id": "9", "currency": "EUR"})
+    monkeypatch.setattr(m.requests, "put", lambda *a, **k: pytest.fail("no PUT in dry run"))
+    assert m.ghost_update_cash_balance({**CFG, "dry_run": True}, "9", 1.0, "EUR") is True
 
 
 @pytest.mark.parametrize("status", [300, 301, 302, 303, 307, 308, 399])
@@ -211,9 +212,9 @@ def test_core_rejects_redirects_before_reading_body_or_retrying(monkeypatch, cap
         expected = [("GET", CFG["ghost_host"] + "/api/v1/account/9")]
         if operation == "cash_get":
             with pytest.raises(RuntimeError, match="Ghostfolio request redirected"):
-                m.ghost_update_cash_balance(cfg, "9", 1.0)
+                m.ghost_update_cash_balance(cfg, "9", 1.0, "EUR")
         else:
-            assert m.ghost_update_cash_balance(cfg, "9", 1.0) is False
+            assert m.ghost_update_cash_balance(cfg, "9", 1.0, "EUR") is False
             assert "Ghostfolio request redirected" in caplog.text
             expected.append(("PUT", CFG["ghost_host"] + "/api/v1/account/9"))
     assert calls == expected
@@ -248,7 +249,7 @@ def test_unknown_acceptance_is_not_assumed_and_blocks_target(monkeypatch, body):
 
 def test_server_empty_created_list_changes_no_bookkeeping(monkeypatch):
     monkeypatch.setattr(m.requests, "post", lambda *a, **k: Resp({"activities": []}, 201))
-    assert m.ghost_import_activities({**CFG}, [import_candidate()]) == ([], True)
+    assert m.ghost_import_activities({**CFG}, [import_candidate()]) == ([], False)
 
 
 

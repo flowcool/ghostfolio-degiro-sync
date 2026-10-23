@@ -5,8 +5,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
 
+
+from ghostfolio_degiro_sync import accounting as accounting_module
 
 @pytest.fixture
 def snapshot():
@@ -16,12 +18,12 @@ def snapshot():
 
 
 def normalize(snapshot):
-    return adapter.normalize_dividends(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'USD'})
+    return accounting_module.normalize_dividends(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'USD'})
 
 
 def test_gross_payment_and_same_currency_withholding(snapshot):
     activity, = normalize(snapshot)
-    assert activity == {'accountId': 'target-a', 'comment': 'DEGIRO#123:DIVIDEND:101',
+    assert activity == {'accountId': 'target-a', 'comment': 'DEGIRO#v1#123:DIVIDEND:101',
         'currency': 'USD', 'dataSource': 'YAHOO', 'date': '2026-01-03T09:00:00+00:00',
         'fee': 1.5, 'quantity': 1, 'symbol': 'TEST', 'type': 'DIVIDEND', 'unitPrice': 10.}
 
@@ -40,7 +42,7 @@ def test_same_day_distinct_payment_times_remain_distinct(snapshot):
         row['date'] = '2026-01-03T11:00:00+01:00'
     snapshot['cash_movements'].extend(second)
     activities = normalize(snapshot)
-    assert [a['comment'] for a in activities] == ['DEGIRO#123:DIVIDEND:101', 'DEGIRO#123:DIVIDEND:201']
+    assert [a['comment'] for a in activities] == ['DEGIRO#v1#123:DIVIDEND:101', 'DEGIRO#v1#123:DIVIDEND:201']
     assert [a['unitPrice'] for a in activities] == [10, 10]
 
 
@@ -115,7 +117,7 @@ def test_known_unsupported_category_blocks_entire_account(snapshot, name):
 
 
 def test_all_observed_categories_have_explicit_owners(snapshot):
-    rules = adapter.load_cash_rules()
+    rules = accounting_module.load_cash_rules()
     rows = []
     descriptions = {'exchange_connection_fee': 'Frais de connexion aux places boursières 2026 (TEST)',
         'bank_withdrawal': 'Retrait TEST', 'cash_sweep_annotation': 'Virement TEST', 'executed_trade_cash': 'Achat TEST'}
@@ -131,29 +133,29 @@ def test_all_observed_categories_have_explicit_owners(snapshot):
             row.pop('orderId')
         if row['description'] == 'Flatex Interest Income':
             row['change'] = 0
-    classified = adapter.classify_cash_movements(rows)
+    classified = accounting_module.classify_cash_movements(rows)
     assert set(classified) == set(rules)
     assert all(len(values) == 1 for values in classified.values())
     rows[-1]['description'] = 'UNRECOGNIZED-PRIVATE-LABEL'
     with pytest.raises(RuntimeError) as error:
-        adapter.classify_cash_movements(rows)
+        accounting_module.classify_cash_movements(rows)
     assert 'PRIVATE' not in str(error.value)
 
 
 def test_ambiguous_rules_never_select_first_match(snapshot):
-    rules = adapter.load_cash_rules()
+    rules = accounting_module.load_cash_rules()
     rules['duplicate'] = deepcopy(rules['paid_dividend'])
     with pytest.raises(RuntimeError, match='ambiguous'):
-        adapter.classify_cash_movements(snapshot['cash_movements'], rules)
+        accounting_module.classify_cash_movements(snapshot['cash_movements'], rules)
 
 
 def test_financial_notice_is_not_silently_ignored():
     row = {'id': 1, 'date': '2026-01-01T00:00:00Z', 'type': 'FLATEX_CASH_SWEEP',
            'description': 'Virement TEST', 'change': 1}
     with pytest.raises(RuntimeError, match='unexpectedly contains'):
-        adapter.classify_cash_movements([row])
+        accounting_module.classify_cash_movements([row])
     row['change'] = None
-    assert adapter.classify_cash_movements([row])['cash_sweep_annotation'] == [row]
+    assert accounting_module.classify_cash_movements([row])['cash_sweep_annotation'] == [row]
 
 
 @pytest.mark.parametrize('field,value', [('currency', 'EUR'), ('productType', 'ETF'),
@@ -166,9 +168,9 @@ def test_unverified_dividend_product_blocks(snapshot, field, value):
 
 def test_missing_mapping_or_quote_currency_blocks(snapshot):
     with pytest.raises(RuntimeError, match='mapping'):
-        adapter.normalize_dividends(snapshot, 'target-a', {}, {'TEST': 'USD'})
+        accounting_module.normalize_dividends(snapshot, 'target-a', {}, {'TEST': 'USD'})
     with pytest.raises(RuntimeError, match='quote units'):
-        adapter.normalize_dividends(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'EUR'})
+        accounting_module.normalize_dividends(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'EUR'})
 
 
 def test_source_and_target_account_identity_is_stable(snapshot):
@@ -176,7 +178,7 @@ def test_source_and_target_account_identity_is_stable(snapshot):
     snapshot['source_account'] = '456'
     second = normalize(snapshot)[0]
     assert first['comment'] != second['comment']
-    third = adapter.normalize_dividends(snapshot, 'target-b', {'US0378331005': 'TEST'}, {'TEST': 'USD'})[0]
+    third = accounting_module.normalize_dividends(snapshot, 'target-b', {'US0378331005': 'TEST'}, {'TEST': 'USD'})[0]
     assert second['accountId'] != third['accountId']
 
 
@@ -191,7 +193,7 @@ def test_invalid_rule_file_fails_closed(tmp_path, document):
     path = tmp_path / 'rules.yaml'
     path.write_text(yaml.safe_dump(document))
     with pytest.raises(RuntimeError, match='Invalid DEGIRO cash rules'):
-        adapter.load_cash_rules(path)
+        accounting_module.load_cash_rules(path)
 
 
 def test_zero_interest_does_not_block_dividend_conversion(snapshot):
@@ -204,7 +206,7 @@ def test_zero_interest_does_not_block_dividend_conversion(snapshot):
 def test_sweep_statement_annotation_has_no_amount():
     row = {'id': 501, 'type': 'FLATEX_CASH_SWEEP', 'description': 'Virement TEST',
            'date': '2026-01-01T00:00:00Z', 'change': None}
-    assert adapter.classify_cash_movements([row])['cash_sweep_annotation'] == [row]
+    assert accounting_module.classify_cash_movements([row])['cash_sweep_annotation'] == [row]
     row['change'] = 1
     with pytest.raises(RuntimeError, match='unexpectedly contains'):
-        adapter.classify_cash_movements([row])
+        accounting_module.classify_cash_movements([row])

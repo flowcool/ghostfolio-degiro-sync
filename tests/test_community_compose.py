@@ -7,14 +7,20 @@ import subprocess
 
 import pytest
 
-import degiro_to_ghostfolio as adapter
+from ghostfolio_degiro_sync import app as adapter
+from ghostfolio_degiro_sync import config as config_module
+from ghostfolio_degiro_sync import degiro as degiro_module
+from ghostfolio_degiro_sync import ghostfolio as ghostfolio_module
+from ghostfolio_degiro_sync import sync as sync_module
+
+from ghostfolio_degiro_sync import vault as vault_module
 
 
 @pytest.mark.parametrize("host", ["https://portfolio.example", "https://vault.example:8443",
     "http://ghostfolio:3333", "http://localhost:3333", "http://127.0.0.1:3333",
     "http://192.168.10.2:3333", "http://[::1]:3333", "http://10.0.0.2"])
 def test_portable_origins(host):
-    assert adapter.validate_ghost_host(host) == host
+    assert config_module.validate_ghost_host(host) == host
 
 
 @pytest.mark.parametrize("host", ["http://example.com", "http://8.8.8.8", "http://0.0.0.0",
@@ -27,7 +33,7 @@ def test_portable_origins(host):
     "https://Portfolio.example", "https://portfolio.example\n", " https://portfolio.example", None])
 def test_invalid_origins_are_private(host):
     with pytest.raises(RuntimeError, match="origin policy") as error:
-        adapter.validate_ghost_host(host)
+        config_module.validate_ghost_host(host)
     assert "SECRET" not in str(error.value)
 
 
@@ -36,7 +42,7 @@ def proposal(monkeypatch):
     monkeypatch.setenv("DRY_RUN", "1")
     result = {"dry_run": True, "proposed": [{"type": "BUY", "symbol": "TEST", "quantity": 1}],
         "cash": 42.5, "accepted": [], "history_verified": False, "rolling_verified": True}
-    monkeypatch.setattr(adapter, "run_sync", lambda *a: result)
+    monkeypatch.setattr(sync_module, "run_sync", lambda *a: result)
     return result
 
 
@@ -54,7 +60,7 @@ def test_review_plan_preserves_financial_proposal_and_private_permissions(propos
 @pytest.mark.parametrize("mode", ["0", "false", "no", "off", "invalid"])
 def test_live_or_invalid_plan_mode_fails_before_sync(monkeypatch, tmp_path, mode):
     monkeypatch.setenv("DRY_RUN", mode)
-    monkeypatch.setattr(adapter, "run_sync", lambda *a: pytest.fail("Sync attempted"))
+    monkeypatch.setattr(sync_module, "run_sync", lambda *a: pytest.fail("Sync attempted"))
     destination = tmp_path / "proposal.json"
     assert adapter.main(["--sync", "--plan-output", str(destination)]) == 1
     assert not destination.exists()
@@ -62,7 +68,7 @@ def test_live_or_invalid_plan_mode_fails_before_sync(monkeypatch, tmp_path, mode
 
 def test_existing_plan_and_symlink_preserved_before_sync(monkeypatch, tmp_path):
     monkeypatch.setenv("DRY_RUN", "1")
-    monkeypatch.setattr(adapter, "run_sync", lambda *a: pytest.fail("Sync attempted"))
+    monkeypatch.setattr(sync_module, "run_sync", lambda *a: pytest.fail("Sync attempted"))
     destination = tmp_path / "existing.json"
     destination.write_bytes(b"PRIVATE ORIGINAL")
     alias = tmp_path / "alias.json"
@@ -73,14 +79,14 @@ def test_existing_plan_and_symlink_preserved_before_sync(monkeypatch, tmp_path):
 
 
 def test_plan_option_not_available_to_read_only(monkeypatch, tmp_path):
-    monkeypatch.setattr(adapter, "read_degiro", lambda *a, **k: pytest.fail("Broker attempted"))
+    monkeypatch.setattr(degiro_module, "read_degiro", lambda *a, **k: pytest.fail("Broker attempted"))
     assert adapter.main(["--read-only", "--from-date", "2026-01-01", "--to-date", "2026-01-02",
         "--output", str(tmp_path / "capture.json"), "--plan-output", str(tmp_path / "plan.json")]) == 1
     assert not list(tmp_path.iterdir())
 
 
 def test_no_plan_is_persisted_when_simulation_fails(proposal, monkeypatch, tmp_path):
-    monkeypatch.setattr(adapter, "run_sync", lambda *a: (_ for _ in ()).throw(RuntimeError("blocked")))
+    monkeypatch.setattr(sync_module, "run_sync", lambda *a: (_ for _ in ()).throw(RuntimeError("blocked")))
     destination = tmp_path / "proposal.json"
     assert adapter.main(["--sync", "--plan-output", str(destination)]) == 1
     assert not destination.exists()
@@ -122,7 +128,7 @@ def test_ghost_account_discovery_is_get_only_private_and_without_broker(monkeypa
     monkeypatch.setenv("GHOST_HOST", "https://portfolio.example")
     monkeypatch.setenv("GHOST_TOKEN", "synthetic-bearer")
     monkeypatch.delenv("GHOST_ACCESS_TOKEN", raising=False)
-    monkeypatch.setattr(adapter, "broker_credentials", lambda: pytest.fail("Broker contacted"))
+    monkeypatch.setattr(vault_module, "broker_credentials", lambda: pytest.fail("Broker contacted"))
     calls = []
     def send(self, request, **options):
         calls.append(request)
@@ -144,7 +150,7 @@ def test_ghost_account_discovery_is_get_only_private_and_without_broker(monkeypa
 
 
 def test_existing_discovery_output_refused_before_auth(monkeypatch, tmp_path):
-    monkeypatch.setattr(adapter, "discover_ghost_accounts", lambda: pytest.fail("Auth attempted"))
+    monkeypatch.setattr(ghostfolio_module, "discover_ghost_accounts", lambda: pytest.fail("Auth attempted"))
     destination = tmp_path / "accounts.json"
     destination.write_bytes(b"original")
     assert adapter.main(["--ghost-accounts", "--output", str(destination)]) == 1
