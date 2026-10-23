@@ -92,3 +92,62 @@ A crash can leave `pending` even after a response was published. Every archive k
 `history_completeness_verified: false` and `import_status: archive_not_importable`.
 The normal whole-account refusal and current-cash guards still apply. Retaining
 unsupported data grants no permission to import other rows or convert history.
+
+## Offline archive inspection
+
+Use the same mounted script and pinned image to inspect an archive. Mount source
+archives read-only when possible. Record the SHA256 of `index.yaml` before inspection;
+pass that exact value as `--index-sha256`. A hash binds the report to those bytes.
+It does not authenticate broker history or establish complete coverage.
+
+```sh
+DEGIRO_IMAGE=ghcr.io/flowcool/ghostfolio-degiro-sync@sha256:4827041d92004d567f008a395e2e1ca9822cffa50d143cdd25cebe66ca233840 \
+  docker compose -f compose.yaml -f archive.compose.yaml run --rm --no-deps \
+  degiro-sync python /archive/archive_degiro_history.py \
+  --inspect-directory /state/history-UNIQUE --index-sha256 INDEX_SHA256 \
+  --output-directory /state/inspection-UNIQUE
+```
+
+Inspection does not load credentials or use the network. Do not supply acquisition
+dates, windows or locale options in inspection mode. Use a new output directory
+outside the archive. The report is `report.yaml`, mode 0600 in a mode 0700 directory.
+Source files and their bytes stay unchanged. Existing destinations, overlapping
+input/output paths, symlinks and hardlinks are refused. Input directories must be
+owned by the executing user and mode 0700. Indexed files must be owned regular files
+with mode 0600 and one link. Response basenames must match their response identifier.
+The index is limited to 2 MiB; the archive's body and total byte limits still apply.
+
+The report binds each response to its identifier, kind, requested dates when present,
+size and hash. `verification: hash_verified` only describes byte integrity. It does
+not describe accounting validity. `available_sha256` records an index claim before
+verification; it is not a verified hash. Every locatable row contributes once to
+one classification:
+
+- `excluded_legacy`: `CASH_FUND_NAV_CHANGE` or `CASH_FUND_TRANSACTION`.
+- `malformed`: a row is not an object, has an invalid discriminator or duplicate
+  keys, or a CSV record has a different column count from its header.
+- `unknown`: the source type is not recognized.
+- `unassessed`: a recognized source category or metadata row has not received
+  accounting validation. No row is certified valid or fully reconciled.
+
+History types use `buysell` for transactions and `type` for cash movements. The
+inspection checks shape and discriminators, not financial fields or relationships.
+Per-response type counts and classification counts conserve locatable rows.
+`rows` records zero-based JSON Pointer offsets, such as `/data/cashMovements/3`.
+Product keys use JSON Pointer escaping. CSV records use `/csv/0` for the first data
+record after the header, plus the physical line where that record ends. Metadata
+rows cover product entries, account information and top-level update collections;
+nested attribute cells are not counted as separate financial rows.
+
+Overlapping windows remain separate observations. Pending intents, refused bodies,
+unreadable responses, ambiguous collection keys and missing collections have explicit
+findings. A response without a readable, unambiguous collection has no invented rows.
+Unindexed files, including staging files, are listed but never opened or adopted.
+The report does not merge records, remove exclusions or create an import subset.
+
+Exit 0 means the report was published, including when it contains findings.
+`inspection_status: findings_detected` requires reading those findings.
+`unassessed_only` also grants no accounting approval. Invalid index integrity or
+unsafe source/destination prevents report publication and returns nonzero. Every
+report keeps `history_completeness_verified: false`, `financial_writes: 0` and
+`import_status: archive_not_importable`. Full-account synchronization guards remain.

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Retain private DEGIRO source responses. Archives never authorize imports."""
 import argparse
+import csv
+import io
 from datetime import UTC, date, datetime
 import hashlib
 import json
@@ -8,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import stat
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -368,16 +371,322 @@ def capture(windows, locale, fd, index):
         raise RuntimeError(failure)
 
 
+CLASSIFICATIONS = ("excluded_legacy", "malformed", "unknown", "unassessed")
+LEGACY_TYPES = {"CASH_FUND_NAV_CHANGE", "CASH_FUND_TRANSACTION"}
+CASH_TYPES = {"TRANSACTION", "CASH_TRANSACTION", "FLATEX_CASH_SWEEP", "COMPENSATION_BOOKING"}
+MAX_INDEX_BYTES = 2 * 1024 * 1024
+MAX_ARCHIVE_STEPS = 2 * degiro.MAX_HISTORY_WINDOWS + MAX_PRODUCT_REQUESTS + 3
+DUPLICATE_KEYS = object()  # Cannot collide with an external JSON string key.
+
+
+def open_archive_directory(path):
+    path = Path(os.path.abspath(path))
+    fd = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in path.parts[1:]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        info = os.fstat(fd)
+        if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700:
+            raise RuntimeError("unsafe_archive_directory")
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def read_archive_file(fd, name, limit, expected_hash, expected_size=None):
+    if (not isinstance(name, str) or not name or name in (".", "..")
+            or "/" in name or "\\" in name or "\x00" in name):
+        raise RuntimeError("unsafe_response_path")
+    if not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+        raise RuntimeError("invalid_hash_binding")
+    descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1):
+            raise RuntimeError("unsafe_private_file")
+        if info.st_size > limit:
+            raise RuntimeError("file_size_limit")
+        if expected_size is not None and (type(expected_size) is not int or expected_size != info.st_size):
+            raise RuntimeError("size_mismatch")
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = None
+            raw = stream.read(limit + 1)
+            after = os.fstat(stream.fileno())
+            if (info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns) != (
+                    after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+                raise RuntimeError("file_changed_during_read")
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    if len(raw) > limit or hashlib.sha256(raw).hexdigest() != expected_hash:
+        raise RuntimeError("hash_mismatch")
+    return raw
+
+
+def archive_index(raw):
+    # Reject aliases and duplicate mappings before construction. The index is untrusted.
+    depth = 0
+    for event in yaml.parse(raw):
+        if isinstance(event, yaml.events.AliasEvent):
+            raise RuntimeError("index_alias_refused")
+        if isinstance(event, (yaml.events.MappingStartEvent, yaml.events.SequenceStartEvent)):
+            depth += 1
+            if depth > MAX_JSON_DEPTH:
+                raise RuntimeError("index_depth_limit")
+        elif isinstance(event, (yaml.events.MappingEndEvent, yaml.events.SequenceEndEvent)):
+            depth -= 1
+    node = yaml.compose(raw)
+    pending = [node]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, yaml.nodes.MappingNode):
+            keys = set()
+            for key, value in item.value:
+                if not isinstance(key, yaml.nodes.ScalarNode) or key.value in keys:
+                    raise RuntimeError("invalid_index_mapping")
+                keys.add(key.value)
+                pending.append(value)
+        elif isinstance(item, yaml.nodes.SequenceNode):
+            pending.extend(item.value)
+    index = yaml.safe_load(raw)
+    if (not isinstance(index, dict) or type(index.get("version")) is not int or index["version"] != 1
+            or index.get("status") not in ("pending", "failed", "requests_finished")
+            or index.get("history_completeness_verified") is not False
+            or index.get("import_status") != "archive_not_importable"
+            or not isinstance(index.get("steps"), dict) or len(index["steps"]) > MAX_ARCHIVE_STEPS):
+        raise RuntimeError("invalid_archive_index")
+    return index
+
+
+def diagnostic_json(raw):
+    # Keep ambiguous row objects locatable. Never adopt ambiguous collections.
+    def unique(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                result.setdefault(DUPLICATE_KEYS, set()).add(key)
+            result[key] = value
+        return result
+    eligible_body(raw, False, set())
+    return json.loads(raw, object_pairs_hook=unique, parse_float=str)
+
+
+def row_diagnostic(row, kind):
+    if not isinstance(row, dict):
+        return "malformed", "row_not_object", "<non_object>"
+    if DUPLICATE_KEYS in row:
+        return "malformed", "ambiguous_duplicate_row_keys", "<ambiguous>"
+    if kind not in ("transactions", "account_overview"):
+        return "unassessed", "accounting_not_assessed", "<metadata>"
+    field = "buysell" if kind == "transactions" else "type"
+    value = row.get(field)
+    if not isinstance(value, str) or not value:
+        return "malformed", "missing_or_invalid_discriminator", "<missing_or_invalid>"
+    label = value if re.fullmatch(r"[A-Za-z0-9_]{1,80}", value) else "<other>"
+    if value in LEGACY_TYPES:
+        return "excluded_legacy", "unsupported_legacy_cash_fund_record", label
+    known = {"B", "S"} if kind == "transactions" else CASH_TYPES
+    if value not in known:
+        return "unknown", "unrecognized_source_type", label
+    return "unassessed", "accounting_not_assessed", label
+
+
+def response_diagnostics(raw, kind):
+    result = {"row_count": 0, "classifications": dict.fromkeys(CLASSIFICATIONS, 0),
+              "type_counts": {}, "rows": [], "findings": []}
+
+    def add(offset, row, csv_row=False, malformed=False):
+        category, reason, label = (("malformed", "csv_column_count_mismatch", "<csv>") if malformed else
+            ("unassessed", "csv_accounting_not_assessed", "<csv>") if csv_row else row_diagnostic(row, kind))
+        result["row_count"] += 1
+        result["classifications"][category] += 1
+        result["type_counts"][label] = result["type_counts"].get(label, 0) + 1
+        result["rows"].append({"offset": offset, "classification": category, "reason": reason})
+
+    if kind == "account_report":
+        eligible_body(raw, True, set())
+        reader = csv.reader(io.StringIO(raw.decode("utf-8-sig"), newline=""), strict=True)
+        previous_limit = csv.field_size_limit(MAX_BODY_BYTES)
+        try:
+            header = next(reader, None)
+            if header is None:
+                result["findings"].append("missing_csv_header")
+                return result
+            for offset, row in enumerate(reader):
+                add("/csv/" + str(offset), row, csv_row=True, malformed=len(row) != len(header))
+                result["rows"][-1]["physical_line_end"] = reader.line_num
+        except csv.Error:
+            result["findings"].append("unreadable_csv_remainder")
+        finally:
+            csv.field_size_limit(previous_limit)
+        return result
+    data = diagnostic_json(raw)
+    if not isinstance(data, dict):
+        result["findings"].append("malformed_response_envelope")
+        return result
+    collection_keys = {"portfolio", "cashFunds", "totalPortfolio"} if kind == "account_update" else {"data"}
+    if data.get(DUPLICATE_KEYS, set()) & collection_keys:
+        result["findings"].append("ambiguous_duplicate_json_key")
+        return result
+    if kind == "account_update":
+        for collection in ("portfolio", "cashFunds", "totalPortfolio"):
+            wrapper = data.get(collection)
+            if isinstance(wrapper, dict) and "value" in wrapper.get(DUPLICATE_KEYS, set()):
+                result["findings"].append("ambiguous_duplicate_" + collection)
+                continue
+            rows = wrapper.get("value") if isinstance(wrapper, dict) else None
+            if not isinstance(rows, list):
+                result["findings"].append("missing_or_malformed_" + collection)
+                continue
+            for offset, row in enumerate(rows):
+                add("/" + collection + "/value/" + str(offset), row)
+        return result
+    rows = data.get("data")
+    prefix = "/data"
+    if isinstance(rows, dict) and ((kind == "account_overview" and "cashMovements" in rows.get(DUPLICATE_KEYS, set()))
+            or (kind == "products" and DUPLICATE_KEYS in rows)):
+        result["findings"].append("ambiguous_duplicate_json_key")
+        return result
+    if kind == "account_overview":
+        rows = rows.get("cashMovements") if isinstance(rows, dict) else None
+        prefix += "/cashMovements"
+    if kind == "account_info":
+        if isinstance(rows, dict):
+            add(prefix, rows)
+        else:
+            result["findings"].append("missing_or_malformed_collection")
+    elif kind == "products":
+        if isinstance(rows, dict):
+            for key, row in rows.items():
+                add(prefix + "/" + key.replace("~", "~0").replace("/", "~1"), row)
+        else:
+            result["findings"].append("missing_or_malformed_collection")
+    elif isinstance(rows, list):
+        for offset, row in enumerate(rows):
+            add(prefix + "/" + str(offset), row)
+    else:
+        result["findings"].append("missing_or_malformed_collection")
+    return result
+
+
+def inspect_archive(args):
+    source = Path(os.path.abspath(args.inspect_directory))
+    output = Path(os.path.abspath(args.output_directory))
+    if output == source or output.is_relative_to(source) or source.is_relative_to(output):
+        raise RuntimeError("input_output_overlap")
+    fd = open_archive_directory(source)
+    try:
+        raw_index = read_archive_file(fd, "index.yaml", MAX_INDEX_BYTES, args.index_sha256)
+        index = archive_index(raw_index)
+        report = {"version": 1, "index_sha256": args.index_sha256, "collection_status": index["status"],
+                  "history_completeness_verified": False, "import_status": "archive_not_importable",
+                  "financial_writes": 0, "notice": "No financial write occurred. Full-account synchronization guards still apply. No row is certified valid or reconciled.",
+                  "responses": {}, "findings": [], "unindexed_files": []}
+        indexed = {"index.yaml"}
+        seen_files = set()
+        total = 0
+        for identity, step in index["steps"].items():
+            if (not isinstance(identity, str) or not re.fullmatch(r"response-[0-9]{4}", identity)
+                    or not isinstance(step, dict) or step.get("id") != identity
+                    or step.get("kind") not in PATHS or step.get("status") not in ("pending", "failed", "retained")):
+                raise RuntimeError("invalid_step_binding")
+            kind = step["kind"]
+            result = {"kind": kind, "collection_status": step["status"], "verification": "unavailable",
+                      "row_count": 0, "classifications": dict.fromkeys(CLASSIFICATIONS, 0),
+                      "type_counts": {}, "rows": [], "findings": []}
+            report["responses"][identity] = result
+            for field in ("from_date", "to_date"):
+                if field in step:
+                    if not isinstance(step[field], str) or date.fromisoformat(step[field]).isoformat() != step[field]:
+                        raise RuntimeError("invalid_step_date")
+                    result[field] = step[field]
+            if type(step.get("http_status")) is int and 100 <= step["http_status"] <= 599:
+                result["http_status"] = step["http_status"]
+            if type(step.get("byte_count")) is int and step["byte_count"] >= 0:
+                result["available_byte_count"] = step["byte_count"]
+            if isinstance(step.get("sha256"), str) and re.fullmatch(r"[0-9a-f]{64}", step["sha256"]):
+                result["available_sha256"] = step["sha256"]
+            if step["status"] != "retained":
+                result["findings"].append("pending_intent" if step["status"] == "pending" else "failed_or_refused_step")
+                reasons = {"invalid_encoding", "credential_material", "credential_key", "unparseable_json",
+                           "json_depth_limit", "http_failure", "body_byte_limit", "total_byte_limit",
+                           "product_id_limit", "archive_storage_or_transport_failure", "collection_failed",
+                           "unexpected_collection_request", "collection_transport_failure"}
+                if isinstance(step.get("refusal_reason"), str) and step["refusal_reason"] in reasons:
+                    result["refusal_reason"] = step["refusal_reason"]
+            if "file" not in step:
+                result["findings"].append("body_unavailable")
+                continue
+            name = step["file"]
+            expected_name = identity + (".csv" if kind == "account_report" else ".json")
+            if name != expected_name or name in seen_files:
+                result["findings"].append("unsafe_or_duplicate_response_path")
+                continue
+            seen_files.add(name)
+            indexed.add(name)
+            try:
+                size = step.get("byte_count")
+                if type(size) is not int or size < 0:
+                    raise RuntimeError("invalid_size_binding")
+                total += size
+                if total > MAX_TOTAL_BYTES:
+                    raise RuntimeError("total_byte_limit")
+                if step.get("responses_seen") != 1 or step.get("requests_dispatched") != 1:
+                    raise RuntimeError("invalid_response_count")
+                body = read_archive_file(fd, name, MAX_BODY_BYTES, step.get("sha256"), size)
+                result.update(sha256=step["sha256"], byte_count=size, verification="hash_verified")
+                result.update(response_diagnostics(body, kind))
+            except Exception as error:
+                # No untrusted paths, payloads or exception messages cross this boundary.
+                codes = {"unsafe_response_path", "invalid_hash_binding", "unsafe_private_file", "file_size_limit",
+                         "size_mismatch", "file_changed_during_read", "hash_mismatch", "invalid_size_binding",
+                         "invalid_response_count", "total_byte_limit", "ambiguous_duplicate_json_key",
+                         "credential_key", "credential_material", "json_depth_limit", "invalid_encoding", "unparseable_json"}
+                reason = str(error) if type(error) is RuntimeError and str(error) in codes else "unreadable_response"
+                result["findings"].append(reason)
+        report["unindexed_files"] = sorted(set(os.listdir(fd)) - indexed)
+        if report["unindexed_files"]:
+            report["findings"].append("unindexed_files_not_adopted")
+        if index["status"] != "requests_finished":
+            report["findings"].append("collection_not_finished")
+        report["inspection_status"] = "findings_detected" if report["findings"] or any(
+            row["findings"] or row["classifications"]["excluded_legacy"] or row["classifications"]["malformed"]
+            or row["classifications"]["unknown"] for row in report["responses"].values()) else "unassessed_only"
+    finally:
+        os.close(fd)
+    output_fd = private_directory(output)
+    try:
+        publish(output_fd, "report.yaml", yaml.safe_dump(report, sort_keys=False).encode())
+    finally:
+        os.close(output_fd)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--from-date", required=True)
-    parser.add_argument("--to-date", required=True)
-    parser.add_argument("--window-days", type=int, default=90)
+    parser.add_argument("--from-date")
+    parser.add_argument("--to-date")
+    parser.add_argument("--window-days", type=int)
     parser.add_argument("--output-directory", required=True)
     parser.add_argument("--report-country")
     parser.add_argument("--report-language")
+    parser.add_argument("--inspect-directory")
+    parser.add_argument("--index-sha256")
     args = parser.parse_args(argv)
     try:
+        if args.inspect_directory is not None:
+            if not args.index_sha256 or any(value is not None for value in (
+                    args.from_date, args.to_date, args.window_days, args.report_country, args.report_language)):
+                raise RuntimeError("invalid_inspection_options")
+            inspect_archive(args)
+            print("Offline inspection finished; archive_not_importable; no financial writes")
+            return 0
+        if args.index_sha256 is not None or not args.from_date or not args.to_date:
+            raise RuntimeError("invalid_capture_options")
+        args.window_days = args.window_days if args.window_days is not None else 90
         windows, locale = preflight(args)
         fd = private_directory(args.output_directory)
         index = {"version": 1, "status": "pending", "history_completeness_verified": False,

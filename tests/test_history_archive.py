@@ -454,3 +454,277 @@ def test_limits_unrepresentable_product_id_is_skipped_after_source_publication(b
     step = list(index_at(output)["steps"].values())[0]
     assert step["invalid_product_ids_skipped"] == 1
     assert (output / step["file"]).read_bytes() == replies["transactions"]
+
+
+
+def synthetic_archive(tmp_path, responses):
+    root = tmp_path / "source"
+    root.mkdir(mode=0o700)
+    steps = {}
+    for number, (kind, body) in enumerate(responses, 1):
+        identity = f"response-{number:04d}"
+        filename = identity + (".csv" if kind == "account_report" else ".json")
+        (root / filename).write_bytes(body)
+        (root / filename).chmod(0o600)
+        steps[identity] = {"id": identity, "kind": kind, "status": "retained", "file": filename,
+            "http_status": 200, "responses_seen": 1, "requests_dispatched": 1,
+            "source_account": "123", "from_date": "2000-01-01", "to_date": "2000-01-03",
+            "byte_count": len(body), "sha256": hashlib.sha256(body).hexdigest()}
+    index = {"version": 1, "status": "requests_finished", "steps": steps,
+        "history_completeness_verified": False, "import_status": "archive_not_importable"}
+    (root / "index.yaml").write_text(yaml.safe_dump(index))
+    (root / "index.yaml").chmod(0o600)
+    return root
+
+
+def inspect_arguments(root, output):
+    return ["--inspect-directory", str(root), "--index-sha256", hashlib.sha256((root / "index.yaml").read_bytes()).hexdigest(),
+            "--output-directory", str(output)]
+
+
+def test_exclusions_conserve_rows_overlap_and_preserve_inputs(tmp_path, monkeypatch):
+    archive = load_archive()
+    body = b'{"data":{"cashMovements":[{"id":0,"type":"CASH_FUND_NAV_CHANGE"},{"id":0,"type":"CASH_FUND_TRANSACTION"},{"type":"TRANSACTION"},{"type":"FUTURE_TYPE"},null,{}]}}'
+    root = synthetic_archive(tmp_path, [("account_overview", body), ("account_overview", body)])
+    before = {p.name:p.read_bytes() for p in root.iterdir()}
+    monkeypatch.setattr(archive.vault, "broker_credentials", lambda: pytest.fail("Credentials accessed"))
+    monkeypatch.setattr(archive.degiro, "bounded_broker_session", lambda: pytest.fail("Broker accessed"))
+    monkeypatch.setenv("DRY_RUN", "invalid-unused-in-offline-inspection")
+    output = tmp_path / "report"
+    assert archive.main(inspect_arguments(root, output)) == 0
+    report = yaml.safe_load((output / "report.yaml").read_bytes())
+    assert report["import_status"] == "archive_not_importable"
+    assert report["history_completeness_verified"] is False
+    assert report["financial_writes"] == 0
+    assert report["index_sha256"] == hashlib.sha256(before["index.yaml"]).hexdigest()
+    assert len(report["responses"]) == 2
+    for response in report["responses"].values():
+        assert response["row_count"] == 6
+        assert response["classifications"] == {"excluded_legacy":2,"malformed":2,"unknown":1,"unassessed":1}
+        assert sum(response["type_counts"].values()) == 6
+        assert [r["offset"] for r in response["rows"]] == [f"/data/cashMovements/{i}" for i in range(6)]
+    assert before == {p.name:p.read_bytes() for p in root.iterdir()}
+    assert (output / "report.yaml").stat().st_mode & 0o777 == 0o600
+
+
+
+def rewrite_index(root, mutate):
+    index = index_at(root)
+    mutate(index)
+    (root / "index.yaml").write_text(yaml.safe_dump(index))
+
+
+@pytest.mark.parametrize("mutation,reason", [
+    ("hash", "hash_mismatch"), ("size", "size_mismatch"),
+    ("traversal", "unsafe_or_duplicate_response_path"), ("absolute", "unsafe_or_duplicate_response_path"),
+    ("symlink", "unreadable_response"), ("hardlink", "unsafe_private_file"),
+    ("public", "unsafe_private_file"), ("directory", "unsafe_private_file"),
+    ("fifo", "unsafe_private_file"), ("missing", "unreadable_response"),
+    ("duplicate_json", "ambiguous_duplicate_json_key"), ("unreadable", "unparseable_json"),
+])
+def test_exclusions_untrusted_response_never_adopted(tmp_path, mutation, reason):
+    archive = load_archive()
+    root = synthetic_archive(tmp_path, [("transactions", b'{"data":[{"buysell":"B"}]}')])
+    body = root / "response-0001.json"
+    if mutation == "hash":
+        body.write_bytes(b'{"data":[{"buysell":"S"}]}')
+    elif mutation in ("size", "traversal", "absolute"):
+        def mutate(index):
+            step = index["steps"]["response-0001"]
+            if mutation == "size": step["byte_count"] += 1
+            else: step["file"] = "../outside.json" if mutation == "traversal" else str(body)
+        rewrite_index(root, mutate)
+    elif mutation in ("symlink", "hardlink"):
+        outside = tmp_path / "outside.json"
+        body.rename(outside)
+        if mutation == "symlink": body.symlink_to(outside)
+        else: os.link(outside, body)
+    elif mutation == "public":
+        body.chmod(0o644)
+    elif mutation in ("directory", "fifo", "missing"):
+        body.unlink()
+        if mutation == "directory": body.mkdir(mode=0o700)
+        elif mutation == "fifo": os.mkfifo(body, mode=0o600)
+    else:
+        raw = b'{"data":[],"data":[{"buysell":"B"}]}' if mutation == "duplicate_json" else b'{"data":['
+        body.write_bytes(raw)
+        def mutate(index):
+            index["steps"]["response-0001"].update(byte_count=len(raw),sha256=hashlib.sha256(raw).hexdigest())
+        rewrite_index(root, mutate)
+    output = tmp_path / "diagnostics"
+    assert archive.main(inspect_arguments(root, output)) == 0
+    report = yaml.safe_load((output / "report.yaml").read_bytes())
+    result = report["responses"]["response-0001"]
+    assert reason in result["findings"]
+    assert result["rows"] == [] and result["row_count"] == 0
+    assert report["import_status"] == "archive_not_importable"
+
+
+def test_exclusions_partial_intents_refusals_and_orphans(tmp_path):
+    archive = load_archive()
+    root = synthetic_archive(tmp_path, [("transactions", b'{"data":[]}')])
+    (root / "orphan.json").write_bytes(b'not adopted')
+    (root / ".pending-synthetic").write_bytes(b'not adopted either')
+    def mutate(index):
+        index["status"] = "failed"
+        index["steps"]["response-0002"] = {"id":"response-0002","kind":"account_overview","status":"pending"}
+        index["steps"]["response-0003"] = {"id":"response-0003","kind":"account_report","status":"failed",
+            "http_status":503,"byte_count":15,"sha256":"a"*64,"refusal_reason":"http_failure"}
+    rewrite_index(root, mutate)
+    output = tmp_path / "report"
+    assert archive.main(inspect_arguments(root, output)) == 0
+    report = yaml.safe_load((output / "report.yaml").read_bytes())
+    assert report["unindexed_files"] == [".pending-synthetic", "orphan.json"]
+    assert report["responses"]["response-0002"]["findings"] == ["pending_intent", "body_unavailable"]
+    assert report["responses"]["response-0003"]["findings"] == ["failed_or_refused_step", "body_unavailable"]
+    assert "collection_not_finished" in report["findings"]
+    assert report["responses"]["response-0003"]["row_count"] == 0
+
+
+@pytest.mark.parametrize("mutation", ["bad_hash", "index_symlink", "index_hardlink", "index_public", "index_alias", "index_duplicates", "source_symlink", "overlap", "output_exists", "mixed_options"])
+def test_exclusions_refuse_unsafe_index_or_destination_preserving_inputs(tmp_path, mutation, capsys):
+    archive = load_archive()
+    root = synthetic_archive(tmp_path, [("transactions", b'{"data":[]}')])
+    output = tmp_path / "report"
+    if mutation == "index_alias":
+        (root / "index.yaml").write_bytes(b'version: 1\nsteps: &steps {}\nother: *steps\n')
+    elif mutation == "index_duplicates":
+        with (root / "index.yaml").open('ab') as stream: stream.write(b'version: 1\n')
+    elif mutation in ("index_symlink", "index_hardlink"):
+        outside = tmp_path / "outside.yaml"
+        (root / "index.yaml").rename(outside)
+        if mutation == "index_symlink": (root / "index.yaml").symlink_to(outside)
+        else: os.link(outside, root / "index.yaml")
+    elif mutation == "index_public":
+        (root / "index.yaml").chmod(0o644)
+    elif mutation == "source_symlink":
+        link = tmp_path / "source-link"
+        link.symlink_to(root, target_is_directory=True)
+        root = link
+    elif mutation == "overlap":
+        output = root / "report"
+    elif mutation == "output_exists":
+        output.mkdir()
+        (output / "sentinel").write_bytes(b'keep')
+    before = {p.name:p.read_bytes() for p in root.iterdir() if p.is_file()}
+    args = inspect_arguments(root, output)
+    if mutation == "bad_hash": args[3] = "0"*64
+    elif mutation == "mixed_options": args.extend(["--from-date","2000-01-01"])
+    assert archive.main(args) == 1
+    assert before == {p.name:p.read_bytes() for p in root.iterdir() if p.is_file()}
+    assert not (output / "report.yaml").exists()
+    assert "outside.yaml" not in capsys.readouterr().err
+
+
+def test_exclusions_metadata_csv_and_empty_envelopes_are_unassessed(tmp_path):
+    archive = load_archive()
+    responses = [
+        ("transactions", b'{"data":[{"buysell":"B"},{"buysell":"S"},{"buysell":false}]}'),
+        ("products", b'{"data":{"42":{"isin":"TEST"},"bad":null}}'),
+        ("account_info", b'{"data":{"baseCurrency":"EUR"}}'),
+        ("account_update", b'{"portfolio":{"value":[{},null]},"cashFunds":{"value":[]},"totalPortfolio":{"value":[{}]}}'),
+        ("account_report", b'Date,Description\n2000-01-01,"line one\nline two"\n2000-01-02\n'),
+        ("account_overview", b'{"data":{}}'),
+        ("transactions", b'{"data":[]}')]
+    root = synthetic_archive(tmp_path, responses)
+    output = tmp_path / "report"
+    assert archive.main(inspect_arguments(root, output)) == 0
+    report = yaml.safe_load((output / "report.yaml").read_bytes())
+    results = list(report["responses"].values())
+    assert [r["row_count"] for r in results] == [3,2,1,3,2,0,0]
+    assert results[0]["classifications"]["unassessed"] == 2
+    assert results[1]["rows"][0]["offset"] == "/data/42"
+    assert results[3]["rows"][-1]["offset"] == "/totalPortfolio/value/0"
+    assert results[4]["rows"][0]["physical_line_end"] == 3
+    assert results[4]["rows"][1]["classification"] == "malformed"
+    assert results[5]["findings"] == ["missing_or_malformed_collection"]
+    assert results[6]["findings"] == []
+    for row in results:
+        assert sum(row["classifications"].values()) == row["row_count"] == len(row["rows"])
+
+
+
+def test_exclusions_actual_capture_then_inspection_cannot_dispatch(broker, tmp_path, monkeypatch):
+    from ghostfolio_degiro_sync import accounting, ghostfolio
+    archive, calls, _, vault_calls, _ = broker
+    root = tmp_path / "capture"
+    assert archive.main(arguments(root, "--report-country", "fr", "--report-language", "fr")) == 0
+    before = {p.name:(p.read_bytes(), p.stat().st_mode) for p in root.iterdir()}
+    counts = (len(calls),len(vault_calls))
+    def forbidden(*args, **kwargs):
+        pytest.fail("Offline inspection called a live or accounting entry point")
+    monkeypatch.setattr(archive.vault, "broker_credentials", forbidden)
+    monkeypatch.setattr(archive.degiro, "bounded_broker_session", forbidden)
+    monkeypatch.setattr(accounting, "check_api_import_format", forbidden)
+    monkeypatch.setattr(accounting, "merge_history", forbidden)
+    monkeypatch.setattr(ghostfolio, "ghost_transport", forbidden)
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", forbidden)
+    output = tmp_path / "inspection"
+    assert archive.main(inspect_arguments(root, output)) == 0
+    report = yaml.safe_load((output / "report.yaml").read_bytes())
+    assert len(report["responses"]) == 8
+    assert all(row["verification"] == "hash_verified" for row in report["responses"].values())
+    assert sum(row["classifications"]["excluded_legacy"] for row in report["responses"].values()) == 4
+    assert before == {p.name:(p.read_bytes(),p.stat().st_mode) for p in root.iterdir()}
+    assert counts == (len(calls),len(vault_calls))
+    assert report["inspection_status"] == "findings_detected"
+
+
+@pytest.mark.parametrize("raw", [b'version: 1\nsteps: !!python/object:unknown {}', b'version: [', b'\xff', b'{}'])
+def test_exclusions_malformed_index_refused(tmp_path, raw):
+    archive = load_archive()
+    root = synthetic_archive(tmp_path, [])
+    (root / "index.yaml").write_bytes(raw)
+    output = tmp_path / "report"
+    assert archive.main(inspect_arguments(root, output)) == 1
+    assert (root / "index.yaml").read_bytes() == raw
+    assert not output.exists()
+
+
+def test_exclusions_no_findings_still_grants_no_import_permission(tmp_path):
+    archive = load_archive()
+    root = synthetic_archive(tmp_path, [("transactions", b'{"data":[{"buysell":"B"},{"buysell":"S"}]}')])
+    output = tmp_path / "report"
+    assert archive.main(inspect_arguments(root, output)) == 0
+    report = yaml.safe_load((output / "report.yaml").read_bytes())
+    assert report["inspection_status"] == "unassessed_only"
+    assert report["import_status"] == "archive_not_importable"
+    assert report["responses"]["response-0001"]["classifications"] == {
+        "excluded_legacy":0,"unknown":0,"malformed":0,"unassessed":2}
+
+
+
+def test_exclusions_duplicate_row_keys_do_not_hide_other_locatable_rows(tmp_path):
+    archive = load_archive()
+    root = synthetic_archive(tmp_path, [("account_overview",
+        b'{"data":{"cashMovements":[{"type":"TRANSACTION","type":"FUTURE"},{"type":"CASH_FUND_NAV_CHANGE"},{"type":"CASH_TRANSACTION"}]}}')])
+    output = tmp_path / "report"
+    assert archive.main(inspect_arguments(root, output)) == 0
+    report = yaml.safe_load((output / "report.yaml").read_bytes())
+    response = report["responses"]["response-0001"]
+    assert response["row_count"] == 3
+    assert response["classifications"] == {"excluded_legacy":1,"malformed":1,"unknown":0,"unassessed":1}
+    assert response["rows"][0]["reason"] == "ambiguous_duplicate_row_keys"
+
+
+
+def test_exclusions_unrelated_duplicate_keys_do_not_hide_collection(tmp_path):
+    archive = load_archive()
+    root = synthetic_archive(tmp_path, [("transactions", b'{"other":1,"other":2,"data":[{"buysell":"B"}]}')])
+    output = tmp_path / "report"
+    assert archive.main(inspect_arguments(root, output)) == 0
+    report = yaml.safe_load((output / "report.yaml").read_bytes())
+    assert report["responses"]["response-0001"]["row_count"] == 1
+
+
+
+def test_exclusions_large_csv_record_remains_locatable(tmp_path):
+    archive = load_archive()
+    body = b'Date,Description\n2000-01-01,' + b'x' * 140000 + b'\n'
+    root = synthetic_archive(tmp_path, [("account_report", body)])
+    output = tmp_path / "report"
+    assert archive.main(inspect_arguments(root, output)) == 0
+    report = yaml.safe_load((output / "report.yaml").read_bytes())
+    response = report["responses"]["response-0001"]
+    assert response["row_count"] == 1
+    assert response["findings"] == []
