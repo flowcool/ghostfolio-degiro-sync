@@ -75,3 +75,13 @@ Public bug reports and compatibility notices use GitHub Issues. Existing local w
 For PR descriptions and merge execution, read `.github/pull_request_template.md`; use `scripts/merge_pr.py` for merges. Required CI and a completed CodeRabbit review must cover the exact final head (docs-only PRs need CI only). Review triggering is managed externally by maintainers; pending, skipped or rate-limited review is not evidence. Record the completed review URL and SHA before guarded merge. Source approval never authorizes production deployment or financial mutations.
 
 Rollback source changes with an atomic Git revert. Preserve local journals and private captures. Runtime deployment, financial writes, cleanup and destructive recovery require the operator's explicit authorization.
+
+## Shared Ghostfolio labs
+
+Use the permanent lab authority in the global working agreement and the
+canonical Infra lab runbook. It covers both labs, including test writes,
+configuration and resets. Keep reservations, separate credentials, retained
+proof, stop on uncertainty without automatic resend, and final stop verification.
+Broker access, production, publication and removal of containers or proof
+retain separate authority. This scope overrides generic write-approval rules
+for these two labs only.
