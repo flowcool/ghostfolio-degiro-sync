@@ -130,6 +130,10 @@ def test_preservation_exact_bytes_and_boundary_one_login(broker, tmp_path):
     (b'{"data":[{"SessionId":"hidden"}]}', "credential_key"),
     (b'{"data":"synthetic-password"}', "credential_material"),
     (b'{"data":"synthetic-\\u0070assword","data":[]}', "credential_material"),
+    (b'{"data":975310}', "credential_material"),
+    (b'{"data":"975310"}', "credential_material"),
+    (b'{"data":"\\u003975310","data":[]}', "credential_material"),
+    (b'{"data":"code: 975310"}', "credential_material"),
     (b'{"data": [}', "unparseable_json"),
     (b'{"data":"\xff"}', "invalid_encoding"),
     (b'{"data":NaN}', "unparseable_json"),
@@ -152,6 +156,54 @@ def test_retention_unsafe_body_never_published(broker, tmp_path, body, reason):
     assert len(list(output.glob("*.json"))) == 1
     assert sessions[0].degiro_evidence == []
     assert len(calls) == 5  # login, discovery, first history pair, logout; no retry.
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_preservation_otp_inside_identifiers_and_amounts(broker, tmp_path, monkeypatch, generated):
+    archive, _, replies, _, _ = broker
+    if generated:
+        import pyotp
+        monkeypatch.setattr(archive.vault, "broker_credentials", lambda: Credentials(
+            username="synthetic-user", password="synthetic-password", totp_secret_key="JBSWY3DPEHPK3PXP"))
+        monkeypatch.setattr(pyotp.TOTP, "now", lambda self: "975310")
+    replies["transactions"] = (b'{"data":[{"id":19753100,"productId":42,"amount":0.975310123,'
+                               b'"description":"ISIN975310US","reference":"19753100",'
+                               b'"escaped":"ISIN\\u003975310US"}]}')
+    replies["account_report"] = b'Date,Amount,Reference\n2000-01-01,1.975310123,ISIN975310US\n'
+    output = tmp_path / "otp-collision"
+    assert archive.main(arguments(output, "--report-country", "fr", "--report-language", "fr")) == 0
+    index = index_at(output)
+    assert index["status"] == "requests_finished"
+    for step in index["steps"].values():
+        if step["kind"] in ("transactions", "account_report"):
+            assert (output / step["file"]).read_bytes() == replies[step["kind"]]
+
+
+@pytest.mark.parametrize("generated", [False, True])
+def test_retention_exact_otp_in_csv_never_published(broker, tmp_path, monkeypatch, generated):
+    archive, _, replies, _, _ = broker
+    if generated:
+        import pyotp
+        monkeypatch.setattr(archive.vault, "broker_credentials", lambda: Credentials(
+            username="synthetic-user", password="synthetic-password", totp_secret_key="JBSWY3DPEHPK3PXP"))
+        monkeypatch.setattr(pyotp.TOTP, "now", lambda self: "975310")
+    replies["account_report"] = b'Date,Reference\n2000-01-01,975310\n'
+    output = tmp_path / "otp-refusal"
+    assert archive.main(arguments(output, "--report-country", "fr", "--report-language", "fr")) == 1
+    step = list(index_at(output)["steps"].values())[-1]
+    assert step["refusal_reason"] == "credential_material" and "file" not in step
+    assert not list(output.glob("*.csv"))
+
+
+def test_retention_numeric_password_keeps_substring_guard(broker, tmp_path, monkeypatch):
+    archive, _, replies, _, _ = broker
+    monkeypatch.setattr(archive.vault, "broker_credentials", lambda: Credentials(
+        username="synthetic-user", password="975310", one_time_password=975310))
+    replies["transactions"] = b'{"data":[{"id":19753100,"productId":42}]}'
+    output = tmp_path / "numeric-secret"
+    assert archive.main(arguments(output)) == 1
+    step = list(index_at(output)["steps"].values())[0]
+    assert step["refusal_reason"] == "credential_material" and "file" not in step
 
 
 @pytest.mark.parametrize("failure", [(503,b'password=DO_NOT_RETAIN'), (302,b'redirect'), (405,b'maintenance'), requests.Timeout("SENSITIVE_URL")])

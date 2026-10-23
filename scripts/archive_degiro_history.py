@@ -108,13 +108,17 @@ def sensitive_key(key):
     return not redact_auth_fields({key: None})
 
 
-def eligible_body(raw, csv, sensitive_values):
+def eligible_body(raw, csv, sensitive_values, one_time_values=()):
     """Inspect all JSON key occurrences before duplicate keys can collapse."""
     try:
         text = raw.decode("utf-8-sig" if csv else "utf-8")
     except UnicodeError:
         raise RuntimeError("invalid_encoding") from None
-    if any(value in text for value in sensitive_values):
+    # OTP digits can occur inside valid identifiers and high-precision amounts.
+    # Only OTPs use token boundaries; long-lived secrets keep substring checks.
+    one_time_pattern = (re.compile(r"(?<![\w.])(?:" + "|".join(re.escape(value) for value in one_time_values)
+                                   + r")(?![\w.])") if one_time_values else None)
+    if any(value in text for value in sensitive_values) or (one_time_pattern and one_time_pattern.search(text)):
         raise RuntimeError("credential_material")
     if csv:
         if re.search(r"token|session|password|username|otp|secret", text, re.IGNORECASE):
@@ -132,7 +136,7 @@ def eligible_body(raw, csv, sensitive_values):
                 value, position = json.decoder.scanstring(text, position)
             except ValueError:
                 raise RuntimeError("unparseable_json") from None
-            if any(secret in value for secret in sensitive_values):
+            if any(secret in value for secret in sensitive_values) or (one_time_pattern and one_time_pattern.search(value)):
                 raise RuntimeError("credential_material")
         elif token in "{[":
             depth += 1
@@ -211,7 +215,8 @@ def capture(windows, locale, fd, index):
     retained = 0
     identities = set()
     sensitive_values = {str(value) for value in (credentials.username, credentials.password,
-        credentials.totp_secret_key, credentials.one_time_password, credentials.in_app_token) if value is not None}
+        credentials.totp_secret_key, credentials.in_app_token) if value is not None}
+    one_time_values = ({str(credentials.one_time_password)} if credentials.one_time_password is not None else set())
     sensitive_values.update(os.environ[name] for name in (
         "BW_CLIENTID", "BW_CLIENTSECRET", "BW_PASSWORD", "BW_SESSION", "GHOST_TOKEN", "GHOST_ACCESS_TOKEN")
         if os.environ.get(name))
@@ -236,7 +241,7 @@ def capture(windows, locale, fd, index):
                 raise RuntimeError("body_byte_limit")
             if retained + len(raw) > MAX_TOTAL_BYTES:
                 raise RuntimeError("total_byte_limit")
-            data = eligible_body(raw, active["kind"] == "account_report", sensitive_values)
+            data = eligible_body(raw, active["kind"] == "account_report", sensitive_values, one_time_values)
             name = active["id"] + (".csv" if active["kind"] == "account_report" else ".json")
             publish(fd, name, raw)
             retained += len(raw)
@@ -272,8 +277,10 @@ def capture(windows, locale, fd, index):
             # Capture generated OTP only in memory so it cannot leak into evidence.
             if control == "login":
                 payload = json.loads(request.body)
+                one_time_values.update(str(value) for key, value in payload.items()
+                                       if key == "oneTimePassword" and value is not None)
                 sensitive_values.update(str(value) for key, value in payload.items()
-                                        if sensitive_key(key) and value is not None)
+                                        if key != "oneTimePassword" and sensitive_key(key) and value is not None)
         try:
             return original_send(request, **kwargs)
         except Exception:
