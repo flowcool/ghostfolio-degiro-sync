@@ -221,8 +221,13 @@ keyed YAML permit and a new private journal path:
 
 Permit schema is `degiro-migration-approval-v1`; authorization is
 `apply-reviewed-comments`. Bind `host`, `manifest_sha256`, `owner_id`,
-`destination_version`, `destination_image` and `target_source_commit`.
-The implemented UpdateOrderDto allowlist is based on Ghostfolio 3.86.0 source
+`destination_version` and `destination_image`. Maintenance accepts semantic
+Ghostfolio versions at or above **3.86.0**, without an exact-version or upstream
+commit pin. A prerelease of 3.86.0 is below the minimum; build metadata does not
+change precedence. Record the actual version from the running application,
+not the Docker tag `latest`. A permit may record `target_source_commit` for
+provenance; it does not select an accepted upstream commit.
+The original UpdateOrderDto allowlist review used Ghostfolio 3.86.0 source
 [`ef47c0d`](https://github.com/ghostfolio/ghostfolio/tree/ef47c0d1b2c48fa4e97fb381561b514e657928cf).
 Source inspection does not qualify any real target. The controller can reconnect
 profiles and the service can queue background market-data work. Every class
@@ -247,6 +252,13 @@ reviewed activity PUT. Scheduled sync gains no historical PUT route. DTOs use
 stored activity currency and actual profile identity, explicit fields and exact
 numeric JSON tokens. Numbers the target cannot preserve are refused. The engine
 never copies the entire GET row into a PUT.
+
+The real activities response can omit `isDraft`; activity/account draft and
+exclusion tags still determine eligibility. An owned comment PUT can advance
+the backend-managed Order `updatedAt`. Exact readback permits only this
+monotonic timestamp change on the row just written and records the complete
+postimage in the journal. All other fields and every protected row remain
+exact. Reversal records its own postimage; timestamps are never sent in a PUT.
 
 A private YAML journal persists and flushes each pending request before dispatch.
 Complete readback must preserve every field and every protected row except the

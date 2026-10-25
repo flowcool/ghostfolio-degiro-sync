@@ -13,13 +13,9 @@ REPOSITORY = 'flowcool/ghostfolio-degiro-sync'
 PR_FIELDS = 'headRefOid state isDraft mergeable mergeStateStatus'
 PAGE = 'pageInfo { hasNextPage endCursor }'
 DOC_PREFIXES = ('openspec/', 'docs/')
-PARENTS = ('baseRef { target { oid } } commits(last:1) { nodes { commit { oid '
-    'signature { isValid signer { login } } parents(first:3) { nodes { oid } } } } }')
 CONNECTIONS = {
-    'reviews': 'reviews(first:100, after:$cursor) { nodes { id author { login } '
+    'reviews': 'reviews(first:100, after:$cursor) { nodes { id author { login __typename } '
         'state commit { oid } body url submittedAt } ' + PAGE + ' }',
-    'comments': 'comments(first:100, after:$cursor) { nodes { id '
-        'author { login __typename } body url createdAt updatedAt } ' + PAGE + ' }',
     'threads': 'reviewThreads(first:100, after:$cursor) { nodes { id isResolved } '
         + PAGE + ' }',
     'files': 'files(first:100, after:$cursor) { nodes { path } ' + PAGE + ' }',
@@ -122,127 +118,40 @@ def read_connection(connection, number, head, deadline):
 def review_time(value):
     try:
         parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
-        require(parsed.utcoffset() is not None, 'Invalid CodeRabbit review time')
+        require(parsed.utcoffset() is not None, 'Invalid Pullfrog review time')
         return parsed
     except (AttributeError, ValueError, TypeError):
-        raise RuntimeError('Invalid CodeRabbit review time') from None
+        raise RuntimeError('Invalid Pullfrog review time') from None
 
 
 def exact_head_reviews(reviews, head):
     return [review for review in reviews
         if isinstance(review.get('author'), dict)
-        and review['author'].get('login') == 'coderabbitai'
+        and review['author'].get('login') in ('pullfrog', 'pullfrog[bot]')
+        and review['author'].get('__typename') == 'Bot'
         and isinstance(review.get('commit'), dict) and review['commit'].get('oid') == head]
 
 
-def unique_coverage_fields(pairs):
-    result = {}
-    for key, value in pairs:
-        require(key not in result, 'Duplicate CodeRabbit coverage field')
-        result[key] = value
-    return result
-
-
-def review_notice_text(body):
-    # Bot reviews include repository policy in fenced context quotations.
-    # Exclude only the known quoted policy sentences, never other notices.
-    lines, prose, quoted, fence = body.splitlines(keepends=True), [], [], None
-    for line in lines:
-        marker = re.match(r'^ {0,3}(`{3,}|~{3,})([^\r\n]*)', line)
-        if fence is None:
-            if marker:
-                fence = marker.group(1)
-                quoted = [line]
-            else:
-                prose.append(line)
-        else:
-            quoted.append(line)
-            if (marker and marker.group(1)[0] == fence[0]
-                    and len(marker.group(1)) >= len(fence) and not marker.group(2).strip()):
-                prose.append(re.sub(r'Skipped, pending or\s+rate-limited reviews are not evidence\.'
-                    r'|pending, skipped or\s+rate-limited review is not evidence\.',
-                    '', ''.join(quoted)))
-                fence, quoted = None, []
-    return ''.join(prose + quoted)
-
-
-def completed_comment(comments, reviews, head, number):
-    # A comment must never override a formal pending/changes-requested review.
-    prior = [(review_time(review.get('submittedAt')), review)
-        for review in reviews if isinstance(review.get('author'), dict)
-        and review['author'].get('login') == 'coderabbitai']
-    if prior:
-        newest = max(stamp for stamp, _ in prior)
-        latest = [review for stamp, review in prior if stamp == newest]
-        require(len(latest) == 1 and latest[0].get('state') in ('COMMENTED', 'APPROVED'),
-            'Latest CodeRabbit formal review is ambiguous or requests changes')
-    candidates = []
-    for comment in comments:
-        author = comment.get('author')
-        if (not isinstance(author, dict) or author.get('login') != 'coderabbitai'
-                or author.get('__typename') != 'Bot'):
-            continue
-        body = comment.get('body')
-        require(isinstance(body, str), 'Invalid CodeRabbit comment body')
-        if 'final_review_risk_coverage:' not in body:
-            continue
-        matches = re.findall(r'^<!-- final_review_risk_coverage:(\{[^\r\n]*\}) -->$',
-            body, re.M)
-        require(len(matches) == 1 and body.count('final_review_risk_coverage:') == 1,
-            'CodeRabbit comment coverage missing or ambiguous')
-        try:
-            coverage = json.loads(matches[0], object_pairs_hook=unique_coverage_fields)
-        except (ValueError, TypeError):
-            raise RuntimeError('Malformed CodeRabbit coverage metadata') from None
-        require(isinstance(coverage, dict) and set(coverage)
-            == {'sourceCommitId', 'coveredCommitId', 'kind'},
-            'Unknown CodeRabbit coverage protocol')
-        require(all(isinstance(coverage[key], str)
-            and re.fullmatch(r'[0-9a-f]{40}', coverage[key])
-            for key in ('sourceCommitId', 'coveredCommitId')),
-            'Invalid CodeRabbit coverage commit')
-        if coverage['sourceCommitId'] != head or coverage['coveredCommitId'] != head:
-            continue
-        require(coverage['kind'] == 'reviewed', 'CodeRabbit final-head review not completed')
-        start, end = '<!-- final_review_risk_start -->', '<!-- final_review_risk_end -->'
-        require(body.count(start) == 1 and body.count(end) == 1
-            and body.index(start) < body.index('<!-- final_review_risk_coverage:')
-                < body.index(end), 'CodeRabbit coverage outside completed risk section')
-        require(not re.search(r'reviews?\s+(skipped|paused|in progress)|rate[- ]limit'
-            r'|<!--\s*(?:review_in_progress|review_status)', review_notice_text(body), re.I),
-            'Skipped, pending or rate-limited review is not evidence')
-        created, updated = review_time(comment.get('createdAt')), review_time(comment.get('updatedAt'))
-        require(updated >= created and (not prior or updated >= max(stamp for stamp, _ in prior)),
-            'CodeRabbit comment predates formal review')
-        url = comment.get('url')
-        require(isinstance(url, str) and re.fullmatch(r'https://github\.com/'
-            + re.escape(REPOSITORY) + '/pull/' + str(number) + r'#issuecomment-[0-9]+', url),
-            'Invalid CodeRabbit comment evidence')
-        candidates.append(url)
-    require(candidates, 'Completed CodeRabbit review of final head missing')
-    require(len(candidates) == 1, 'Final-head CodeRabbit comment evidence ambiguous')
-    return candidates[0]
-
-
-def completed_review(reviews, head, number, comments=()):
-    candidates = []
-    for review in exact_head_reviews(reviews, head):
-        candidates.append((review_time(review.get('submittedAt')), review))
-    if not candidates:
-        return completed_comment(comments, reviews, head, number)
-    newest = max(submitted for submitted, _ in candidates)
-    latest = [review for submitted, review in candidates if submitted == newest]
-    require(len(latest) == 1, 'Final-head CodeRabbit review evidence ambiguous')
+def completed_review(reviews, head, number):
+    exact = exact_head_reviews(reviews, head)
+    require(all(isinstance(r.get('body'), str) for r in exact), 'Invalid Pullfrog review body')
+    # GitHub represents thread replies as empty COMMENTED reviews. They cannot
+    # establish completed coverage or supersede an earlier change request.
+    candidates = [r for r in exact if r.get('state') not in ('COMMENTED', 'APPROVED')
+                  or r['body'].strip()]
+    require(candidates, 'Completed Pullfrog review of final head missing')
+    newest = max(review_time(r.get('submittedAt')) for r in candidates)
+    latest = [r for r in candidates if review_time(r.get('submittedAt')) == newest]
+    require(len(latest) == 1, 'Final-head Pullfrog review evidence ambiguous')
     review = latest[0]
     require(review.get('state') in ('COMMENTED', 'APPROVED'),
-        'Final-head CodeRabbit review is not completed or requests changes')
+        'Final-head Pullfrog review is not completed or requests changes')
     body, url = review.get('body'), review.get('url')
     require(isinstance(body, str) and isinstance(url, str)
         and re.fullmatch(r'https://github\.com/' + re.escape(REPOSITORY)
             + '/pull/' + str(number) + r'#pullrequestreview-[0-9]+', url),
-        'Invalid CodeRabbit review evidence')
-    require(not re.search(r'reviews?\s+(skipped|paused|in progress)|rate[- ]limit',
-        review_notice_text(body), re.I),
+        'Invalid Pullfrog review evidence')
+    require(not re.search(r'reviews?\s+(skipped|paused|in progress)|rate[- ]limit\s+(exceeded|reached)', body, re.I),
         'Skipped, pending or rate-limited review is not evidence')
     return url
 
@@ -254,35 +163,8 @@ def is_docs_only(files):
         for path in paths)
 
 
-def update_parent(number, head, deadline):
-    # A genuine branch update is a GitHub-signed (web-flow) merge commit of the current base tip
-    # into the branch: first parent = reviewed branch head, second = base tip. GitHub refuses
-    # an update with conflicts, so the commit adds no change of its own.
-    pr = gh_query('query($number:Int!) { repository(owner:"flowcool", '
-        'name:"ghostfolio-degiro-sync") { pullRequest(number:$number) { headRefOid '
-        + PARENTS + ' } } }', number, deadline)
-    require(pr_head(pr) == head, 'Pull request head changed during preflight')
-    try:
-        commits = pr['commits']['nodes']
-        require(isinstance(commits, list) and len(commits) == 1
-            and commits[0]['commit']['oid'] == head, 'Exact-head parent metadata unavailable')
-        parents = [node['oid'] for node in commits[0]['commit']['parents']['nodes']]
-        signature = commits[0]['commit']['signature']
-        base_tip = pr['baseRef']['target']['oid']
-    except (KeyError, TypeError):
-        raise RuntimeError('Exact-head parent metadata malformed') from None
-    require(len(parents) == 2 and all(isinstance(oid, str)
-        and re.fullmatch(r'[0-9a-f]{40}', oid) for oid in parents),
-        'Completed CodeRabbit review of final head missing')
-    require(isinstance(signature, dict) and signature.get('isValid') is True
-        and isinstance(signature.get('signer'), dict)
-        and signature['signer'].get('login') == 'web-flow' and parents[1] == base_tip,
-        'Completed CodeRabbit review of final head missing')
-    return parents[0]
-
-
 def passing_checks(checks, docs_only=False):
-    required, rabbit = 0, 0
+    required = 0
     for check in checks:
         require(type(check.get('isRequired')) is bool, 'Required-check metadata unavailable')
         kind = check.get('__typename')
@@ -295,19 +177,12 @@ def passing_checks(checks, docs_only=False):
         else:
             raise RuntimeError('Unknown GitHub check metadata')
         require(isinstance(name, str) and name, 'Malformed GitHub check name')
-        if docs_only and name == 'CodeRabbit':
+        if name in ('CodeRabbit', 'pullfrog-approval'):
             continue
         if check['isRequired']:
             required += 1
-            require(success, 'Required check is missing, pending or unsuccessful')
-        if name == 'CodeRabbit':
-            creator = check.get('creator')
-            require(kind == 'StatusContext' and isinstance(creator, dict)
-                and creator.get('login') == 'coderabbitai' and success,
-                'CodeRabbit review status is not verified successful')
-            rabbit += 1
+        require(success, 'CI check is missing, pending or unsuccessful')
     require(required > 0, 'Required check collection empty')
-    require(docs_only or rabbit == 1, 'CodeRabbit review status missing or ambiguous')
     return required
 
 
@@ -319,33 +194,20 @@ def check_merge(number):
     require(initial.get('state') == 'OPEN' and initial.get('isDraft') is False,
         'Pull request is closed or draft')
     docs_only = is_docs_only(read_connection('files', number, head, deadline))
-    reviews, comments, review_url = [], [], None
+    reviews, review_url = [], None
     if not docs_only:
         reviews = read_connection('reviews', number, head, deadline)
-        comments = [] if exact_head_reviews(reviews, head) else read_connection('comments', number, head, deadline)
-        try:
-            review_url = completed_review(reviews, head, number, comments)
-        except RuntimeError as error:
-            # A branch-update merge commit carries no review of its own: accept the
-            # CodeRabbit success status on it (checked below) plus a completed formal
-            # review of its first parent, the previously reviewed branch head.
-            if str(error) != 'Completed CodeRabbit review of final head missing':
-                raise
-            review_url = completed_review(reviews, update_parent(number, head, deadline), number)
-            comments = []
+        review_url = completed_review(reviews, head, number)
     checks = passing_checks(read_connection('checks', number, head, deadline), docs_only)
     threads = read_connection('threads', number, head, deadline)
     require(all(type(thread.get('isResolved')) is bool for thread in threads),
         'Review conversation metadata incomplete')
     require(all(thread['isResolved'] for thread in threads),
         'Unresolved review conversation blocks merge')
-    if comments:
-        refreshed_reviews = read_connection('reviews', number, head, deadline)
-        refreshed_comments = read_connection('comments', number, head, deadline)
-        require(refreshed_reviews == reviews and refreshed_comments == comments,
-            'CodeRabbit review evidence changed during preflight')
-        require(completed_review(refreshed_reviews, head, number, refreshed_comments) == review_url,
-            'CodeRabbit review evidence changed during preflight')
+    if not docs_only:
+        refreshed = read_connection('reviews', number, head, deadline)
+        require(refreshed == reviews and completed_review(refreshed, head, number) == review_url,
+            'Pullfrog review evidence changed during preflight')
     final = gh_query(query_for(), number, deadline)
     require(pr_head(final) == head, 'Pull request head changed during preflight')
     require(final.get('state') == 'OPEN' and final.get('isDraft') is False

@@ -151,16 +151,19 @@ def test_preview_changed_complete_selection_removes_replacements(tmp_path, snaps
     assert manifest['counts']['unproven'] == 3
 
 
-def prepare_apply(tmp_path, snapshot):
+def prepare_apply(tmp_path, snapshot, destination_version='3.86.0', api_shape=False):
     inputs, rows = saved_inputs(tmp_path, snapshot)
     config = yaml.safe_load(inputs.read_text())
     for index, row in enumerate(rows):
+        if api_shape:
+            row.pop('isDraft')
+            row['updatedAt'] = '2026-01-05T00:00:00.000Z'
         if row['assetProfile']['dataSource'] == 'MANUAL':
             row['assetProfile']['symbol'] = f'00000000-0000-4000-8000-{index:012d}'
     destination = tmp_path / 'destination.json'
     destination.write_text(json.dumps({'count': len(rows), 'activities': rows}, default=float))
     config['snapshot']['sha256'] = migration.digest(destination.read_bytes())
-    config['snapshot']['destination_version'] = '3.86.0'
+    config['snapshot']['destination_version'] = destination_version
     inputs.write_text(yaml.safe_dump(config))
     manifest_hash = migration.preview(inputs, tmp_path / 'review')
     manifest = tmp_path / 'review/manifest.yaml'
@@ -169,7 +172,7 @@ def prepare_apply(tmp_path, snapshot):
     state.mkdir(mode=0o700)
     approval = {'schema': 'degiro-migration-approval-v1', 'authorization': 'apply-reviewed-comments',
         'host': 'https://portfolio.example', 'owner_id': 'synthetic-owner',
-        'manifest_sha256': manifest_hash, 'destination_version': '3.86.0',
+        'manifest_sha256': manifest_hash, 'destination_version': destination_version,
         'destination_image': 'sha256:' + 'a' * 64,
         'target_source_commit': 'ef47c0d1b2c48fa4e97fb381561b514e657928cf',
         'state_dir': str(state), 'writers_stopped': True, 'requests_settled': True,
@@ -185,8 +188,8 @@ def prepare_apply(tmp_path, snapshot):
     return inputs, manifest, manifest_hash, permit, migration.digest(permit.read_bytes()), tmp_path / 'operation.yaml', rows
 
 
-def apply_fake(tmp_path, snapshot, monkeypatch, effect=None):
-    args = prepare_apply(tmp_path, snapshot)
+def apply_fake(tmp_path, snapshot, monkeypatch, effect=None, destination_version='3.86.0', api_shape=False):
+    args = prepare_apply(tmp_path, snapshot, destination_version, api_shape)
     rows = migration.exact_json((tmp_path / 'destination.json').read_bytes())['activities']
     puts = []
     def request(method, host, token, row_id=None, payload=None):
@@ -216,6 +219,111 @@ def test_apply_only_changes_reviewed_comments_with_intent_first(tmp_path, snapsh
         migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
 
 
+@pytest.mark.parametrize('version', ['3.86.0', '3.86.0+build.7', '3.93.0', '3.100.0',
+                                    '3.93.0-rc.1', '4.0.0'])
+def test_apply_and_rollback_accept_newer_versions_without_source_pin(tmp_path, snapshot, monkeypatch, version):
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch, destination_version=version)
+    permit = migration.keyed_yaml(args[3].read_bytes())
+    permit.pop('target_source_commit')
+    args[3].write_bytes(migration.yaml_bytes(permit))
+    args = (*args[:4], migration.digest(args[3].read_bytes()), *args[5:])
+    before = deepcopy(rows)
+    migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    assert len(puts) == 3
+    assert [{**row, 'comment': old['comment']} for row, old in zip(rows, before)] == before
+    rollback = rollback_permit(args)
+    def request(method, host, token, row_id=None, payload=None):
+        if method == 'GET':
+            return {'count': len(rows), 'activities': deepcopy(rows)}
+        puts.append(row_id)
+        next(row for row in rows if row['id'] == row_id)['comment'] = payload['comment']
+    monkeypatch.setattr(migration, 'maintenance_request', request)
+    migration.rollback(args[5], args[1], args[2], rollback, migration.digest(rollback.read_bytes()),
+        'https://portfolio.example', 'synthetic-token')
+    assert len(puts) == 6 and rows == before
+    assert migration.keyed_yaml(args[5].read_bytes())['status'] == 'rolled_back'
+
+
+def test_apply_and_rollback_real_api_shape_and_backend_timestamps(tmp_path, snapshot, monkeypatch):
+    def effect(rows, row_id, payload):
+        row = next(row for row in rows if row['id'] == row_id)
+        row.update(comment=payload['comment'], updatedAt='2026-01-06T00:00:00.000Z')
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch, effect,
+                                 destination_version='3.93.0', api_shape=True)
+    before = deepcopy(rows)
+    migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    record = migration.keyed_yaml(args[5].read_bytes())
+    assert all(entry['postimage']['updatedAt'] == '2026-01-06T00:00:00.000Z'
+               for entry in record['rows'].values())
+    capture = tmp_path / 'after.json'
+    capture.write_bytes(migration.numeric_json({'count': len(rows), 'activities': rows}))
+    assert set(migration.inspect(args[5], args[1], args[2], capture,
+                                migration.digest(capture.read_bytes())).values()) == {'converted'}
+    permit = rollback_permit(args)
+    def request(method, host, token, row_id=None, payload=None):
+        if method == 'GET':
+            return {'count': len(rows), 'activities': deepcopy(rows)}
+        row = next(row for row in rows if row['id'] == row_id)
+        row.update(comment=payload['comment'], updatedAt='2026-01-07T00:00:00.000Z')
+    monkeypatch.setattr(migration, 'maintenance_request', request)
+    migration.rollback(args[5], args[1], args[2], permit, migration.digest(permit.read_bytes()),
+                       'https://portfolio.example', 'synthetic-token')
+    assert [{**row, 'updatedAt': old['updatedAt']} for row, old in zip(rows, before)] == before
+    record = migration.keyed_yaml(args[5].read_bytes())
+    assert all(entry['rollback_postimage']['updatedAt'] == '2026-01-07T00:00:00.000Z'
+               for entry in record['rows'].values())
+
+
+@pytest.mark.parametrize('drift', ['protected-timestamp', 'owned-amount', 'regressed-timestamp'])
+def test_apply_real_shape_keeps_context_guards(tmp_path, snapshot, monkeypatch, drift):
+    def effect(rows, row_id, payload):
+        row = next(row for row in rows if row['id'] == row_id)
+        row.update(comment=payload['comment'], updatedAt='2026-01-06T00:00:00.000Z')
+        if drift == 'protected-timestamp':
+            rows[0]['updatedAt'] = '2026-01-06T00:00:00.000Z'
+        elif drift == 'owned-amount':
+            row['fee'] += 1
+        else:
+            row['updatedAt'] = '2026-01-04T00:00:00.000Z'
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch, effect,
+                                 destination_version='3.93.0', api_shape=True)
+    with pytest.raises(RuntimeError):
+        migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    assert len(puts) == 1
+    assert any(entry['status'] == 'pending' for entry in migration.keyed_yaml(args[5].read_bytes())['rows'].values())
+
+
+def test_comment_payload_uses_real_draft_tags_without_isdraft(tmp_path, snapshot):
+    args = prepare_apply(tmp_path, snapshot, api_shape=True)
+    row = deepcopy(args[-1][1])
+    row['tags'] = [{'id': '0c077abd-eca2-4cbb-818c-6cefbf2d169a'}]
+    with pytest.raises(RuntimeError, match='Unsupported activity context'):
+        migration.comment_payload(row, 'DEGIRO#v1#123:TRADE:10')
+
+
+@pytest.mark.parametrize('version', ['3.85.99', '2.100.0', '3.86.0-rc.1', '3.93',
+                                    'latest', '03.93.0', '3.93.0-01', '3.93.0+', '3.93.0\n'])
+def test_apply_refuses_unsupported_versions_before_authentication(tmp_path, snapshot, monkeypatch, version):
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch, destination_version=version)
+    monkeypatch.setattr(migration, 'maintenance_token', lambda *a: pytest.fail('Unexpected authentication'))
+    with pytest.raises(RuntimeError, match='at least 3.86.0'):
+        migration.apply(*args[:6], 'https://portfolio.example', None)
+    assert not puts and not args[5].exists()
+
+
+@pytest.mark.parametrize('field', ['destination_version', 'destination_image'])
+def test_apply_newer_version_still_requires_matching_destination(tmp_path, snapshot, monkeypatch, field):
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch, destination_version='3.93.0')
+    permit = migration.keyed_yaml(args[3].read_bytes())
+    permit[field] = '3.94.0' if field == 'destination_version' else 'sha256:' + 'b' * 64
+    args[3].write_bytes(migration.yaml_bytes(permit))
+    args = (*args[:4], migration.digest(args[3].read_bytes()), *args[5:])
+    monkeypatch.setattr(migration, 'maintenance_token', lambda *a: pytest.fail('Unexpected authentication'))
+    with pytest.raises(RuntimeError, match='Destination image or version changed'):
+        migration.apply(*args[:6], 'https://portfolio.example', None)
+    assert not puts and not args[5].exists()
+
+
 @pytest.mark.parametrize('failure', ['timeout', 'normalization', 'protected', 'partial'])
 def test_apply_stops_pending_without_retry(tmp_path, snapshot, monkeypatch, failure):
     def effect(rows, row_id, payload):
@@ -238,8 +346,9 @@ def test_apply_stops_pending_without_retry(tmp_path, snapshot, monkeypatch, fail
     assert len(puts) == (2 if failure == 'partial' else 1)
 
 
-def test_apply_pending_qualification_stale_snapshot_and_decimal_loss_refuse(tmp_path, snapshot, monkeypatch):
-    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch)
+@pytest.mark.parametrize('version', ['3.86.0', '3.93.0'])
+def test_apply_pending_qualification_stale_snapshot_and_decimal_loss_refuse(tmp_path, snapshot, monkeypatch, version):
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch, destination_version=version)
     permit = migration.keyed_yaml(args[3].read_bytes())
     for qualification in permit['qualifications'].values():
         qualification['target_dto']['status'] = 'pending'
@@ -408,3 +517,70 @@ def test_rollback_interruption_remains_uncertain_and_manual_drift_blocks(tmp_pat
     changed['fee'] = 999
     states = migration.inspect_rows(record, {'count': len(rows), 'activities': rows}, reviewed['snapshot'])
     assert states[changed['id']] == 'changed'
+
+
+@pytest.mark.parametrize('timestamp', [None, 42, '2026-01-06T00:00:00', 'invalid'])
+def test_inspect_invalid_owned_timestamp_reports_changed(tmp_path, snapshot, monkeypatch, timestamp):
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch, api_shape=True)
+    migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    record, reviewed = migration.migration_journal(args[5], args[1], args[2])
+    row = next(r for r in rows if r['id'] in record['rows'])
+    if timestamp is None:
+        del row['updatedAt']
+    else:
+        row['updatedAt'] = timestamp
+    states = migration.inspect_rows(record, {'count': len(rows), 'activities': rows}, reviewed['snapshot'])
+    assert states[row['id']] == 'changed'
+
+
+@pytest.mark.parametrize('credential', ['access', 'bearer'])
+def test_shipped_cli_authenticates_real_apply_and_rollback_once(tmp_path, snapshot, monkeypatch, credential):
+    from scripts import migrate_degiro_identity as cli
+    from ghostfolio_degiro_sync import ghostfolio
+    args = prepare_apply(tmp_path, snapshot, api_shape=True)
+    rows = migration.exact_json((tmp_path / 'destination.json').read_bytes())['activities']
+    original_rows = deepcopy(rows)
+    monkeypatch.setenv('GHOST_HOST', 'https://portfolio.example')
+    monkeypatch.delenv('GHOST_TOKEN', raising=False)
+    monkeypatch.delenv('GHOST_ACCESS_TOKEN', raising=False)
+    monkeypatch.setenv('GHOST_ACCESS_TOKEN' if credential == 'access' else 'GHOST_TOKEN',
+                       'synthetic-access' if credential == 'access' else 'synthetic-bearer')
+    exchanges, puts = [], []
+    def exchange(host, access):
+        assert (host, access) == ('https://portfolio.example', 'synthetic-access')
+        exchanges.append(host)
+        return 'synthetic-bearer'
+    monkeypatch.setattr(ghostfolio, 'ghost_exchange_access_token', exchange)
+    def transport(method, host, token, row_id=None, payload=None):
+        assert (host, token) == ('https://portfolio.example', 'synthetic-bearer')
+        if method == 'GET':
+            return {'count': len(rows), 'activities': deepcopy(rows)}
+        puts.append(row_id)
+        next(row for row in rows if row['id'] == row_id)['comment'] = payload['comment']
+    monkeypatch.setattr(migration, 'maintenance_request', transport)
+    common = ['--manifest', str(args[1]), '--manifest-sha256', args[2], '--journal', str(args[5]),
+              '--host', 'https://portfolio.example']
+    assert cli.main(['apply', '--inputs', str(args[0]), '--approval', str(args[3]),
+                     '--approval-sha256', args[4], *common]) == 0
+    assert len(puts) == 3 and len(exchanges) == (1 if credential == 'access' else 0)
+    assert migration.maintenance_request is transport
+    permit = rollback_permit(args)
+    assert cli.main(['rollback', '--approval', str(permit),
+                     '--approval-sha256', migration.digest(permit.read_bytes()), *common]) == 0
+    assert len(puts) == 6 and len(exchanges) == (2 if credential == 'access' else 0)
+    assert rows == original_rows
+    assert migration.maintenance_request is transport
+
+
+
+def test_cli_auth_refuses_ambiguous_or_foreign_credentials_without_exchange(monkeypatch):
+    from ghostfolio_degiro_sync import ghostfolio
+    monkeypatch.setenv('GHOST_HOST', 'https://portfolio.example')
+    monkeypatch.setenv('GHOST_TOKEN', 'synthetic-bearer')
+    monkeypatch.setenv('GHOST_ACCESS_TOKEN', 'synthetic-access')
+    monkeypatch.setattr(ghostfolio, 'ghost_exchange_access_token', lambda *a: pytest.fail('unexpected login'))
+    with pytest.raises(RuntimeError, match='exactly one'):
+        migration.maintenance_token('https://portfolio.example', None)
+    monkeypatch.delenv('GHOST_TOKEN')
+    with pytest.raises(RuntimeError, match='origin'):
+        migration.maintenance_token('https://different.example', None)

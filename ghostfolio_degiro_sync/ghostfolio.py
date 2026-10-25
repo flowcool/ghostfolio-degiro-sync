@@ -148,6 +148,17 @@ def index_existing_activities(body: Any, target_account: Any, *, now: datetime |
         if row["id"] in identities:
             raise RuntimeError("Duplicate Ghostfolio created activity identity")
         identities.add(row["id"])
+        if row.get("accountId") != target_account["id"]:
+            # A golden snapshot may contain unrelated historical rows that are
+            # incomplete or from another provider. Preserve them for ownership
+            # checks, but validate only the selected target account.
+            profile = row.get("assetProfile", row.get("SymbolProfile"))
+            if isinstance(profile, dict) and isinstance(profile.get("symbol"), str) and profile.get("symbol") \
+                    and isinstance(profile.get("dataSource"), str) and profile.get("dataSource"):
+                result.append({**row, "symbol": profile["symbol"], "dataSource": profile["dataSource"]})
+            else:
+                result.append(row)
+            continue
         for field in ("quantity", "unitPrice", "fee"):
             if accounting_module.financial_decimal(row.get(field)) < 0:
                 raise RuntimeError("Invalid or redacted Ghostfolio financial context")
@@ -161,9 +172,6 @@ def index_existing_activities(body: Any, target_account: Any, *, now: datetime |
             raise RuntimeError("Missing or invalid Ghostfolio asset profile context")
         normalized = {**row, "symbol": profile["symbol"], "dataSource": profile["dataSource"]}
         accounting_module.broker_instant(row.get("date"))
-        if row.get("accountId") != target_account["id"]:
-            result.append(normalized)
-            continue
         if profile["dataSource"] not in ("YAHOO", "MANUAL"):
             raise RuntimeError("Unsupported target asset data source")
         if row.get("type") not in ("BUY", "SELL", "DIVIDEND", "FEE", "INTEREST"):
@@ -192,7 +200,7 @@ def match_manual_activity(activity: Any, entries: Any) -> Any:
     nearby = []
     limit = 3 if activity["type"] == "DIVIDEND" else 2
     for row in entries:
-        if (row["accountId"], row["type"], row["symbol"]) != (
+        if (row.get("accountId"), row.get("type"), row.get("symbol")) != (
                 activity["accountId"], activity["type"], activity["symbol"]):
             continue
         gap = abs((datetime.fromisoformat(accounting_module.broker_instant(row["date"])).date() - day).days)

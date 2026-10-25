@@ -61,12 +61,13 @@ adds `feature`, `fix`, `documentation`, `maintenance` and `breaking-change` from
 conventional PR title; it is advisory and never a required check. A
 `breaking-change` or `compat` PR needs a filled "Release impact" section.
 
-## CodeRabbit
+## Pullfrog review
 
-`.coderabbit.yaml` enables automatic reviews for every base branch and draft
-PRs, so stacked PRs are reviewed. Reviews beyond the plan's included hourly
-allowance use usage-based billing once the trial ends; manage it in the
-CodeRabbit billing settings. A CodeRabbit review is not a substitute for CI.
+Pullfrog is the sole PR reviewer. A completed review must cover the exact final
+head. Resolve actionable conversations and require all CI checks to pass before
+running `scripts/merge_pr.py`. Ignore the known sticky `pullfrog-approval` status
+alone. Docs-only changes need CI and resolved conversations only.
+CodeRabbit automatic reviews are disabled in `.coderabbit.yaml`.
 
 ## Rollback
 

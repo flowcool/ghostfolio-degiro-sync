@@ -41,6 +41,15 @@ def test_exact_comparison_retains_wire_decimals_and_zero_tolerance():
     assert (expected, observed) == before
 
 
+def test_manual_uuid_profile_rewrite_is_coherent():
+    expected = candidate('FEE', 'FEE')
+    expected.update(dataSource='MANUAL', symbol='GF_DEGIRO_123_FEE_EUR')
+    observed = {**expected, 'id': 'row-a', 'symbol': '00000000-0000-4000-8000-000000000001'}
+    report = diagnostics.reconcile_activities([expected], [observed], '2026-01-01', '2026-01-31')
+    assert report[0]['status'] == 'coherent'
+    assert report[0]['checks']['symbol'] == 'equal'
+
+
 def test_dividend_activity_quantity_is_not_security_quantity():
     expected = candidate('DIVIDEND', 'DIVIDEND')
     report = diagnostics.reconcile_activities([expected], [{**expected, 'id': 'row-a'}],
@@ -140,3 +149,12 @@ def test_no_dividend_report_and_unavailable_units_are_explicit():
     assert 'unitPrice unavailable' in text
     assert 'Action: Inspect evidence; no activity selected.' in text
     assert check_report(text) == []
+
+
+def test_manual_matching_skips_foreign_rows_without_profile_symbol():
+    from ghostfolio_degiro_sync.ghostfolio import match_manual_activity
+    activity = {'accountId': 'target-a', 'type': 'BUY', 'symbol': 'AAPL',
+                'date': '2026-01-01T00:00:00Z', 'quantity': 1}
+    incomplete_foreign = {'accountId': 'other', 'type': 'BUY',
+                          'date': '2026-01-01T00:00:00Z', 'quantity': 1}
+    assert not match_manual_activity(activity, [incomplete_foreign])

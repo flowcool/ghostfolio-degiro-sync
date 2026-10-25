@@ -44,6 +44,8 @@ RUN python -m pip install --no-cache-dir --no-deps . \
     && python -m pip uninstall -y pip \
     && rm -rf build ghostfolio_degiro_sync.egg-info
 COPY scripts/recover_degiro.py ./scripts/recover_degiro.py
+COPY degiro_identity_maintenance.py ./degiro_identity_maintenance.py
+COPY scripts/migrate_degiro_identity.py ./scripts/migrate_degiro_identity.py
 COPY scripts/check_scheduler.py ./scripts/check_scheduler.py
 COPY third_party/bitwarden/ /usr/local/share/bitwarden/
 RUN chmod 755 /app/entrypoint.sh \

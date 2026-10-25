@@ -34,50 +34,19 @@ Use synthetic inputs and isolated state. Do not attach secrets or private data.
 
 State whether AI assisted this change and what the author verified.
 
-## CodeRabbit review
+## Pullfrog review
 
-Review triggering is managed externally. Record missing, pending or
-rate-limited coverage as a blocker; this template does not authorize a trigger.
+- [ ] Completed Pullfrog review covers the exact final head.
+- [ ] Actionable threads are resolved and all CI checks pass.
 
-- [ ] Verify that a review completed and covers the final PR head; a walkthrough,
-      summary, skipped notice or rate-limit notice alone is not review evidence.
-- [ ] Address confirmed findings and record the review link and reviewed head SHA.
+Review evidence: <!-- review URL and full reviewed SHA -->
 
-After another push, verify completed coverage of the new final head.
-Do not treat CodeRabbit as a substitute for CI or the repository's required
-independent review.
+CodeRabbit is not used. A sticky `pullfrog-approval` status alone does not block
+merge. Every other CI check must pass. Docs-only changes (`openspec/`, `docs/`
+or `*.md`) need CI and resolved conversations only.
 
-Review evidence: <!-- completed review URL and reviewed commit SHA -->
-
-Before merging, run `.venv/bin/python scripts/merge_pr.py <number>`.
-Use `--method squash` or `--method rebase` to select an alternative to the
-default merge commit. The helper verifies repository settings and every
-effective base-branch rule before invoking the selected method.
-This is the execution entry point: it runs the live preflight and invokes
-`gh pr merge --match-head-commit` only after validated readiness. A preflight
-exception or malformed proof makes zero merge calls. There is no auto/admin mode.
-Use `.venv/bin/python scripts/check_pr_merge.py <number>` for read-only inspection.
-The read-only preflight checks completed final-head CodeRabbit review evidence,
-required CI, review status, complete conversations and GitHub eligibility, then
-rechecks the head. The execution entry point pins its returned SHA for the merge.
-It performs no merge, comment, resolution or review trigger and grants no
-production authority. GitHub remains authoritative at the actual merge.
-Submitted final-head reviews are authoritative. When none exists, the helper can
-accept one authenticated CodeRabbit bot comment containing its machine-readable
-`final_review_risk_coverage` marker: both source and covered commit must equal the
-final head and kind must be `reviewed`. A summary alone, reused/stale coverage,
-malformed or ambiguous evidence, a pending/changes-requested formal review, and
-skipped/rate-limited reviews fail closed. Comments use the same bounded pagination
-and head checks. Comment-based readiness also re-reads reviews and comments at
-the end and refuses changed or deleted evidence and new formal vetoes. These are
-sequential snapshots: evidence can still change after preflight, so inspect any
-new reviewer update before merging. GitHub pins the head at merge, but the
-review/check snapshots and merge are separate operations. If the merge command
-fails or times out, inspect the actual GitHub state before retrying; the helper
-reports command success, not independently verified merged state.
-A PR that changes only `openspec/`, `docs/` or `*.md` files needs no CodeRabbit
-evidence (the CodeRabbit status is ignored); required checks, resolved threads and
-clean GitHub eligibility still apply. After a branch-update merge commit, a successful
-CodeRabbit status on the head plus a completed review of its first parent is accepted, when the head is a GitHub-signed (web-flow) merge of the current base tip.
-There is no other review-reuse exception or bypass flag. Roll back this
-evidence-format support with a scoped Git revert; no production action is needed.
+Use `.venv/bin/python scripts/check_pr_merge.py <number>` for read-only
+inspection. Use `.venv/bin/python scripts/merge_pr.py <number>` to merge.
+The versioned helper requires fresh final-head evidence, verifies branch merge
+policy, pins the evaluated head with `--match-head-commit` and offers no admin or auto-merge bypass.
+After a failed or uncertain merge, inspect GitHub before any retry.

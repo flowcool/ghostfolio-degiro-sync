@@ -27,19 +27,9 @@ def metadata():
 
 
 def review():
-    return {'id': 'review-100', 'author': {'login': 'coderabbitai'},
-        'state': 'COMMENTED', 'commit': {'oid': HEAD}, 'body': '', 'url': URL,
+    return {'id': 'review-100', 'author': {'login': 'pullfrog', '__typename': 'Bot'},
+        'state': 'COMMENTED', 'commit': {'oid': HEAD}, 'body': 'Review complete: no blockers.', 'url': URL,
         'submittedAt': '2026-10-09T12:00:00Z'}
-
-
-def coverage_comment():
-    coverage = {'sourceCommitId': HEAD, 'coveredCommitId': HEAD, 'kind': 'reviewed'}
-    return {'id': 'comment-200', 'author': {'login': 'coderabbitai', '__typename': 'Bot'},
-        'url': COMMENT_URL, 'createdAt': '2026-10-09T12:00:00Z',
-        'updatedAt': '2026-10-09T13:00:00Z',
-        'body': '<!-- final_review_risk_start -->\n'
-            '<!-- final_review_risk_coverage:' + json.dumps(coverage) + ' -->\n'
-            '<!-- final_review_risk_end -->'}
 
 
 @pytest.fixture
@@ -87,177 +77,11 @@ def github(monkeypatch):
     return data
 
 
-def test_authenticated_final_head_incremental_comment_is_completed_evidence(github):
-    github['reviews'][None]['nodes'][0]['commit']['oid'] = 'b' * 40
-    github['comments'][None]['nodes'] = [coverage_comment()]
-    assert preflight.check_merge(24)['review_url'] == COMMENT_URL
-
-
-@pytest.mark.parametrize('case', ['wrong_author', 'human_author', 'missing_author',
-    'stale_source', 'stale_covered', 'not_reviewed', 'duplicate_marker', 'bad_json',
-    'duplicate_field', 'extra_field', 'invalid_sha', 'missing_start', 'missing_end',
-    'outside_section', 'rate_limited', 'skipped', 'paused', 'in_progress',
-    'progress_marker', 'wrong_url', 'wrong_pr', 'bad_updated', 'naive_time',
-    'before_created', 'before_formal', 'missing_body', 'summary_only'])
-def test_comment_evidence_fails_closed(github, case):
-    github['reviews'][None]['nodes'][0]['commit']['oid'] = 'b' * 40
-    comment = coverage_comment()
-    github['comments'][None]['nodes'] = [comment]
-    if case == 'wrong_author':
-        comment['author']['login'] = 'untrusted'
-    elif case == 'human_author':
-        comment['author']['__typename'] = 'User'
-    elif case == 'missing_author':
-        comment['author'] = None
-    elif case in ('stale_source', 'stale_covered', 'not_reviewed', 'extra_field', 'invalid_sha'):
-        fields = {'sourceCommitId': HEAD, 'coveredCommitId': HEAD, 'kind': 'reviewed'}
-        if case == 'stale_source': fields['sourceCommitId'] = 'b' * 40
-        elif case == 'stale_covered': fields['coveredCommitId'] = 'b' * 40
-        elif case == 'not_reviewed': fields['kind'] = 'reused'
-        elif case == 'extra_field': fields['unknown'] = True
-        else: fields['coveredCommitId'] = 'invalid'
-        comment['body'] = comment['body'].replace(
-            json.dumps({'sourceCommitId': HEAD, 'coveredCommitId': HEAD, 'kind': 'reviewed'}),
-            json.dumps(fields))
-    elif case == 'duplicate_marker':
-        comment['body'] += '\n' + comment['body']
-    elif case == 'bad_json':
-        comment['body'] = comment['body'].replace('"kind": "reviewed"', '"kind": invalid')
-    elif case == 'duplicate_field':
-        comment['body'] = comment['body'].replace('"kind": "reviewed"',
-            '"kind": "pending", "kind": "reviewed"')
-    elif case in ('missing_start', 'missing_end'):
-        marker = 'start' if case == 'missing_start' else 'end'
-        comment['body'] = comment['body'].replace('<!-- final_review_risk_' + marker + ' -->', '')
-    elif case == 'outside_section':
-        comment['body'] = comment['body'].replace('<!-- final_review_risk_start -->\n', '')
-        comment['body'] += '\n<!-- final_review_risk_start -->'
-    elif case in ('rate_limited', 'skipped', 'paused', 'in_progress', 'progress_marker'):
-        comment['body'] += {'rate_limited': '\nRate limit exceeded', 'skipped': '\nReview skipped',
-            'paused': '\nReview paused', 'in_progress': '\nReview in progress',
-            'progress_marker': '\n<!-- review_in_progress -->'}[case]
-    elif case in ('wrong_url', 'wrong_pr'):
-        comment['url'] = 'https://untrusted.invalid' if case == 'wrong_url' else COMMENT_URL.replace('/24#', '/25#')
-    elif case in ('bad_updated', 'naive_time', 'before_created', 'before_formal'):
-        comment['updatedAt'] = {'bad_updated': None, 'naive_time': '2026-10-09T13:00:00',
-            'before_created': '2026-10-09T11:00:00Z', 'before_formal': '2026-10-09T12:30:00Z'}[case]
-        if case == 'before_formal':
-            github['reviews'][None]['nodes'][0]['submittedAt'] = '2026-10-09T14:00:00Z'
-    elif case == 'missing_body':
-        comment['body'] = None
-    else:
-        comment['body'] = 'Walkthrough only; no actionable comments.'
-    with pytest.raises(RuntimeError):
-        preflight.check_merge(24)
-
-
-@pytest.mark.parametrize('exact', [False, True])
-@pytest.mark.parametrize('state', ['CHANGES_REQUESTED', 'PENDING', 'DISMISSED'])
-def test_comment_does_not_override_formal_review_refusal(github, exact, state):
-    row = github['reviews'][None]['nodes'][0]
-    row['state'] = state
-    if not exact:
-        row['commit']['oid'] = 'b' * 40
-    github['comments'][None]['nodes'] = [coverage_comment()]
-    with pytest.raises(RuntimeError):
-        preflight.check_merge(24)
-
-
-def test_comment_pagination_and_multiple_final_head_evidence_are_not_truncated(github):
-    github['reviews'][None]['nodes'].clear()
-    github['comments'][None] = page([coverage_comment()], 'next')
-    other = coverage_comment()
-    other['id'] = 'comment-201'
-    other['url'] = COMMENT_URL.replace('-200', '-201')
-    github['comments']['next'] = page([other])
-    with pytest.raises(RuntimeError, match='ambiguous'):
-        preflight.check_merge(24)
-    assert any(cursor == 'next' for _, cursor in github['calls'])
-
-
-def test_comment_pagination_can_find_final_coverage_after_stale_comment(github):
-    github['reviews'][None]['nodes'].clear()
-    first = coverage_comment()
-    first['body'] = first['body'].replace(HEAD, 'b' * 40)
-    github['comments'][None] = page([first], 'next')
-    second = coverage_comment()
-    second['id'] = 'comment-201'
-    github['comments']['next'] = page([second])
-    assert preflight.check_merge(24)['review_url'] == COMMENT_URL
-
-
-def test_successful_comment_evidence_does_not_bypass_required_ci(github):
-    github['reviews'][None]['nodes'].clear()
-    github['comments'][None]['nodes'] = [coverage_comment()]
-    github['checks'][None]['nodes'][0]['conclusion'] = 'FAILURE'
-    with pytest.raises(RuntimeError, match='Required check'):
-        preflight.check_merge(24)
-
-
-@pytest.mark.parametrize('change', ['deleted', 'edited', 'formal_veto'])
-def test_comment_proof_changed_during_preflight_is_refused(github, monkeypatch, change):
-    github['reviews'][None]['nodes'].clear()
-    github['comments'][None]['nodes'] = [coverage_comment()]
-    original = preflight.gh_query
-
-    def query(*args, **kwargs):
-        result = original(*args, **kwargs)
-        if 'contexts(first:' in args[0]:
-            if change == 'deleted':
-                github['comments'][None]['nodes'].clear()
-            elif change == 'edited':
-                github['comments'][None]['nodes'][0]['body'] += '\nUpdated concern'
-            else:
-                veto = review()
-                veto.update(state='CHANGES_REQUESTED', submittedAt='2026-10-09T14:00:00Z')
-                github['reviews'][None]['nodes'] = [veto]
-        return result
-
-    monkeypatch.setattr(preflight, 'gh_query', query)
-    with pytest.raises(RuntimeError, match='evidence changed'):
-        preflight.check_merge(24)
-
-
 def test_exact_final_review_green_checks_and_complete_threads(github):
     assert preflight.check_merge(24) == {'ready': True, 'head': HEAD,
         'review_url': URL, 'required_checks': 1, 'docs_only': False}
     assert github['base_calls'] == 2
-    assert len(github['calls']) == 6
-
-
-@pytest.mark.parametrize('comment', [False, True])
-@pytest.mark.parametrize('fence', ['```', '~~~~'])
-def test_quoted_policy_is_not_a_review_status_notice(github, comment, fence):
-    policy = '\n' + fence + 'text\nSkipped, pending or rate-limited reviews are not evidence.\n' + fence
-    if comment:
-        github['reviews'][None]['nodes'].clear()
-        row = coverage_comment()
-        row['body'] += policy
-        github['comments'][None]['nodes'] = [row]
-    else:
-        github['reviews'][None]['nodes'][0]['body'] += policy
-    assert preflight.check_merge(24)['ready']
-
-
-@pytest.mark.parametrize('comment', [False, True])
-@pytest.mark.parametrize('fence', ['```', '~~~~'])
-@pytest.mark.parametrize('notice', [None, 'Review skipped', 'Review paused',
-    'Review in progress', 'Rate limit exceeded'])
-def test_new_policy_quote_preserves_real_notices_in_same_fence(github, comment, fence, notice):
-    policy = 'pending, skipped or rate-limited review is not evidence.'
-    body = fence + 'text\n' + policy + (' ' + notice if notice else '') + '\n' + fence
-    if comment:
-        github['reviews'][None]['nodes'].clear()
-        row = coverage_comment()
-        row['body'] += '\n' + body
-        github['comments'][None]['nodes'] = [row]
-    else:
-        github['reviews'][None]['nodes'][0]['body'] = body
-    if notice:
-        with pytest.raises(RuntimeError, match='not evidence'):
-            preflight.check_merge(24)
-    else:
-        assert preflight.check_merge(24)['ready']
+    assert len(github['calls']) == 7
 
 
 @pytest.mark.parametrize('notice', ['Review skipped', 'Review paused',
@@ -323,28 +147,6 @@ def test_newest_final_head_review_is_authoritative(github):
     ('conclusion', 'SKIPPED'), ('status', 'IN_PROGRESS'), ('isRequired', None)])
 def test_required_ci_is_not_optional(github, field, value):
     github['checks'][None]['nodes'][0][field] = value
-    with pytest.raises(RuntimeError):
-        preflight.check_merge(24)
-
-
-@pytest.mark.parametrize('case', ['empty_required', 'missing_rabbit', 'pending_rabbit',
-    'wrong_creator', 'duplicate_rabbit', 'wrong_head'])
-def test_check_provenance_and_completeness(github, case):
-    checks = github['checks'][None]['nodes']
-    if case == 'empty_required':
-        checks[0]['isRequired'] = False
-    elif case == 'missing_rabbit':
-        checks.pop()
-    elif case == 'pending_rabbit':
-        checks[1]['state'] = 'PENDING'
-    elif case == 'wrong_creator':
-        checks[1]['creator']['login'] = 'untrusted'
-    elif case == 'duplicate_rabbit':
-        other = deepcopy(checks[1])
-        other['id'] = 'rabbit-2'
-        checks.append(other)
-    else:
-        github['checks_head'] = 'b' * 40
     with pytest.raises(RuntimeError):
         preflight.check_merge(24)
 
@@ -501,7 +303,7 @@ def docs_only_pr(github):
     github['checks'][None]['nodes'] = github['checks'][None]['nodes'][:1]
 
 
-def test_docs_only_pr_is_ready_without_coderabbit_evidence(github):
+def test_docs_only_pr_is_ready_without_reviewer_evidence(github):
     docs_only_pr(github)
     assert preflight.check_merge(24) == {'ready': True, 'head': HEAD, 'review_url': None,
         'required_checks': 1, 'docs_only': True}
@@ -527,17 +329,17 @@ def test_docs_only_still_requires_threads_and_checks(github, case):
         preflight.check_merge(24)
 
 
-def test_docs_only_with_one_non_doc_path_needs_coderabbit(github):
+def test_docs_only_with_one_non_doc_path_needs_pullfrog(github):
     docs_only_pr(github)
     github['files'][None]['nodes'].append({'path': 'scripts/merge_pr.py'})
-    with pytest.raises(RuntimeError, match='CodeRabbit review of final head missing'):
+    with pytest.raises(RuntimeError, match='Pullfrog review of final head missing'):
         preflight.check_merge(24)
 
 
 def test_empty_file_list_is_not_docs_only(github):
     docs_only_pr(github)
     github['files'][None] = page([])
-    with pytest.raises(RuntimeError, match='CodeRabbit'):
+    with pytest.raises(RuntimeError, match='Pullfrog'):
         preflight.check_merge(24)
 
 
@@ -557,52 +359,75 @@ def test_incomplete_files_pagination_refuses_even_for_docs(github, case):
         preflight.check_merge(24)
 
 
-def branch_update_head(github, reviewed=True):
-    github['reviews'][None]['nodes'][0]['commit']['oid'] = 'e' * 40 if reviewed else 'd' * 40
-
-
-def test_branch_update_merge_commit_uses_parent_review_and_head_status(github):
-    branch_update_head(github)
-    proof = preflight.check_merge(24)
-    assert proof['review_url'] == URL and proof['docs_only'] is False
-
-
-def test_branch_update_needs_status_success_on_head(github):
-    branch_update_head(github)
-    github['checks'][None]['nodes'][1]['state'] = 'PENDING'
-    with pytest.raises(RuntimeError, match='CodeRabbit review status'):
-        preflight.check_merge(24)
-
-
-@pytest.mark.parametrize('case', ['unreviewed_parent', 'not_a_merge_commit', 'second_parent_only',
-    'second_parent_not_base_tip', 'unsigned', 'invalid_signature', 'foreign_signer'])
-def test_branch_update_fallback_fails_closed(github, case):
-    branch_update_head(github)
-    if case == 'unreviewed_parent':
-        branch_update_head(github, reviewed=False)
-    elif case == 'not_a_merge_commit':
-        github['parents'] = ['e' * 40]
-    elif case == 'second_parent_not_base_tip':
-        github['base_tip'] = 'f' * 40
-    elif case == 'unsigned':
-        github['signature'] = None
-    elif case == 'invalid_signature':
-        github['signature'] = {'isValid': False, 'signer': {'login': 'web-flow'}}
-    elif case == 'foreign_signer':
-        github['signature'] = {'isValid': True, 'signer': {'login': 'someone'}}
+@pytest.mark.parametrize('kind', ['Bot', 'User'])
+def test_only_pullfrog_bot_is_authoritative(github, kind):
+    github['reviews'][None]['nodes'][0]['author']['__typename'] = kind
+    if kind == 'Bot':
+        assert preflight.check_merge(24)['ready']
     else:
-        github['parents'] = ['c' * 40, 'e' * 40]
-    with pytest.raises(RuntimeError, match='CodeRabbit review of final head missing'):
+        with pytest.raises(RuntimeError, match='review of final head missing'):
+            preflight.check_merge(24)
+
+
+@pytest.mark.parametrize('name', ['CodeRabbit', 'pullfrog-approval', 'other-ci'])
+def test_only_retired_reviewer_and_sticky_approval_status_are_ignored(github, name):
+    github['checks'][None]['nodes'].append({'id': 'extra', '__typename': 'StatusContext',
+        'context': name, 'state': 'FAILURE', 'isRequired': False})
+    if name in ('CodeRabbit', 'pullfrog-approval'):
+        assert preflight.check_merge(24)['ready']
+    else:
+        with pytest.raises(RuntimeError, match='CI check'):
+            preflight.check_merge(24)
+
+
+@pytest.mark.parametrize('case', ['empty_required', 'wrong_head'])
+def test_check_provenance_and_completeness(github, case):
+    if case == 'empty_required':
+        github['checks'][None]['nodes'][0]['isRequired'] = False
+    else:
+        github['checks_head'] = 'b' * 40
+    with pytest.raises(RuntimeError):
         preflight.check_merge(24)
 
 
-def test_pr_template_preserves_one_body_and_external_review_contract():
+def test_review_evidence_changed_during_preflight_is_refused(github, monkeypatch):
+    original = preflight.gh_query
+    calls = 0
+
+    def query(*args, **kwargs):
+        nonlocal calls
+        if 'reviews(first:' in args[0]:
+            calls += 1
+            if calls == 2:
+                github['reviews'][None]['nodes'][0]['body'] = 'Changed review'
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(preflight, 'gh_query', query)
+    with pytest.raises(RuntimeError, match='evidence changed'):
+        preflight.check_merge(24)
+
+
+def test_pr_template_preserves_guarded_merge_contract():
     root = Path(__file__).resolve().parents[1]
     body = (root / '.github/pull_request_template.md').read_text()
     for section in ('Summary', 'Behavior', 'Release impact', 'Evidence',
-            'Verification', 'Merge Danger', 'AI assistance', 'CodeRabbit review'):
+            'Verification', 'Merge Danger', 'AI assistance', 'Pullfrog review'):
         assert body.count('## ' + section + '\n') == 1
-    assert 'managed externally' in body
-    assert '@coderabbitai' not in body and 'request another incremental pass' not in body
     assert 'check_pr_merge.py' in body and '--match-head-commit' in body
     assert '.github/pull_request_template.md' in (root / 'AGENTS.md').read_text()
+
+
+@pytest.mark.parametrize('earlier', [None, 'CHANGES_REQUESTED', 'COMMENTED'])
+def test_reply_reviews_neither_establish_coverage_nor_hide_a_veto(github, earlier):
+    reply = review()
+    reply.update(id='reply', body='', submittedAt='2026-10-09T13:00:00Z')
+    github['reviews'][None]['nodes'] = [reply]
+    if earlier:
+        summary = review()
+        summary['state'] = earlier
+        github['reviews'][None]['nodes'].insert(0, summary)
+    if earlier == 'COMMENTED':
+        assert preflight.check_merge(24)['review_url'] == URL
+    else:
+        with pytest.raises(RuntimeError):
+            preflight.check_merge(24)
