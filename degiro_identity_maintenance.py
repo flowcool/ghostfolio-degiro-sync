@@ -132,7 +132,8 @@ def validate_snapshot(snapshot, metadata):
         require('comment' in row and (row['comment'] is None or isinstance(row['comment'], str)), 'Missing or redacted comment')
         for key in ('quantity', 'unitPrice', 'fee'):
             require(type(row.get(key)) is int or isinstance(row.get(key), Decimal) and row[key].is_finite(), 'Missing or redacted financial number')
-        require(text(row.get('type')) and type(row.get('isDraft')) is bool and isinstance(row.get('tags'), list), 'Incomplete activity context')
+        require(text(row.get('type')) and ('isDraft' not in row or type(row['isDraft']) is bool)
+                and isinstance(row.get('tags'), list), 'Incomplete activity context')
         for key in ('accountId', 'currency'):
             require(key in row and (row[key] is None or text(row[key])), 'Missing activity context')
         instant(row.get('date'))
@@ -388,8 +389,10 @@ def comment_payload(row, comment):
     require(isinstance(profile, dict) and profile.get('dataSource') in ('YAHOO', 'MANUAL')
             and text(profile.get('symbol')) and profile['symbol'] == profile['symbol'].strip(),
             'Unsupported update profile')
+    from ghostfolio_degiro_sync import ghostfolio
     require(row['type'] in ('BUY', 'SELL', 'DIVIDEND', 'FEE', 'INTEREST')
-            and row.get('isDraft') is False and text(row.get('accountId'))
+            and ghostfolio.core.activity_is_active(row) and ghostfolio.core.activity_date_is_current(row)
+            and text(row.get('accountId'))
             and text(row.get('currency')), 'Unsupported activity context')
     payload = {key: row[key] for key in ('id', 'accountId', 'currency', 'date', 'type')}
     payload.update(comment=comment, symbol=profile['symbol'], dataSource=profile['dataSource'])
@@ -499,6 +502,18 @@ def persist(path, record):
     write_journal({'directory': path.parent, 'path': path, 'document': document})
 
 
+def owned_readback(expected, observed):
+    """Only an owned PUT can advance its backend-managed Order timestamp."""
+    require(isinstance(observed, dict), 'Missing owned activity readback')
+    comparable = observed
+    if 'updatedAt' in expected:
+        require(instant(observed.get('updatedAt')) >= instant(expected['updatedAt']),
+                'Owned activity timestamp regressed')
+        comparable = {**observed, 'updatedAt': expected['updatedAt']}
+    require(canonical_json(comparable) == canonical_json(expected), 'Owned activity context changed')
+    return observed
+
+
 def apply(inputs, manifest, manifest_sha256, approval, approval_sha256, journal, host, token):
     from contextlib import ExitStack
     import time
@@ -535,10 +550,12 @@ def apply(inputs, manifest, manifest_sha256, approval, approval_sha256, journal,
             file = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             os.close(file)
             persist(path, record)
-            def check():
+            def check(written=None):
                 fresh = maintenance_request('GET', host, token)
                 validate_snapshot(fresh, reviewed['snapshot'])
                 actual = {row['id']: row for row in fresh['activities']}
+                if written is not None:
+                    expected[written] = owned_readback(expected[written], actual.get(written))
                 require(actual.keys() == expected.keys() and all(canonical_json(actual[k]) == canonical_json(v)
                     for k, v in expected.items()), 'Destination context, protected rows or occupancy changed')
                 for source, data in captured.items():
@@ -555,7 +572,8 @@ def apply(inputs, manifest, manifest_sha256, approval, approval_sha256, journal,
                 persist(path, record)
                 maintenance_request('PUT', host, token, row_id, payloads[row_id])
                 expected[row_id] = {**expected[row_id], 'comment': reviewed['replacements'][row_id]['new_comment']}
-                check()
+                check(row_id)
+                records[row_id]['postimage'] = expected[row_id]
                 records[row_id]['status'] = 'verified'
                 persist(path, record)
             record['status'] = 'complete'
@@ -608,6 +626,15 @@ def inspect_rows(record, snapshot, metadata):
     result = {}
     for row_id, entry in record['rows'].items():
         row = actual.get(row_id)
+        before = entry['preimage']
+        if row is not None and 'updatedAt' in before:
+            # Fingerprints retain the original timestamp for old journals too.
+            # Exact observed timestamps remain in postimages, never in a PUT.
+            try:
+                if instant(row.get('updatedAt')) >= instant(before['updatedAt']):
+                    row = {**row, 'updatedAt': before['updatedAt']}
+            except (TypeError, ValueError, AttributeError):
+                pass
         fingerprint = digest(canonical_json(row))
         state = ('converted' if fingerprint == entry['after_fingerprint'] else
                  'original' if fingerprint == entry['before_fingerprint'] else
@@ -688,8 +715,10 @@ def rollback(journal, manifest, manifest_sha256, approval, approval_sha256, host
             batch, pause = qualified_approval(permit, reviewed, manifest_sha256, host,
                 [hydrate_row(record['rows'][row_id]['preimage']) for row_id in selected], 'rollback')
             expected = {row['id']: row for row in snapshot['activities']}
-            def check():
+            def check(written=None):
                 actual = {row['id']: row for row in fresh()['activities']}
+                if written is not None:
+                    expected[written] = owned_readback(expected[written], actual.get(written))
                 require(actual.keys() == expected.keys() and all(canonical_json(actual[key]) == canonical_json(value)
                     for key, value in expected.items()), 'Rollback protected context changed')
             check()
@@ -713,7 +742,8 @@ def rollback(journal, manifest, manifest_sha256, approval, approval_sha256, host
                 persist(path, record)
                 maintenance_request('PUT', host, token, row_id, payload)
                 expected[row_id] = {**expected[row_id], 'comment': entry['old_comment']}
-                check()
+                check(row_id)
+                entry['rollback_postimage'] = expected[row_id]
                 entry['rollback_status'] = 'verified'
                 persist(path, record)
             record['status'] = 'rolled_back'

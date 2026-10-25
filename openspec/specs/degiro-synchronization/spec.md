@@ -196,6 +196,8 @@ Qualify the exact target UpdateOrderDto and update effects from its pinned imple
 
 Persist each original row fingerprint, comment and bounded request as pending in a locked private YAML journal before dispatch. Prove exact post-write readback and unchanged protected rows before advancing. Stop on failed/uncertain HTTP, normalization, partial completion or changed context. Retain pending state and confirmed subsets; never retry automatically. An unchanged/old readback alone does not prove that a delayed request cannot complete. Independent completion/cancellation evidence is required before retry or reversal; otherwise keep the operation stopped.
 
+The API MAY omit `isDraft`; maintenance SHALL still enforce draft and exclusion tags. An owned comment PUT MAY advance only its row's backend-managed Order `updatedAt` monotonically. Maintenance SHALL retain the complete observed postimage, including that timestamp, for conversion and reversal. It SHALL NOT send timestamps in the update DTO or relax checks on other fields or protected rows.
+
 #### Scenario: Conversion and uncertain completion
 
 - **WHEN** `.venv/bin/python -m pytest -q tests/test_identity_migration.py -k apply` exercises exact qualified DTOs, MANUAL/zero values, stale manifests, concurrent writers, decimal loss, profile effects, partial success, delayed writes and timeouts

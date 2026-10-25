@@ -253,6 +253,13 @@ stored activity currency and actual profile identity, explicit fields and exact
 numeric JSON tokens. Numbers the target cannot preserve are refused. The engine
 never copies the entire GET row into a PUT.
 
+The real activities response can omit `isDraft`; activity/account draft and
+exclusion tags still determine eligibility. An owned comment PUT can advance
+the backend-managed Order `updatedAt`. Exact readback permits only this
+monotonic timestamp change on the row just written and records the complete
+postimage in the journal. All other fields and every protected row remain
+exact. Reversal records its own postimage; timestamps are never sent in a PUT.
+
 A private YAML journal persists and flushes each pending request before dispatch.
 Complete readback must preserve every field and every protected row except the
 approved comment. A failed request, normalization, profile effect or uncertain

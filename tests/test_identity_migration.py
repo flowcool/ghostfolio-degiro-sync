@@ -151,10 +151,13 @@ def test_preview_changed_complete_selection_removes_replacements(tmp_path, snaps
     assert manifest['counts']['unproven'] == 3
 
 
-def prepare_apply(tmp_path, snapshot, destination_version='3.86.0'):
+def prepare_apply(tmp_path, snapshot, destination_version='3.86.0', api_shape=False):
     inputs, rows = saved_inputs(tmp_path, snapshot)
     config = yaml.safe_load(inputs.read_text())
     for index, row in enumerate(rows):
+        if api_shape:
+            row.pop('isDraft')
+            row['updatedAt'] = '2026-01-05T00:00:00.000Z'
         if row['assetProfile']['dataSource'] == 'MANUAL':
             row['assetProfile']['symbol'] = f'00000000-0000-4000-8000-{index:012d}'
     destination = tmp_path / 'destination.json'
@@ -185,8 +188,8 @@ def prepare_apply(tmp_path, snapshot, destination_version='3.86.0'):
     return inputs, manifest, manifest_hash, permit, migration.digest(permit.read_bytes()), tmp_path / 'operation.yaml', rows
 
 
-def apply_fake(tmp_path, snapshot, monkeypatch, effect=None, destination_version='3.86.0'):
-    args = prepare_apply(tmp_path, snapshot, destination_version)
+def apply_fake(tmp_path, snapshot, monkeypatch, effect=None, destination_version='3.86.0', api_shape=False):
+    args = prepare_apply(tmp_path, snapshot, destination_version, api_shape)
     rows = migration.exact_json((tmp_path / 'destination.json').read_bytes())['activities']
     puts = []
     def request(method, host, token, row_id=None, payload=None):
@@ -239,6 +242,63 @@ def test_apply_and_rollback_accept_newer_versions_without_source_pin(tmp_path, s
         'https://portfolio.example', 'synthetic-token')
     assert len(puts) == 6 and rows == before
     assert migration.keyed_yaml(args[5].read_bytes())['status'] == 'rolled_back'
+
+
+def test_apply_and_rollback_real_api_shape_and_backend_timestamps(tmp_path, snapshot, monkeypatch):
+    def effect(rows, row_id, payload):
+        row = next(row for row in rows if row['id'] == row_id)
+        row.update(comment=payload['comment'], updatedAt='2026-01-06T00:00:00.000Z')
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch, effect,
+                                 destination_version='3.93.0', api_shape=True)
+    before = deepcopy(rows)
+    migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    record = migration.keyed_yaml(args[5].read_bytes())
+    assert all(entry['postimage']['updatedAt'] == '2026-01-06T00:00:00.000Z'
+               for entry in record['rows'].values())
+    capture = tmp_path / 'after.json'
+    capture.write_bytes(migration.numeric_json({'count': len(rows), 'activities': rows}))
+    assert set(migration.inspect(args[5], args[1], args[2], capture,
+                                migration.digest(capture.read_bytes())).values()) == {'converted'}
+    permit = rollback_permit(args)
+    def request(method, host, token, row_id=None, payload=None):
+        if method == 'GET':
+            return {'count': len(rows), 'activities': deepcopy(rows)}
+        row = next(row for row in rows if row['id'] == row_id)
+        row.update(comment=payload['comment'], updatedAt='2026-01-07T00:00:00.000Z')
+    monkeypatch.setattr(migration, 'maintenance_request', request)
+    migration.rollback(args[5], args[1], args[2], permit, migration.digest(permit.read_bytes()),
+                       'https://portfolio.example', 'synthetic-token')
+    assert [{**row, 'updatedAt': old['updatedAt']} for row, old in zip(rows, before)] == before
+    record = migration.keyed_yaml(args[5].read_bytes())
+    assert all(entry['rollback_postimage']['updatedAt'] == '2026-01-07T00:00:00.000Z'
+               for entry in record['rows'].values())
+
+
+@pytest.mark.parametrize('drift', ['protected-timestamp', 'owned-amount', 'regressed-timestamp'])
+def test_apply_real_shape_keeps_context_guards(tmp_path, snapshot, monkeypatch, drift):
+    def effect(rows, row_id, payload):
+        row = next(row for row in rows if row['id'] == row_id)
+        row.update(comment=payload['comment'], updatedAt='2026-01-06T00:00:00.000Z')
+        if drift == 'protected-timestamp':
+            rows[0]['updatedAt'] = '2026-01-06T00:00:00.000Z'
+        elif drift == 'owned-amount':
+            row['fee'] += 1
+        else:
+            row['updatedAt'] = '2026-01-04T00:00:00.000Z'
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch, effect,
+                                 destination_version='3.93.0', api_shape=True)
+    with pytest.raises(RuntimeError):
+        migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    assert len(puts) == 1
+    assert any(entry['status'] == 'pending' for entry in migration.keyed_yaml(args[5].read_bytes())['rows'].values())
+
+
+def test_comment_payload_uses_real_draft_tags_without_isdraft(tmp_path, snapshot):
+    args = prepare_apply(tmp_path, snapshot, api_shape=True)
+    row = deepcopy(args[-1][1])
+    row['tags'] = [{'id': '0c077abd-eca2-4cbb-818c-6cefbf2d169a'}]
+    with pytest.raises(RuntimeError, match='Unsupported activity context'):
+        migration.comment_payload(row, 'DEGIRO#v1#123:TRADE:10')
 
 
 @pytest.mark.parametrize('version', ['3.85.99', '2.100.0', '3.86.0-rc.1', '3.93',
