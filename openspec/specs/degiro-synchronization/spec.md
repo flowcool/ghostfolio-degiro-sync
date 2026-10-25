@@ -74,16 +74,21 @@ The connector SHALL produce BUY/SELL; gross DIVIDEND with its one matching tax a
 
 Proof: `.venv/bin/python -m pytest -q tests/test_degiro_trades.py tests/test_degiro_dividends.py tests/test_degiro_fees.py tests/test_degiro_cash_yield.py` reports passed. The 2026-10-10 real DRY_RUN proposed one zero Flatex INTEREST and one positive compensation INTEREST.
 
-### Requirement: Whole-account refusal
+### Requirement: Selected-account refusal
 
-Unknown or unsupported data, a tax without exactly one matching dividend, wrong units or a changed identity MUST stop all writes for the account. Old fund history and corporate actions are unsupported.
+Unknown or unsupported data for the selected target account, a tax without exactly one matching dividend, wrong units or a changed identity MUST stop all writes for that account. A golden snapshot MAY contain incomplete or unsupported activities belonging to other accounts; the connector SHALL preserve those rows for evidence and SHALL NOT let them block the selected account. Old fund history and corporate actions remain unsupported when they belong to the selected account.
 
-#### Scenario: Unsupported evidence
+#### Scenario: Unsupported selected-account evidence
 
-- **WHEN** such data is present
+- **WHEN** such data is present on the selected target account
 - **THEN** logs show `DEGIRO sync failed; unknown, incomplete or uncertain account state blocks writes` and nothing is written.
 
-Proof: `.venv/bin/python -m pytest -q tests/test_degiro_sync.py tests/test_degiro_dividends.py -k 'whole_account or ambiguous or unsupported or unknown'` reports passed.
+#### Scenario: Unrelated golden history
+
+- **WHEN** a golden snapshot contains incomplete or unsupported rows for another account and the selected account is valid
+- **THEN** those rows remain in the readback evidence and the selected account continues through reconciliation.
+
+Proof: `.venv/bin/python -m pytest -q tests/test_degiro_sync.py tests/test_degiro_dividends.py -k 'selected_account or ambiguous or unsupported or unknown'` reports passed.
 
 ### Requirement: Cash check and simulation
 
