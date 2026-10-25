@@ -243,12 +243,12 @@ def test_unsupported_target_data_source_blocks(snapshot, source):
 
 
 @pytest.mark.parametrize('field,value', [('symbol', ''), ('dataSource', ''), ('dataSource', None)])
-def test_foreign_profile_still_requires_well_formed_evidence(snapshot, field, value):
+def test_foreign_incomplete_profile_is_preserved_without_blocking_target(snapshot, field, value):
     foreign = opening_holding()
     foreign.update(id='foreign', accountId='other-account')
     foreign['assetProfile'][field] = value
-    with pytest.raises(RuntimeError):
-        run(snapshot, [opening_holding(), foreign], dry_run=False)
+    result = run(snapshot, [opening_holding(), foreign], dry_run=True)
+    assert len(result['proposed']) == 3
 
 
 def test_manual_csv_fee_overlap_requires_explicit_reconciliation(snapshot):
