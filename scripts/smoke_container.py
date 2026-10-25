@@ -80,7 +80,7 @@ assert len(files) == provenance["python_module_count"]
 assert tree.hexdigest() == provenance["python_tree_sha256"]
 assert not any(name.startswith(("DEGIRO_", "GHOST_TOKEN")) for name in os.environ)
 assert sorted(p.name for p in Path("/app").iterdir()) == ["entrypoint.sh", "ghostfolio_core.py", "ghostfolio_degiro_sync", "pyproject.toml", "requirements.txt", "scripts"]
-assert sorted(p.name for p in Path("/app/scripts").iterdir()) == ["check_scheduler.py", "recover_degiro.py"]
+assert sorted(p.name for p in Path("/app/scripts").iterdir()) == ["check_scheduler.py", "migrate_degiro_identity.py", "recover_degiro.py"]
 assert hashlib.sha256(Path("/app/scripts/recover_degiro.py").read_bytes()).hexdigest() == {recovery_hash!r}
 assert hashlib.sha256(Path("/app/scripts/check_scheduler.py").read_bytes()).hexdigest() == {health_hash!r}
 import runpy
