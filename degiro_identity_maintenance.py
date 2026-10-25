@@ -334,7 +334,26 @@ def preview(inputs, output):
     return manifest_hash
 
 
-TARGET_SOURCE_COMMIT = 'ef47c0d1b2c48fa4e97fb381561b514e657928cf'
+MINIMUM_DESTINATION_VERSION = (3, 86, 0)
+
+
+def supported_destination_version(version):
+    """Compare semantic versions with a floor, without pinning a target release."""
+    if not isinstance(version, str):
+        return False
+    matched = re.fullmatch(
+        r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
+        r'(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?'
+        r'(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?', version)
+    if matched is None:
+        return False
+    prerelease = matched[4]
+    if prerelease and any(part.isdecimal() and len(part) > 1 and part[0] == '0'
+                          for part in prerelease.split('.')):
+        return False
+    release = tuple(int(part) for part in matched.group(1, 2, 3))
+    return release > MINIMUM_DESTINATION_VERSION or (
+        release == MINIMUM_DESTINATION_VERSION and prerelease is None)
 
 
 def update_class(row):
@@ -361,7 +380,7 @@ def numeric_json(value):
 
 
 def comment_payload(row, comment):
-    """Ghostfolio 3.86 UpdateOrderDto allowlist, never a GET object echo."""
+    """Explicit Ghostfolio UpdateOrderDto allowlist, never a GET object echo."""
     from math import isfinite
     from ghostfolio_degiro_sync import identity
     identity.parse_identity(comment, row['type'])
@@ -430,8 +449,8 @@ def qualified_approval(permit, reviewed, manifest_sha256, host, rows, direction)
         require(text(permit.get(key)), 'Missing qualified operation prerequisite')
     require(permit.get('writers_stopped') is True and permit.get('requests_settled') is True,
             'Competing writers or requests remain')
-    require(reviewed['snapshot']['destination_version'] == '3.86.0'
-            and permit.get('target_source_commit') == TARGET_SOURCE_COMMIT, 'Unqualified target source')
+    require(supported_destination_version(reviewed['snapshot']['destination_version']),
+            'Ghostfolio version must be semantic and at least 3.86.0')
     for key in ('destination_version', 'destination_image'):
         require(permit.get(key) == reviewed['snapshot'][key], 'Destination image or version changed')
     require(type(permit.get('write_count')) is int and permit['write_count'] == len(rows), 'Unapproved write count')

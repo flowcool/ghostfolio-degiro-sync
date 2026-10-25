@@ -221,8 +221,13 @@ keyed YAML permit and a new private journal path:
 
 Permit schema is `degiro-migration-approval-v1`; authorization is
 `apply-reviewed-comments`. Bind `host`, `manifest_sha256`, `owner_id`,
-`destination_version`, `destination_image` and `target_source_commit`.
-The implemented UpdateOrderDto allowlist is based on Ghostfolio 3.86.0 source
+`destination_version` and `destination_image`. Maintenance accepts semantic
+Ghostfolio versions at or above **3.86.0**, without an exact-version or upstream
+commit pin. A prerelease of 3.86.0 is below the minimum; build metadata does not
+change precedence. Record the actual version from the running application,
+not the Docker tag `latest`. A permit may record `target_source_commit` for
+provenance; it does not select an accepted upstream commit.
+The original UpdateOrderDto allowlist review used Ghostfolio 3.86.0 source
 [`ef47c0d`](https://github.com/ghostfolio/ghostfolio/tree/ef47c0d1b2c48fa4e97fb381561b514e657928cf).
 Source inspection does not qualify any real target. The controller can reconnect
 profiles and the service can queue background market-data work. Every class

@@ -151,7 +151,7 @@ def test_preview_changed_complete_selection_removes_replacements(tmp_path, snaps
     assert manifest['counts']['unproven'] == 3
 
 
-def prepare_apply(tmp_path, snapshot):
+def prepare_apply(tmp_path, snapshot, destination_version='3.86.0'):
     inputs, rows = saved_inputs(tmp_path, snapshot)
     config = yaml.safe_load(inputs.read_text())
     for index, row in enumerate(rows):
@@ -160,7 +160,7 @@ def prepare_apply(tmp_path, snapshot):
     destination = tmp_path / 'destination.json'
     destination.write_text(json.dumps({'count': len(rows), 'activities': rows}, default=float))
     config['snapshot']['sha256'] = migration.digest(destination.read_bytes())
-    config['snapshot']['destination_version'] = '3.86.0'
+    config['snapshot']['destination_version'] = destination_version
     inputs.write_text(yaml.safe_dump(config))
     manifest_hash = migration.preview(inputs, tmp_path / 'review')
     manifest = tmp_path / 'review/manifest.yaml'
@@ -169,7 +169,7 @@ def prepare_apply(tmp_path, snapshot):
     state.mkdir(mode=0o700)
     approval = {'schema': 'degiro-migration-approval-v1', 'authorization': 'apply-reviewed-comments',
         'host': 'https://portfolio.example', 'owner_id': 'synthetic-owner',
-        'manifest_sha256': manifest_hash, 'destination_version': '3.86.0',
+        'manifest_sha256': manifest_hash, 'destination_version': destination_version,
         'destination_image': 'sha256:' + 'a' * 64,
         'target_source_commit': 'ef47c0d1b2c48fa4e97fb381561b514e657928cf',
         'state_dir': str(state), 'writers_stopped': True, 'requests_settled': True,
@@ -185,8 +185,8 @@ def prepare_apply(tmp_path, snapshot):
     return inputs, manifest, manifest_hash, permit, migration.digest(permit.read_bytes()), tmp_path / 'operation.yaml', rows
 
 
-def apply_fake(tmp_path, snapshot, monkeypatch, effect=None):
-    args = prepare_apply(tmp_path, snapshot)
+def apply_fake(tmp_path, snapshot, monkeypatch, effect=None, destination_version='3.86.0'):
+    args = prepare_apply(tmp_path, snapshot, destination_version)
     rows = migration.exact_json((tmp_path / 'destination.json').read_bytes())['activities']
     puts = []
     def request(method, host, token, row_id=None, payload=None):
@@ -216,6 +216,54 @@ def test_apply_only_changes_reviewed_comments_with_intent_first(tmp_path, snapsh
         migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
 
 
+@pytest.mark.parametrize('version', ['3.86.0', '3.86.0+build.7', '3.93.0', '3.100.0',
+                                    '3.93.0-rc.1', '4.0.0'])
+def test_apply_and_rollback_accept_newer_versions_without_source_pin(tmp_path, snapshot, monkeypatch, version):
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch, destination_version=version)
+    permit = migration.keyed_yaml(args[3].read_bytes())
+    permit.pop('target_source_commit')
+    args[3].write_bytes(migration.yaml_bytes(permit))
+    args = (*args[:4], migration.digest(args[3].read_bytes()), *args[5:])
+    before = deepcopy(rows)
+    migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    assert len(puts) == 3
+    assert [{**row, 'comment': old['comment']} for row, old in zip(rows, before)] == before
+    rollback = rollback_permit(args)
+    def request(method, host, token, row_id=None, payload=None):
+        if method == 'GET':
+            return {'count': len(rows), 'activities': deepcopy(rows)}
+        puts.append(row_id)
+        next(row for row in rows if row['id'] == row_id)['comment'] = payload['comment']
+    monkeypatch.setattr(migration, 'maintenance_request', request)
+    migration.rollback(args[5], args[1], args[2], rollback, migration.digest(rollback.read_bytes()),
+        'https://portfolio.example', 'synthetic-token')
+    assert len(puts) == 6 and rows == before
+    assert migration.keyed_yaml(args[5].read_bytes())['status'] == 'rolled_back'
+
+
+@pytest.mark.parametrize('version', ['3.85.99', '2.100.0', '3.86.0-rc.1', '3.93',
+                                    'latest', '03.93.0', '3.93.0-01', '3.93.0+', '3.93.0\n'])
+def test_apply_refuses_unsupported_versions_before_authentication(tmp_path, snapshot, monkeypatch, version):
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch, destination_version=version)
+    monkeypatch.setattr(migration, 'maintenance_token', lambda *a: pytest.fail('Unexpected authentication'))
+    with pytest.raises(RuntimeError, match='at least 3.86.0'):
+        migration.apply(*args[:6], 'https://portfolio.example', None)
+    assert not puts and not args[5].exists()
+
+
+@pytest.mark.parametrize('field', ['destination_version', 'destination_image'])
+def test_apply_newer_version_still_requires_matching_destination(tmp_path, snapshot, monkeypatch, field):
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch, destination_version='3.93.0')
+    permit = migration.keyed_yaml(args[3].read_bytes())
+    permit[field] = '3.94.0' if field == 'destination_version' else 'sha256:' + 'b' * 64
+    args[3].write_bytes(migration.yaml_bytes(permit))
+    args = (*args[:4], migration.digest(args[3].read_bytes()), *args[5:])
+    monkeypatch.setattr(migration, 'maintenance_token', lambda *a: pytest.fail('Unexpected authentication'))
+    with pytest.raises(RuntimeError, match='Destination image or version changed'):
+        migration.apply(*args[:6], 'https://portfolio.example', None)
+    assert not puts and not args[5].exists()
+
+
 @pytest.mark.parametrize('failure', ['timeout', 'normalization', 'protected', 'partial'])
 def test_apply_stops_pending_without_retry(tmp_path, snapshot, monkeypatch, failure):
     def effect(rows, row_id, payload):
@@ -238,8 +286,9 @@ def test_apply_stops_pending_without_retry(tmp_path, snapshot, monkeypatch, fail
     assert len(puts) == (2 if failure == 'partial' else 1)
 
 
-def test_apply_pending_qualification_stale_snapshot_and_decimal_loss_refuse(tmp_path, snapshot, monkeypatch):
-    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch)
+@pytest.mark.parametrize('version', ['3.86.0', '3.93.0'])
+def test_apply_pending_qualification_stale_snapshot_and_decimal_loss_refuse(tmp_path, snapshot, monkeypatch, version):
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch, destination_version=version)
     permit = migration.keyed_yaml(args[3].read_bytes())
     for qualification in permit['qualifications'].values():
         qualification['target_dto']['status'] = 'pending'
