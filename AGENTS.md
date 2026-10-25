@@ -52,7 +52,7 @@ This mode replaces the global per-step ceremony. The invariants above still appl
   when allowed (global Delegation rule; `pr-ship` is not used here because
   `merge_pr.py` enforces the review evidence).
   `merge_pr.py` applies the same docs-only rule: a PR changing only `openspec/`, `docs/`
-  or `*.md` files needs no CodeRabbit evidence; every other PR still does.
+  or `*.md` files needs no reviewer evidence; every other PR requires a completed Pullfrog review of the exact final head. CodeRabbit is not used.
 - **Ask the operator only for:** a DEGIRO fact missing from the spec, a real broker
   login, a Ghostfolio write, a scope change. One question at a time, in plain
   French, with your recommended answer.
@@ -72,7 +72,7 @@ See CONTRIBUTING.md for developer commands. Before committing code, run the full
 
 Public bug reports and compatibility notices use GitHub Issues. Existing local work-tracker policy is supplied by the execution environment; do not publish private tracker IDs or paths.
 
-For PR descriptions and merge execution, read `.github/pull_request_template.md`; use `scripts/merge_pr.py` for merges. Required CI and a completed CodeRabbit review must cover the exact final head (docs-only PRs need CI only). Review triggering is managed externally by maintainers; pending, skipped or rate-limited review is not evidence. Record the completed review URL and SHA before guarded merge. Source approval never authorizes production deployment or financial mutations.
+For PR descriptions and merge execution, read `.github/pull_request_template.md`; use `scripts/merge_pr.py` for merges. Required CI and a completed Pullfrog review must cover the exact final head (docs-only PRs need CI only). Review triggering is managed externally by maintainers; pending, skipped or rate-limited review is not evidence. Ignore CodeRabbit and the known sticky `pullfrog-approval` status; every other CI check must pass. Record the completed review URL and SHA before guarded merge. Source approval never authorizes production deployment or financial mutations.
 
 Rollback source changes with an atomic Git revert. Preserve local journals and private captures. Runtime deployment, financial writes, cleanup and destructive recovery require the operator's explicit authorization.
 

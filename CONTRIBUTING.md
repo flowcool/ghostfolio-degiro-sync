@@ -46,7 +46,7 @@ Use arm64 on an arm64 host. The smoke has no broker or vault access. Account cre
 
 Read docs/upstreams.md. Scheduled watches create public compatibility notices without changing pins or deployments. Review upstream source, update synthetic contract fixtures and record evidence before adopting changes. Contributor scripts outside the package keep functional Python without custom classes or type annotations.
 
-Use the pull-request template. CI and completed CodeRabbit coverage must apply to the final head before the guarded scripts/merge_pr.py command. Keep personal paths, hostnames, operator names, captures and private issue references out of public artifacts.
+Use the pull-request template. CI and completed Pullfrog review must apply to the final head before the guarded scripts/merge_pr.py command. Keep personal paths, hostnames, operator names, captures and private issue references out of public artifacts.
 
 The guarded command defaults to a merge commit. Select another method explicitly:
 
