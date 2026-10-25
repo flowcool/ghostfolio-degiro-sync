@@ -28,7 +28,7 @@ def metadata():
 
 def review():
     return {'id': 'review-100', 'author': {'login': 'pullfrog', '__typename': 'Bot'},
-        'state': 'COMMENTED', 'commit': {'oid': HEAD}, 'body': '', 'url': URL,
+        'state': 'COMMENTED', 'commit': {'oid': HEAD}, 'body': 'Review complete: no blockers.', 'url': URL,
         'submittedAt': '2026-10-09T12:00:00Z'}
 
 
@@ -415,3 +415,19 @@ def test_pr_template_preserves_guarded_merge_contract():
         assert body.count('## ' + section + '\n') == 1
     assert 'check_pr_merge.py' in body and '--match-head-commit' in body
     assert '.github/pull_request_template.md' in (root / 'AGENTS.md').read_text()
+
+
+@pytest.mark.parametrize('earlier', [None, 'CHANGES_REQUESTED', 'COMMENTED'])
+def test_reply_reviews_neither_establish_coverage_nor_hide_a_veto(github, earlier):
+    reply = review()
+    reply.update(id='reply', body='', submittedAt='2026-10-09T13:00:00Z')
+    github['reviews'][None]['nodes'] = [reply]
+    if earlier:
+        summary = review()
+        summary['state'] = earlier
+        github['reviews'][None]['nodes'].insert(0, summary)
+    if earlier == 'COMMENTED':
+        assert preflight.check_merge(24)['review_url'] == URL
+    else:
+        with pytest.raises(RuntimeError):
+            preflight.check_merge(24)

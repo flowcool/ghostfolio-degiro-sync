@@ -133,7 +133,12 @@ def exact_head_reviews(reviews, head):
 
 
 def completed_review(reviews, head, number):
-    candidates = exact_head_reviews(reviews, head)
+    exact = exact_head_reviews(reviews, head)
+    require(all(isinstance(r.get('body'), str) for r in exact), 'Invalid Pullfrog review body')
+    # GitHub represents thread replies as empty COMMENTED reviews. They cannot
+    # establish completed coverage or supersede an earlier change request.
+    candidates = [r for r in exact if r.get('state') not in ('COMMENTED', 'APPROVED')
+                  or r['body'].strip()]
     require(candidates, 'Completed Pullfrog review of final head missing')
     newest = max(review_time(r.get('submittedAt')) for r in candidates)
     latest = [r for r in candidates if review_time(r.get('submittedAt')) == newest]
