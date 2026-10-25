@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import degiro_identity_maintenance as maintenance
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
     preview = commands.add_parser('preview')
@@ -31,7 +31,7 @@ def main():
     rollback.add_argument('--approval', type=Path, required=True)
     rollback.add_argument('--approval-sha256', required=True)
     rollback.add_argument('--host', required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     previous = logging.root.manager.disable
     logging.disable(logging.CRITICAL)
     try:

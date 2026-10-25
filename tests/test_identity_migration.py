@@ -517,3 +517,70 @@ def test_rollback_interruption_remains_uncertain_and_manual_drift_blocks(tmp_pat
     changed['fee'] = 999
     states = migration.inspect_rows(record, {'count': len(rows), 'activities': rows}, reviewed['snapshot'])
     assert states[changed['id']] == 'changed'
+
+
+@pytest.mark.parametrize('timestamp', [None, 42, '2026-01-06T00:00:00', 'invalid'])
+def test_inspect_invalid_owned_timestamp_reports_changed(tmp_path, snapshot, monkeypatch, timestamp):
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch, api_shape=True)
+    migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    record, reviewed = migration.migration_journal(args[5], args[1], args[2])
+    row = next(r for r in rows if r['id'] in record['rows'])
+    if timestamp is None:
+        del row['updatedAt']
+    else:
+        row['updatedAt'] = timestamp
+    states = migration.inspect_rows(record, {'count': len(rows), 'activities': rows}, reviewed['snapshot'])
+    assert states[row['id']] == 'changed'
+
+
+@pytest.mark.parametrize('credential', ['access', 'bearer'])
+def test_shipped_cli_authenticates_real_apply_and_rollback_once(tmp_path, snapshot, monkeypatch, credential):
+    from scripts import migrate_degiro_identity as cli
+    from ghostfolio_degiro_sync import ghostfolio
+    args = prepare_apply(tmp_path, snapshot, api_shape=True)
+    rows = migration.exact_json((tmp_path / 'destination.json').read_bytes())['activities']
+    original_rows = deepcopy(rows)
+    monkeypatch.setenv('GHOST_HOST', 'https://portfolio.example')
+    monkeypatch.delenv('GHOST_TOKEN', raising=False)
+    monkeypatch.delenv('GHOST_ACCESS_TOKEN', raising=False)
+    monkeypatch.setenv('GHOST_ACCESS_TOKEN' if credential == 'access' else 'GHOST_TOKEN',
+                       'synthetic-access' if credential == 'access' else 'synthetic-bearer')
+    exchanges, puts = [], []
+    def exchange(host, access):
+        assert (host, access) == ('https://portfolio.example', 'synthetic-access')
+        exchanges.append(host)
+        return 'synthetic-bearer'
+    monkeypatch.setattr(ghostfolio, 'ghost_exchange_access_token', exchange)
+    def transport(method, host, token, row_id=None, payload=None):
+        assert (host, token) == ('https://portfolio.example', 'synthetic-bearer')
+        if method == 'GET':
+            return {'count': len(rows), 'activities': deepcopy(rows)}
+        puts.append(row_id)
+        next(row for row in rows if row['id'] == row_id)['comment'] = payload['comment']
+    monkeypatch.setattr(migration, 'maintenance_request', transport)
+    common = ['--manifest', str(args[1]), '--manifest-sha256', args[2], '--journal', str(args[5]),
+              '--host', 'https://portfolio.example']
+    assert cli.main(['apply', '--inputs', str(args[0]), '--approval', str(args[3]),
+                     '--approval-sha256', args[4], *common]) == 0
+    assert len(puts) == 3 and len(exchanges) == (1 if credential == 'access' else 0)
+    assert migration.maintenance_request is transport
+    permit = rollback_permit(args)
+    assert cli.main(['rollback', '--approval', str(permit),
+                     '--approval-sha256', migration.digest(permit.read_bytes()), *common]) == 0
+    assert len(puts) == 6 and len(exchanges) == (2 if credential == 'access' else 0)
+    assert rows == original_rows
+    assert migration.maintenance_request is transport
+
+
+
+def test_cli_auth_refuses_ambiguous_or_foreign_credentials_without_exchange(monkeypatch):
+    from ghostfolio_degiro_sync import ghostfolio
+    monkeypatch.setenv('GHOST_HOST', 'https://portfolio.example')
+    monkeypatch.setenv('GHOST_TOKEN', 'synthetic-bearer')
+    monkeypatch.setenv('GHOST_ACCESS_TOKEN', 'synthetic-access')
+    monkeypatch.setattr(ghostfolio, 'ghost_exchange_access_token', lambda *a: pytest.fail('unexpected login'))
+    with pytest.raises(RuntimeError, match='exactly one'):
+        migration.maintenance_token('https://portfolio.example', None)
+    monkeypatch.delenv('GHOST_TOKEN')
+    with pytest.raises(RuntimeError, match='origin'):
+        migration.maintenance_token('https://different.example', None)

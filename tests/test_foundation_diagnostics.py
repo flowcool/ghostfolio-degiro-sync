@@ -149,3 +149,12 @@ def test_no_dividend_report_and_unavailable_units_are_explicit():
     assert 'unitPrice unavailable' in text
     assert 'Action: Inspect evidence; no activity selected.' in text
     assert check_report(text) == []
+
+
+def test_manual_matching_skips_foreign_rows_without_profile_symbol():
+    from ghostfolio_degiro_sync.ghostfolio import match_manual_activity
+    activity = {'accountId': 'target-a', 'type': 'BUY', 'symbol': 'AAPL',
+                'date': '2026-01-01T00:00:00Z', 'quantity': 1}
+    incomplete_foreign = {'accountId': 'other', 'type': 'BUY',
+                          'date': '2026-01-01T00:00:00Z', 'quantity': 1}
+    assert not match_manual_activity(activity, [incomplete_foreign])

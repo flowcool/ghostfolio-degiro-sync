@@ -277,3 +277,17 @@ def test_rolling_failure_diagnostics_are_visible_in_dry_run(monkeypatch, caplog,
     monkeypatch.setattr(sync_module, "run_sync", refused)
     assert adapter.main(["--sync"]) == 1
     assert message in caplog.text
+
+
+@pytest.mark.parametrize('field,value', [('symbol', ''), ('dataSource', ''), ('dataSource', None)])
+def test_foreign_incomplete_profile_does_not_block_rolling(rolling, field, value):
+    _, _, destination = rolling
+    foreign = deepcopy(destination['activities']['activities'][0])
+    foreign.update(id='foreign-profile', accountId='other-account', comment=None)
+    foreign['assetProfile'][field] = value
+    destination['activities']['activities'].append(foreign)
+    destination['activities']['count'] += 1
+    before = deepcopy(destination)
+    result = sync_account(rolling)
+    assert len(result['proposed']) == 3 and result['rolling_verified']
+    assert destination == before
