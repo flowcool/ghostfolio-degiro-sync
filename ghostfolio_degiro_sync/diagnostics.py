@@ -1,6 +1,7 @@
 """Fixed public diagnostic boundaries and private library logging."""
 
 import logging
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -111,6 +112,16 @@ def reconcile_activities(expected: list[dict[str, Any]], observed: list[dict[str
         else:
             destination.setdefault(owner, []).append(row)
     result = []
+
+    def manual_uuid_rewrite(proposal: dict[str, Any] | None, stored: dict[str, Any] | None) -> bool:
+        """Treat Ghostfolio's proven MANUAL profile UUID rewrite as equivalent identity."""
+        if not proposal or not stored or proposal.get('dataSource') != 'MANUAL' or stored.get('dataSource') != 'MANUAL':
+            return False
+        if proposal.get('type') not in ('FEE', 'INTEREST') or proposal.get('symbol') == stored.get('symbol'):
+            return False
+        return bool(re.fullmatch(r'GF_DEGIRO_[1-9][0-9]*_.+', str(proposal.get('symbol')))
+                    and re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', str(stored.get('symbol'))))
+
     for owner in dict.fromkeys([*source, *destination]):
         proposals, rows = source.get(owner, []), destination.get(owner, [])
         proposal = proposals[0] if len(proposals) == 1 else None
@@ -135,6 +146,8 @@ def reconcile_activities(expected: list[dict[str, Any]], observed: list[dict[str
         date_value = day(reference)
         outside = (not proposals and date_value is not None and from_date is not None
                    and to_date is not None and not from_date <= date_value <= to_date)
+        if manual_uuid_rewrite(proposal, stored):
+            checks['symbol'] = 'equal'
         if outside:
             status = 'outside-window'
         elif exact and len(proposals) == len(rows) == 1 and all(value != 'unavailable' for value in checks.values()):
