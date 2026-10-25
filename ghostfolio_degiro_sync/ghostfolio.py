@@ -200,7 +200,7 @@ def match_manual_activity(activity: Any, entries: Any) -> Any:
     nearby = []
     limit = 3 if activity["type"] == "DIVIDEND" else 2
     for row in entries:
-        if (row["accountId"], row["type"], row["symbol"]) != (
+        if (row.get("accountId"), row.get("type"), row.get("symbol")) != (
                 activity["accountId"], activity["type"], activity["symbol"]):
             continue
         gap = abs((datetime.fromisoformat(accounting_module.broker_instant(row["date"])).date() - day).days)

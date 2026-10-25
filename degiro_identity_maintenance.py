@@ -633,7 +633,7 @@ def inspect_rows(record, snapshot, metadata):
             try:
                 if instant(row.get('updatedAt')) >= instant(before['updatedAt']):
                     row = {**row, 'updatedAt': before['updatedAt']}
-            except (TypeError, ValueError, AttributeError):
+            except (RuntimeError, TypeError, ValueError, AttributeError):
                 pass
         fingerprint = digest(canonical_json(row))
         state = ('converted' if fingerprint == entry['after_fingerprint'] else
