@@ -46,19 +46,7 @@ Use arm64 on an arm64 host. The smoke has no broker or vault access. Account cre
 
 Read docs/upstreams.md. Scheduled watches create public compatibility notices without changing pins or deployments. Review upstream source, update synthetic contract fixtures and record evidence before adopting changes. Contributor scripts outside the package keep functional Python without custom classes or type annotations.
 
-Use the pull-request template. CI and completed Pullfrog review must apply to the final head before the guarded scripts/merge_pr.py command. Keep personal paths, hostnames, operator names, captures and private issue references out of public artifacts.
-
-The guarded command defaults to a merge commit. Select another method explicitly:
-
-```sh
-.venv/bin/python scripts/merge_pr.py <number> --method squash
-# --method accepts merge, squash or rebase.
-```
-
-The selected method must be enabled by both repository settings and every
-effective rule on the PR's base branch. A failed or incomplete policy lookup
-blocks the command. Every method keeps the verified final-head review/CI checks
-and `--match-head-commit` pin; there is no auto-merge or administrator bypass.
+Use the pull-request template. CI and completed Pullfrog review must apply to the final head before merge through the maintainers' shared merge gate, which pins the reviewed head. Keep personal paths, hostnames, operator names, captures and private issue references out of public artifacts.
 
 ## Complete community journey in a disposable container
 

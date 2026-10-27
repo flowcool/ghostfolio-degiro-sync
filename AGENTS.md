@@ -43,15 +43,15 @@ This mode replaces the global per-step ceremony. The invariants above still appl
 - **Tests:** offline pytest for adapter logic on synthetic or anonymized fixtures.
   No tests for contributor tooling, docs or CI. No full-suite rerun for prose edits.
 - **Notes:** one closing note with evidence per item; no per-step findings.
+- **Git:** one branch and one PR per change. Sub-items, steps and review fixes
+  are commits in that PR; never open separate or stacked PRs for them.
 - **Docs:** README and user docs required by the spec only. No new plan, review
   or contract files.
 - **Subagents:** only on the operator's explicit request. The PR lifecycle uses
-  no subagent: the implementing agent opens the PR, waits with
-  `~/.agents/bin/pr-gate <n> --repo flowcool/ghostfolio-degiro-sync` (one call,
-  never a `sleep` loop), answers each comment and merges with `scripts/merge_pr.py`
-  when allowed (global Delegation rule; `pr-ship` is not used here because
-  `merge_pr.py` enforces the review evidence).
-  `merge_pr.py` applies the same docs-only rule: a PR changing only `openspec/`, `docs/`
+  no subagent: the implementing agent opens the PR, runs the shared merge gate
+  `~/.agents/bin/pr-ship <n> --repo flowcool/ghostfolio-degiro-sync` (one call,
+  never a `sleep` loop) and answers each comment.
+  `pr-ship` applies the docs-only rule: a PR changing only `openspec/`, `docs/`
   or `*.md` files needs no reviewer evidence; every other PR requires a completed Pullfrog review of the exact final head. CodeRabbit is not used.
 - **Ask the operator only for:** a DEGIRO fact missing from the spec, a real broker
   login, a Ghostfolio write, a scope change. One question at a time, in plain
@@ -72,7 +72,7 @@ See CONTRIBUTING.md for developer commands. Before committing code, run the full
 
 Public bug reports and compatibility notices use GitHub Issues. Existing local work-tracker policy is supplied by the execution environment; do not publish private tracker IDs or paths.
 
-For PR descriptions and merge execution, read `.github/pull_request_template.md`; use `scripts/merge_pr.py` for merges. Required CI and a completed Pullfrog review must cover the exact final head (docs-only PRs need CI only). Review triggering is managed externally by maintainers; pending, skipped or rate-limited review is not evidence. Ignore CodeRabbit and the known sticky `pullfrog-approval` status; every other CI check must pass. Record the completed review URL and SHA before guarded merge. Source approval never authorizes production deployment or financial mutations.
+For PR descriptions and merge execution, read `.github/pull_request_template.md`; merge with the shared `pr-ship` gate. Required CI and a completed Pullfrog review must cover the exact final head (docs-only PRs need CI only). Review triggering is managed externally by maintainers; pending, skipped or rate-limited review is not evidence. Ignore CodeRabbit and the known sticky `pullfrog-approval` status; every other CI check must pass. Record the completed review URL and SHA before guarded merge. Source approval never authorizes production deployment or financial mutations.
 
 Rollback source changes with an atomic Git revert. Preserve local journals and private captures. Runtime deployment, financial writes, cleanup and destructive recovery require the operator's explicit authorization.
 

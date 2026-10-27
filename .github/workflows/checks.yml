@@ -1,8 +1,7 @@
 name: Build and checks
 
 on:
-  push:
-    branches: [main]
+  # main is checked on the PR before merge; no re-run after merge.
   pull_request:
   workflow_dispatch:
   schedule:
@@ -11,7 +10,37 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: checks-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Documentation-only PRs (docs/, openspec/, *.md) skip the work below; tests
+  # still run. Required checks still report (skipped = success). Fails open:
+  # any scope error runs everything.
+  scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.files.outputs.code }}
+    steps:
+      - id: files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          code=true
+          if [ -n "$PR" ]; then
+            files=$(gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" --name-only || true)
+            if [ -n "$files" ] && ! printf '%s\n' "$files" | grep -qvE '^(docs/|openspec/)|\.md$'; then
+              code=false
+            fi
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -26,6 +55,8 @@ jobs:
       - run: PYTHON=python bash scripts/check.sh
       - run: python -m pytest -q
   dependency-audit:
+    needs: scope
+    if: ${{ !cancelled() && (needs.scope.result != 'success' || needs.scope.outputs.code != 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -38,6 +69,12 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: pip-audit
   container-check:
+    # Matrix job names only expand when the job runs, so it always runs and
+    # its steps are skipped for documentation-only PRs.
+    needs: scope
+    if: ${{ !cancelled() }}
+    env:
+      RUN_WORK: ${{ needs.scope.result != 'success' || needs.scope.outputs.code != 'false' }}
     strategy:
       fail-fast: false
       matrix:
@@ -48,12 +85,15 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.RUN_WORK == 'true'
         with:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: env.RUN_WORK == 'true'
         with:
           python-version: "3.14"
       - name: Use public Docker Hub cache on this disposable runner
+        if: env.RUN_WORK == 'true'
         run: |
           sudo python3 - <<'PY'
           import json
@@ -70,6 +110,7 @@ jobs:
           sudo systemctl restart docker
           docker info --format '{{json .RegistryConfig.Mirrors}}'
       - name: Build runtime on native architecture without publication
+        if: env.RUN_WORK == 'true'
         run: docker build --build-arg TARGETARCH=${{ matrix.arch }} --build-arg APP_VERSION="${GITHUB_SHA}" -t degiro-smoke:ci .
       # Blocking gate: fixable HIGH/CRITICAL in packages we can act on (base image
       # OS packages, plus our Python layer). The supercronic binary is excluded
@@ -78,6 +119,7 @@ jobs:
       # cron only, no HTTP listener, no TLS client). It is covered by the advisory
       # scan below instead of blocking every PR.
       - name: Scan image for fixable high and critical vulnerabilities (blocking)
+        if: env.RUN_WORK == 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: degiro-smoke:ci
@@ -91,7 +133,7 @@ jobs:
       # supercronic binary skipped above) for visibility, but never blocks the
       # merge. Runs even if the blocking scan failed.
       - name: Advisory vulnerability scan (never blocks)
-        if: always()
+        if: always() && env.RUN_WORK == 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: degiro-smoke:ci
@@ -100,8 +142,10 @@ jobs:
           ignore-unfixed: true
           exit-code: "0"
       - name: Isolated run-once and real cron smoke
+        if: env.RUN_WORK == 'true'
         run: python scripts/smoke_container.py degiro-smoke:ci
       - name: Synthetic complete community journey
+        if: env.RUN_WORK == 'true'
         run: |
           docker run --rm --network none --read-only --cap-drop ALL \
             --security-opt no-new-privileges:true --tmpfs /tmp:rw,nosuid,nodev,size=32m \

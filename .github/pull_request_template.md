@@ -45,8 +45,5 @@ CodeRabbit is not used. A sticky `pullfrog-approval` status alone does not block
 merge. Every other CI check must pass. Docs-only changes (`openspec/`, `docs/`
 or `*.md`) need CI and resolved conversations only.
 
-Use `.venv/bin/python scripts/check_pr_merge.py <number>` for read-only
-inspection. Use `.venv/bin/python scripts/merge_pr.py <number>` to merge.
-The versioned helper requires fresh final-head evidence, verifies branch merge
-policy, pins the evaluated head with `--match-head-commit` and offers no admin or auto-merge bypass.
+Maintainers merge through the shared merge gate, which pins the evaluated head.
 After a failed or uncertain merge, inspect GitHub before any retry.

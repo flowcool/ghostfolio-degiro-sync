@@ -1,14 +1,18 @@
 name: Core integrity
 
 on:
+  # PRs and the weekly schedule cover main; no re-run on every branch push.
   pull_request:
-  push:
   workflow_dispatch:
   schedule:
     - cron: "17 5 * * 1"
 
 permissions:
   contents: read
+
+concurrency:
+  group: core-integrity-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   core-integrity:
