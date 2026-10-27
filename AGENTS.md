@@ -43,6 +43,8 @@ This mode replaces the global per-step ceremony. The invariants above still appl
 - **Tests:** offline pytest for adapter logic on synthetic or anonymized fixtures.
   No tests for contributor tooling, docs or CI. No full-suite rerun for prose edits.
 - **Notes:** one closing note with evidence per item; no per-step findings.
+- **Git:** one branch and one PR per change. Sub-items, steps and review fixes
+  are commits in that PR; never open separate or stacked PRs for them.
 - **Docs:** README and user docs required by the spec only. No new plan, review
   or contract files.
 - **Subagents:** only on the operator's explicit request. The PR lifecycle uses
