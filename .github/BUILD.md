@@ -65,7 +65,7 @@ conventional PR title; it is advisory and never a required check. A
 
 Pullfrog is the sole PR reviewer. A completed review must cover the exact final
 head. Resolve actionable conversations and require all CI checks to pass before
-running `scripts/merge_pr.py`. Ignore the known sticky `pullfrog-approval` status
+merging. Ignore the known sticky `pullfrog-approval` status
 alone. Docs-only changes need CI and resolved conversations only.
 CodeRabbit automatic reviews are disabled in `.coderabbit.yaml`.
 

@@ -41,7 +41,7 @@ def test_all_project_python_obeys_functional_unannotated_style():
         | set((root / 'tests').rglob('*.py'))
         | set((root / 'ghostfolio_degiro_sync').rglob('*.py')))
     names = {str(path.relative_to(root)) for path in files}
-    assert {'ghostfolio_degiro_sync/app.py', 'ghostfolio_core.py', 'scripts/merge_pr.py',
+    assert {'ghostfolio_degiro_sync/app.py', 'ghostfolio_core.py', 'scripts/check_core.py',
         'tests/test_python_conventions.py'} <= names
     failures = [(str(path.relative_to(root)), line, reason) for path in files
         for line, reason in convention_violations(path.read_text(encoding="utf-8"),
