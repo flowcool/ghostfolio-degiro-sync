@@ -50,7 +50,7 @@ Paste this into a Portainer stack or save it as `compose.yaml`. Supply the varia
 # Existing Ghostfolio network; run once by default, CRON is opt-in.
 services:
   degiro-sync:
-    image: ${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:v0.4.1}
+    image: ${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:v0.5.0}
     restart: ${RESTART_POLICY:-no}
     user: "10001:10001"
     read_only: true
@@ -118,7 +118,7 @@ Start with `DRY_RUN=1` and an empty `CRON`. In Portainer, use absolute host path
 | `RESTART_POLICY` | Docker restart policy | `no` | With `CRON`, set `unless-stopped` to restart the scheduler after a crash or host reboot |
 | `APPRISE_URLS` | Failure alerts | Empty: disabled | Recommended for scheduled runs; JSON list, e.g. `'["ntfy://notification-host/topic"]'` |
 | `APPRISE_TIMEOUT` | Alert deadline | `10` seconds | Keep the default; allowed range 1–30 |
-| `DEGIRO_IMAGE` | Published image tag or digest | `ghcr.io/flowcool/ghostfolio-degiro-sync:v0.4.1` | Follow a reviewed release, pin an immutable digest for controlled upgrades, or explicitly choose `:latest` |
+| `DEGIRO_IMAGE` | Published image tag or digest | `ghcr.io/flowcool/ghostfolio-degiro-sync:v0.5.0` | Follow a reviewed release, pin an immutable digest for controlled upgrades, or explicitly choose `:latest` |
 
 **BREAKING:** a valid IANA `TZ` is required for financial writes. Missing or invalid `TZ` forces simulation and emits a fixed warning. Absent or blank `DRY_RUN` also simulates and emits `DRY_RUN not set: simulation, nothing written`. Values are trimmed and case-insensitive: `1`/`true`/`yes`/`on` simulate; `0`/`false`/`no`/`off` request writes. Any other value stops before broker or Ghostfolio access.
 
