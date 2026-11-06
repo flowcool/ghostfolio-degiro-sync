@@ -122,6 +122,8 @@ Use the permanent lab authority in the global working agreement and the
 canonical Infra lab runbook. It covers both labs, including test writes,
 configuration and resets. Keep reservations, separate credentials, retained
 proof, stop on uncertainty without automatic resend, and final stop verification.
-Broker access, production, publication and removal of containers or proof
-retain separate authority. This scope overrides generic write-approval rules
+Broker access, production, publication and removal of stack containers,
+volumes, recovery copies or proof retain separate authority. One-shot test
+containers are not proof: the agentvm daily `docker-oneshot-gc` removes them
+after 24 h and keeps the newest per name family (Florent 2026-11-06). This scope overrides generic write-approval rules
 for these two labs only.
