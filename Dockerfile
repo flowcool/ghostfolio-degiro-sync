@@ -1,4 +1,4 @@
-FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170
+FROM python:3.14-slim@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966
 
 WORKDIR /app
 ARG SUPERCRONIC_VERSION=v0.2.51
@@ -8,7 +8,9 @@ ARG TARGETARCH
 ARG BW_VERSION=2026.10.0
 ARG BW_SHA256SUM_amd64=a300959a347bd71ff571da75687c8388da2ecd747a20f0abddd18643eb9466ba
 ARG BW_SHA256SUM_arm64=ea6203a565c48d3107bb8511221bb1e436e06c9bc07d05ba679d8921648e83c9
-RUN apt-get update && apt-get install -y --no-install-recommends curl unzip tzdata libstdc++6 \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        apt=3.0.4 libapt-pkg7.0=3.0.4 \
+        zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1 curl unzip tzdata libstdc++6 \
     && curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSLO "https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-${TARGETARCH}" \
     && case "${TARGETARCH}" in \
       amd64) EXPECTED="${SUPERCRONIC_SHA256SUM_amd64}" ;; \
