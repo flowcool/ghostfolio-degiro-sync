@@ -1,14 +1,28 @@
 #!/bin/bash
 set -eu
 
-if [ "$#" -gt 0 ]; then
-    if [[ "$1" == --* ]]; then
-        exec python -m ghostfolio_degiro_sync "$@"
-    fi
+if [ "$#" -gt 0 ] && [[ "$1" != --* ]]; then
     exec "$@"
 fi
+if [ "$#" -eq 1 ] && [ "$1" = --notify-worker ]; then
+    exec python -m ghostfolio_degiro_sync "$@"
+fi
 
-echo "ghostfolio-degiro-sync version ${APP_VERSION:-dev}"
+cat <<'BANNER'
++--------------------------------------+
+|             DEGIRO SYNC              |
+|         DEGIRO -> Ghostfolio         |
++--------------------------------------+
+BANNER
+version=${APP_VERSION:-dev}
+revision=${APP_REVISION:-unknown}
+if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then version=dev; fi
+if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then revision=unknown; fi
+printf 'ghostfolio-degiro-sync version %s — commit %s\n' "$version" "${revision:0:12}"
+
+if [ "$#" -gt 0 ]; then
+    exec python -m ghostfolio_degiro_sync "$@"
+fi
 if [ -n "${CRON:-}" ]; then
     # Five numeric cron fields only; never interpolate an environment command.
     if [[ ! "$CRON" =~ ^[0-9*/,-]+([[:blank:]][0-9*/,-]+){4}$ ]]; then

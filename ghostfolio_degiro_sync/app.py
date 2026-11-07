@@ -262,6 +262,12 @@ def _main(argv: Any=None, failures: Any=None) -> Any:
 
 def main(argv: Any=None) -> Any:
     """Resolve simulation policy before access and finalize one outcome."""
+    version = os.environ.get("APP_VERSION", "")
+    revision = os.environ.get("APP_REVISION", "")
+    if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version):
+        version = "dev"
+    commit = revision[:12] if re.fullmatch(r"[0-9a-f]{40}", revision) else "unknown"
+    log.info("ghostfolio-degiro-sync version %s — commit %s", version, commit)
     if not os.environ.get("DRY_RUN", "").strip():
         log.warning("DRY_RUN not set: simulation, nothing written")
     try:

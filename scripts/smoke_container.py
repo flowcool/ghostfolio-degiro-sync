@@ -9,6 +9,8 @@ import subprocess
 import time
 import uuid
 
+from release_identity import verify_image_identity
+
 
 def run(*args, input_text=None, expected=0):
     result = subprocess.run(args, input=input_text, text=True, capture_output=True, timeout=30)
@@ -24,6 +26,18 @@ def main():
     options = ["docker", "run", "--rm", "--network=none", "--read-only", "--workdir=/",
                "--tmpfs", "/tmp:rw,nosuid,nodev,size=16m", "--cap-drop=ALL",
                "--security-opt=no-new-privileges"]
+    image = json.loads(run("docker", "inspect", args.image))[0]
+    env = dict(line.split("=", 1) for line in image["Config"]["Env"])
+    version, revision = env.get("APP_VERSION"), env.get("APP_REVISION")
+    if version == "dev" and revision == "unknown":
+        assert image["Config"]["Labels"]["org.opencontainers.image.version"] == "dev"
+        assert image["Config"]["Labels"]["org.opencontainers.image.revision"] == "unknown"
+    else:
+        verify_image_identity({"architecture": image["Architecture"], "os": image["Os"],
+            "config": image["Config"]}, "v" + version, revision,
+            "flowcool/ghostfolio-degiro-sync", image["Architecture"])
+    identity = f"ghostfolio-degiro-sync version {version} — commit {revision[:12]}"
+    print("Embedded software version/revision and OCI labels agree: PASS")
     expected = {}
     for line in Path("requirements.txt").read_text().splitlines():
         if line.strip() and not line.lstrip().startswith("#"):
@@ -93,6 +107,8 @@ print("Python 3.14, native dependencies, no pip, runtime UID, source-equivalent 
     output = run(*options, "-i", args.image, "python", "-I", "-m", "ghostfolio_degiro_sync",
         "--notify-worker", input_text="malformed", expected=10)
     assert output == ""
+    output = run(*options, "-i", args.image, "--notify-worker", input_text="malformed", expected=10)
+    assert output == ""
     print("Installed module and isolated worker run from /; malformed worker input is silent: PASS")
     output = run(*options, "-e", "BITWARDENCLI_APPDATA_DIR=/tmp/vault-smoke",
         args.image, "bw", "--version")
@@ -107,7 +123,12 @@ print("Python 3.14, native dependencies, no pip, runtime UID, source-equivalent 
     print("Actual daily scheduler uses 06:15 Europe/Zurich; winter/summer zone data present: PASS")
     output = run(*options, args.image, expected=1)
     assert "Running once" in output and "DEGIRO sync failed" in output
+    assert output.count("DEGIRO SYNC") == 1 and "DEGIRO -> Ghostfolio" in output
+    assert output.count(identity) == 2
     print("Default run-once fails closed without credentials: PASS")
+    output = run(*options, args.image, "--sync", expected=1)
+    assert output.count("DEGIRO SYNC") == 1 and output.count(identity) == 2
+    print("Explicit connector options retain banner and per-invocation identity: PASS")
     output = run(*options, args.image, "python", "/app/scripts/recover_degiro.py",
         "--expected-intent-id", "a" * 32, expected=1)
     assert "Positive import recovery failed" in output
@@ -124,6 +145,7 @@ print("Python 3.14, native dependencies, no pip, runtime UID, source-equivalent 
             logs = run("docker", "logs", name)
             if "DEGIRO sync failed" in logs:
                 assert "Running with validated cron schedule" in logs
+                assert logs.count("DEGIRO SYNC") == 1 and logs.count(identity) >= 2
                 info = json.loads(run("docker", "inspect", name))[0]
                 assert info["State"]["Running"] is True
                 assert info["Config"]["Healthcheck"]["Test"] == [

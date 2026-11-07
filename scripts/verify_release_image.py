@@ -5,6 +5,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from release_identity import verify_image_identity
+
 
 def native_manifest_digest(index, arch):
     matches = [entry.get("digest") for entry in index.get("manifests", [])
@@ -15,7 +17,7 @@ def native_manifest_digest(index, arch):
     return matches[0]
 
 
-def verify(image, digest, arch):
+def verify(image, digest, arch, tag, revision):
     if (not re.fullmatch(r"ghcr\.io/[a-z0-9_.-]+/[a-z0-9_.-]+", image)
             or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
             or arch not in ("amd64", "arm64")):
@@ -26,10 +28,12 @@ def verify(image, digest, arch):
             text=True, timeout=60))
     index = inspect(image + "@" + digest)
     manifest = inspect(image + "@" + native_manifest_digest(index, arch))
-    local = subprocess.check_output(["docker", "inspect", "--format", "{{.Id}}",
-        "degiro-release:check"], text=True, timeout=15).strip()
-    if manifest.get("config", {}).get("digest") != local:
+    local = json.loads(subprocess.check_output(["docker", "inspect", "--format", "{{json .}}",
+        "degiro-release:check"], text=True, timeout=15))
+    if manifest.get("config", {}).get("digest") != local.get("Id"):
         raise RuntimeError("Published native configuration differs from the tested image")
+    verify_image_identity({"architecture": local.get("Architecture"), "os": local.get("Os"),
+                           "config": local.get("Config")}, tag, revision, image.removeprefix("ghcr.io/"), arch)
     return digest
 
 
@@ -38,8 +42,10 @@ def main():
     parser.add_argument("--image", required=True)
     parser.add_argument("--digest", required=True)
     parser.add_argument("--arch", required=True)
+    parser.add_argument("--tag", required=True)
+    parser.add_argument("--revision", required=True)
     args = parser.parse_args()
-    digest = verify(args.image, args.digest, args.arch)
+    digest = verify(args.image, args.digest, args.arch, args.tag, args.revision)
     Path("digests").mkdir(exist_ok=True)
     Path("digests", args.arch + ".txt").write_text(digest)
 

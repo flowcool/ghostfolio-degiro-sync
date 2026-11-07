@@ -36,7 +36,11 @@ RUN python -m pip install --no-cache-dir -r requirements.txt \
     && python -m pip check
 
 ARG APP_VERSION=dev
-ENV APP_VERSION=${APP_VERSION} DRY_RUN=1 PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ARG APP_REVISION=unknown
+ENV APP_VERSION=${APP_VERSION} APP_REVISION=${APP_REVISION} DRY_RUN=1 PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+LABEL org.opencontainers.image.version=${APP_VERSION} \
+      org.opencontainers.image.revision=${APP_REVISION} \
+      org.opencontainers.image.source="https://github.com/flowcool/ghostfolio-degiro-sync"
 COPY pyproject.toml ghostfolio_core.py entrypoint.sh ./
 COPY ghostfolio_degiro_sync/ ./ghostfolio_degiro_sync/
 RUN python -m pip install --no-cache-dir --no-deps . \

@@ -295,6 +295,23 @@ INFO emits no machine-evidence records. DEBUG adds no broker or Ghostfolio reads
 
 ### Candidate and stable images
 
+New release images derive software version `X.Y.Z` and the full source commit
+from their checked Git tag and commit. Both architectures embed the same values
+in runtime metadata and OCI labels. A fixed `DEGIRO SYNC` banner appears once
+at connector container startup. Startup and each application run report:
+
+```text
+ghostfolio-degiro-sync version 1.2.3 — commit 0123456789ab
+```
+
+The twelve-character prefix identifies the source. An RC reports its target
+software version; this line does not certify stable publication. Its registry
+tag retains the full `vX.Y.Z-rc.N` suffix. No version setting is required for
+published images. Contributor builds without metadata report `dev` and `unknown`.
+To check a local release build, pass `--build-arg APP_VERSION=X.Y.Z` and
+`--build-arg APP_REVISION=<full-40-character-commit>` to `docker build` and run
+`python scripts/smoke_container.py <local-image>` from the same source checkout.
+
 Use an unused `vX.Y.Z-rc.N` tag, with a positive candidate number and no leading
 zeros, for an approved candidate publication. Publish a non-draft GitHub
 prerelease from main. Candidates publish only their exact `v` image tag. They do
@@ -308,8 +325,41 @@ and readback evidence. Incomplete or failed proof blocks promotion. Replace a
 failed digest with an unused candidate version and replay both scenarios.
 Lab writes, candidate publication and stable promotion each need their own GO.
 
+After both labs pass and stop, attach one `lab-qualification.json` asset to the
+highest RC's published GitHub prerelease. A release maintainer attests the
+retained private proof through this bounded public record. Use this shape with
+the exact repository, tag, source commit, index/native digests and proof hashes:
+
+```json
+{
+  "schema": 1,
+  "repository": "flowcool/ghostfolio-degiro-sync",
+  "rc_tag": "v1.2.3-rc.1",
+  "commit": "<40 lowercase hexadecimal characters>",
+  "digest": "sha256:<64 lowercase hexadecimal characters>",
+  "native": {
+    "amd64": "sha256:<native manifest digest>",
+    "arm64": "sha256:<different native manifest digest>"
+  },
+  "labs": {
+    "empty": {"status": "PASS", "cleanup": "stopped", "evidence_sha256": "<proof hash>"},
+    "golden": {"status": "PASS", "cleanup": "stopped", "evidence_sha256": "<proof hash>"}
+  }
+}
+```
+
+Keep credentials, private paths and work-tracker identifiers out of the asset.
+Missing fields, duplicate keys or a record larger than 16 KiB block promotion.
+The workflow signs each new candidate index. Stable promotion verifies that
+signature against the candidate release workflow and checks the qualification,
+both architectures and embedded runtime/OCI identity before any registry write.
+Older unsigned candidates or images without the new identity cannot use this
+path. Publish a new qualifying RC; preserve old images and evidence.
+
 Stable `vX.Y.Z` must use the same source commit as the highest numbered candidate
-for that version. The preflight names both tags if their commits differ. Only a
+for that version. It copies that qualified index without rebuilding; stable
+and RC digests must be identical. A missing candidate blocks stable publication.
+The preflight names both tags if their commits differ. Only a
 published non-draft stable release on main can publish its stable version tag;
 only the current stable release can update `latest`. Every version is immutable.
 If latest promotion fails, first verify the stable digest and that the release

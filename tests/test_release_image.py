@@ -3,6 +3,7 @@ from contextlib import nullcontext
 import importlib.util
 from pathlib import Path
 import re
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -10,7 +11,11 @@ import yaml
 
 SPEC = importlib.util.spec_from_file_location("release_image", Path("scripts/release_image.py"))
 release = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(release)
+sys.path.insert(0, str(Path("scripts").resolve()))
+try:
+    SPEC.loader.exec_module(release)
+finally:
+    sys.path.pop(0)
 
 
 def event(tag="v0.2.0", prerelease=False):
@@ -97,14 +102,14 @@ def test_registry_diagnostics_expose_status_only(monkeypatch, capsys):
 def test_registry_exception_is_reported_by_phase_without_secret(monkeypatch, tmp_path, capsys):
     import json
     event_path = tmp_path / "event.json"
-    event_path.write_text(json.dumps(event()))
+    event_path.write_text(json.dumps(event("v0.2.0-rc.1", True)))
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
     monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
     monkeypatch.setenv("GITHUB_ACTOR", "actor")
     monkeypatch.setenv("GH_TOKEN", "SYNTHETIC-TOKEN")
     monkeypatch.setattr(release.sys, "argv", ["release_image.py", "--registry"])
     monkeypatch.setattr(release.subprocess, "run", lambda *args, **kwargs: None)
-    monkeypatch.setattr(release.subprocess, "check_output", lambda *args, **kwargs: "same-sha\n")
+    monkeypatch.setattr(release.subprocess, "check_output", lambda *args, **kwargs: "a" * 40 + "\n")
     def fail(*args):
         raise RuntimeError("SYNTHETIC-RESPONSE-SECRET")
     monkeypatch.setattr(release, "registry_version_absent", fail)
@@ -170,9 +175,10 @@ def test_release_manifest_requires_both_native_gates_and_no_pr_publication():
     verification = next(step for step in steps if "Verify publication" in step.get("name", ""))
     assert 'scripts/verify_release_image.py' in verification["run"]
     assert 'containerimage.config.digest' not in verification["run"]
-    promotion = next(step for step in jobs["manifest"]["steps"] if "Promote" in step.get("name", ""))
+    promotion = jobs["promote-qualified-rc"]
     assert promotion["if"] == "needs.preflight.outputs.prerelease == 'false'"
-    assert 'releases/latest' in promotion["run"]
+    assert any(step.get('run') == 'python scripts/promote_release_image.py --publish'
+               for step in promotion['steps'])
     base = yaml.safe_load(Path("compose.yaml").read_text())["services"]["degiro-sync"]
     assert "build" not in base
     # The version itself is Renovate's job; tests/test_image_pins.py keeps every pin equal.
@@ -195,5 +201,6 @@ def test_highest_candidate_uses_numeric_order_and_names_mismatch():
         release.highest_candidate_source("v1.2.3", tags, commits.__getitem__)
     commits["v1.2.3"] = "candidate"
     release.highest_candidate_source("v1.2.3", tags, commits.__getitem__)
-    release.highest_candidate_source("v1.2.3", [], lambda _: pytest.fail("No candidate"))
+    with pytest.raises(RuntimeError, match='requires a qualified release candidate'):
+        release.highest_candidate_source("v1.2.3", [], lambda _: pytest.fail("No candidate"))
     release.highest_candidate_source("v1.2.3-rc.11", tags, lambda _: pytest.fail("Candidate"))

@@ -8,10 +8,15 @@ import pytest
 
 SPEC = importlib.util.spec_from_file_location("verify_release_image", Path("scripts/verify_release_image.py"))
 release = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(release)
+sys.path.insert(0, str(Path("scripts").resolve()))
+try:
+    SPEC.loader.exec_module(release)
+finally:
+    sys.path.pop(0)
 DIGEST = "sha256:" + "a" * 64
 NATIVE = "sha256:" + "b" * 64
 CONFIG = "sha256:" + "c" * 64
+REVISION = "0123456789abcdef0123456789abcdef01234567"
 
 
 def index(arch="amd64"):
@@ -27,7 +32,11 @@ def test_exact_published_native_config_matches_validated_local_image(monkeypatch
         calls.append(command)
         assert options["text"] is True and options["timeout"] <= 60
         if command[:3] == ["docker", "inspect", "--format"]:
-            return CONFIG + "\n"
+            return json.dumps({"Id": CONFIG, "Architecture": arch, "Os": "linux",
+                "Config": {"Env": ["APP_VERSION=1.2.3", "APP_REVISION=" + REVISION], "Labels": {
+                    "org.opencontainers.image.version": "1.2.3",
+                    "org.opencontainers.image.revision": REVISION,
+                    "org.opencontainers.image.source": "https://github.com/owner/repo"}}})
         assert command[:5] == ["docker", "buildx", "imagetools", "inspect", "--raw"]
         if command[-1].endswith(DIGEST):
             return json.dumps(index(arch))
@@ -35,10 +44,10 @@ def test_exact_published_native_config_matches_validated_local_image(monkeypatch
         return json.dumps({"config": {"digest": CONFIG if matches else DIGEST}})
     monkeypatch.setattr(release.subprocess, "check_output", output)
     if matches:
-        assert release.verify("ghcr.io/owner/repo", DIGEST, arch) == DIGEST
+        assert release.verify("ghcr.io/owner/repo", DIGEST, arch, "v1.2.3-rc.1", REVISION) == DIGEST
     else:
         with pytest.raises(RuntimeError, match="differs"):
-            release.verify("ghcr.io/owner/repo", DIGEST, arch)
+            release.verify("ghcr.io/owner/repo", DIGEST, arch, "v1.2.3-rc.1", REVISION)
     assert len(calls) == 3
 
 
@@ -64,16 +73,16 @@ def test_native_manifest_must_be_unique_valid_and_correct_platform(change):
 def test_invalid_reference_never_executes_docker(monkeypatch, image, digest, arch):
     monkeypatch.setattr(release.subprocess, "check_output", lambda *args, **kwargs: pytest.fail("Unexpected command"))
     with pytest.raises(RuntimeError):
-        release.verify(image, digest, arch)
+        release.verify(image, digest, arch, "v1.2.3-rc.1", REVISION)
 
 
 @pytest.mark.parametrize("succeeds", [True, False])
 def test_cli_only_hands_verified_digest_to_manifest_job(monkeypatch, tmp_path, succeeds):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sys, "argv", ["verify_release_image.py", "--image", "ghcr.io/owner/repo",
-        "--digest", DIGEST, "--arch", "amd64"])
-    def verify(image, digest, arch):
-        assert (image, digest, arch) == ("ghcr.io/owner/repo", DIGEST, "amd64")
+        "--digest", DIGEST, "--arch", "amd64", "--tag", "v1.2.3-rc.1", "--revision", REVISION])
+    def verify(image, digest, arch, tag, revision):
+        assert (image, digest, arch, tag, revision) == ("ghcr.io/owner/repo", DIGEST, "amd64", "v1.2.3-rc.1", REVISION)
         if not succeeds:
             raise RuntimeError("Published configuration mismatch")
         return digest
