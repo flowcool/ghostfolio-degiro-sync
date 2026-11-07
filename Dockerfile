@@ -9,7 +9,8 @@ ARG BW_VERSION=2026.10.0
 ARG BW_SHA256SUM_amd64=a300959a347bd71ff571da75687c8388da2ecd747a20f0abddd18643eb9466ba
 ARG BW_SHA256SUM_arm64=ea6203a565c48d3107bb8511221bb1e436e06c9bc07d05ba679d8921648e83c9
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        apt=3.0.4 libapt-pkg7.0=3.0.4 curl unzip tzdata libstdc++6 \
+        apt=3.0.4 libapt-pkg7.0=3.0.4 \
+        zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1 curl unzip tzdata libstdc++6 \
     && curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSLO "https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-${TARGETARCH}" \
     && case "${TARGETARCH}" in \
       amd64) EXPECTED="${SUPERCRONIC_SHA256SUM_amd64}" ;; \
