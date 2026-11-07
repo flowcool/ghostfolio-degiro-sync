@@ -59,27 +59,31 @@ This mode replaces the global per-step ceremony. The invariants above still appl
 - **Spec first.** `openspec/specs/` describes current behavior. No behavior change
   without an OpenSpec change approved by the operator. When reality contradicts
   the spec, stop and report; never amend the spec silently.
-- **OpenSpec to work items.** After approval, one parent item for the change and
-  one self-contained item per task (spec path, requirement, scenario, acceptance
-  command, files to touch). Closing an item ticks its task in `tasks.md`; archive
-  the change when every task item is closed, before the release item.
-- **Release.** A change that touches shipped code ends with a release item after
-  its last task: change archived, acceptance replayed on `main`, semver tag from
-  `main` on the operator's go, image published and pullable; the parent item
-  closes only after it. Renovate then opens the image-pin bump PR and automerges
-  it on green required checks; `tests/test_image_pins.py` keeps the Compose
-  default and README pins equal.
-- **One item = one fresh session.** Claim, implement, prove, close, stop. Do not
-  start the next item or arm a goal across items. Budget about 150 tool calls;
-  above that, stop and report the state.
-- **Generated OpenSpec skills.** These rules override them. `openspec-apply-change`
-  implements one task per session, not every task until done. Change names are
-  lowercase kebab-case; stop before any shell command if a selected change name
-  is not, and pass values read from OpenSpec output as quoted arguments, never
-  as shell source. Never read or write a path under `openspec/` that is a symlink or resolves
-  outside `openspec/`.
-- **Done = the item's scenario replayed for real** (command and observed output in
-  the closing note). Green offline tests alone are not done.
+- **OpenSpec to work items.** After approval, use one parent item and one
+  implementation item that lists all tasks. Each task names its spec path,
+  requirement, scenario, acceptance command and files. Tick tasks in
+  `tasks.md` as their proof passes. Archive the change in the final
+  implementation commit. Keep a separate item for an operation or decision.
+- **Release.** A change that touches shipped code has a release item after
+  implementation. Replay acceptance on `main`. Publish a semver tag only
+  under the operator's GO. The image must be pullable and qualified before
+  the parent closes. Repository Compose and README pins stay equal through
+  `tests/test_image_pins.py`. Infra owns the production image channel.
+- **Continue authorized work.** Continue through approved implementation,
+  review and release preparation in the same session. Reuse the owning item
+  and valid evidence. Split work for an independent deliverable, repository
+  boundary or new authorization. Stable publication, production, financial
+  writes and historical conversion retain their recorded GO.
+- **Generated OpenSpec skills.** These rules override them.
+  `openspec-apply-change` implements approved tasks in order. Continue while
+  evidence and context remain sufficient. Hand off with a concrete reason.
+  Change names use lowercase kebab-case. Validate a selected name before a
+  shell command. Pass values from OpenSpec output as quoted arguments.
+  Never read or write an `openspec/` symlink or a path outside that root.
+- **Done.** Prove the owning item's outcome with its acceptance command.
+  Reuse runtime evidence for the same artifact, inputs and environment.
+  Offline work closes with offline proof. A live outcome requires observed
+  live proof under its GO. No mandatory soak or daily-cycle count gates a release.
 - **Tests:** offline pytest for adapter logic on synthetic or anonymized fixtures.
   No tests for contributor tooling, docs or CI. No full-suite rerun for prose edits.
 - **Notes:** one closing note with evidence per item; no per-step findings.
