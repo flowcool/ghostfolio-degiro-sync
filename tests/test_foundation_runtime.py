@@ -115,6 +115,28 @@ def test_blank_mode_warns_once_even_if_configuration_fails(monkeypatch, caplog):
     assert caplog.text.count('DRY_RUN not set: simulation, nothing written') == 1
 
 
+@pytest.mark.parametrize('version,revision,expected', [
+    ('1.2.3', '0123456789abcdef0123456789abcdef01234567',
+     'ghostfolio-degiro-sync version 1.2.3 — commit 0123456789ab'),
+    ('', '', 'ghostfolio-degiro-sync version dev — commit unknown'),
+    ('SECRET\ninjected', 'SECRET\ninjected',
+     'ghostfolio-degiro-sync version dev — commit unknown'),
+])
+def test_each_failed_invocation_reports_safe_software_identity(monkeypatch, caplog,
+        version, revision, expected):
+    import logging
+    from ghostfolio_degiro_sync import app as command
+    monkeypatch.setenv('APP_VERSION', version)
+    monkeypatch.setenv('APP_REVISION', revision)
+    monkeypatch.setenv('APPRISE_URLS', '')
+    monkeypatch.delenv('GHOST_HOST', raising=False)
+    caplog.set_level(logging.INFO)
+    assert command.main(['--sync']) == 1
+    assert command.main(['--sync']) == 1
+    assert caplog.text.count(expected) == 2
+    assert 'SECRET' not in caplog.text
+
+
 @pytest.mark.parametrize('path,method,seconds', [('/api/v1/account', 'GET', 120),
     ('/api/v1/account/target-a', 'GET', 120), ('/api/v1/activities', 'GET', 60),
     ('/api/v1/import', 'POST', 60), ('/api/v1/account/target-a', 'PUT', 30)])

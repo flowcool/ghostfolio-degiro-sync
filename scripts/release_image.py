@@ -10,11 +10,14 @@ from pathlib import Path
 import requests
 
 
+from release_identity import RC_TAG, STABLE_TAG, release_identity, verify_image_identity
+
+
 def release_metadata(event):
     release = event.get("release", {})
     tag = release.get("tag_name", "")
-    if (event.get("action") != "published" or release.get("draft")
-            or not re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-rc\.[1-9][0-9]*)?", tag)
+    if (event.get("action") != "published" or release.get("draft") is not False
+            or not isinstance(tag, str) or not (STABLE_TAG.fullmatch(tag) or RC_TAG.fullmatch(tag))
             or type(release.get("prerelease")) is not bool
             or release["prerelease"] != ("-" in tag)):
         raise RuntimeError("A published semantic-version release is required")
@@ -30,10 +33,12 @@ def highest_candidate_source(tag, tags, resolve):
         match = re.fullmatch(re.escape(tag) + r"-rc\.([1-9][0-9]*)", candidate)
         if match:
             candidates.append((int(match[1]), candidate))
-    if candidates:
-        candidate = max(candidates)[1]
-        if resolve(tag) != resolve(candidate):
-            raise RuntimeError(f"Stable {tag} differs from highest candidate {candidate}")
+    if not candidates:
+        raise RuntimeError(f"Stable {tag} requires a qualified release candidate")
+    candidate = max(candidates)[1]
+    if resolve(tag) != resolve(candidate):
+        raise RuntimeError(f"Stable {tag} differs from highest candidate {candidate}")
+    return candidate
 
 
 def registry_version_absent(repository, tag, username, password):
@@ -43,7 +48,7 @@ def registry_version_absent(repository, tag, username, password):
     with requests.Session() as session:
         session.trust_env = False
         response = session.get("https://ghcr.io/token", params={"service": "ghcr.io",
-            "scope": f"repository:{repository}:pull,push"}, auth=(username, password),
+            "scope": f"repository:{repository}:pull"}, auth=(username, password),
             timeout=(10, 30), allow_redirects=False)
         print(f"Registry token endpoint HTTP {response.status_code}", file=sys.stderr)
         if response.status_code != 200:
@@ -60,8 +65,8 @@ def registry_version_absent(repository, tag, username, password):
             raise RuntimeError("Version image already exists; publication refused")
         body = response.json()
         errors = body.get("errors", []) if isinstance(body, dict) else []
-        if response.status_code != 404 or not errors or any(
-                error.get("code") not in ("MANIFEST_UNKNOWN", "NAME_UNKNOWN") for error in errors):
+        if response.status_code != 404 or not isinstance(errors, list) or not errors or any(
+                not isinstance(error, dict) or error.get("code") not in ("MANIFEST_UNKNOWN", "NAME_UNKNOWN") for error in errors):
             raise RuntimeError("Registry absence could not be proven")
 
 
@@ -101,6 +106,7 @@ def main():
         tagged = subprocess.check_output(["git", "rev-parse", tag + "^{commit}"], text=True, timeout=15).strip()
         if head != tagged:
             raise RuntimeError("Release checkout does not match tag")
+        app_version, revision = release_identity(tag, head)
         phase = "highest candidate source"
         tags = subprocess.check_output(["git", "tag", "--list", tag + "-rc.*"],
                                        text=True, timeout=15).splitlines()
@@ -117,7 +123,8 @@ def main():
                                     os.environ["GITHUB_ACTOR"], os.environ["GH_TOKEN"])
         phase = "workflow output"
         with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-            output.write(f"tag={tag}\nprerelease={str(prerelease).lower()}\n")
+            output.write(f"tag={tag}\nprerelease={str(prerelease).lower()}\n"
+                         f"app_version={app_version}\nrevision={revision}\n")
     except RuntimeError as error:
         if phase == "highest candidate source":
             raise SystemExit(str(error)) from None

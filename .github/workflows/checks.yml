@@ -111,7 +111,7 @@ jobs:
           docker info --format '{{json .RegistryConfig.Mirrors}}'
       - name: Build runtime on native architecture without publication
         if: env.RUN_WORK == 'true'
-        run: docker build --build-arg TARGETARCH=${{ matrix.arch }} --build-arg APP_VERSION="${GITHUB_SHA}" -t degiro-smoke:ci .
+        run: docker build --build-arg TARGETARCH=${{ matrix.arch }} --build-arg APP_VERSION=0.0.0 --build-arg APP_REVISION="${GITHUB_SHA}" -t degiro-smoke:ci .
       # Blocking gate: fixable HIGH/CRITICAL in packages we can act on (base image
       # OS packages, plus our Python layer). The supercronic binary is excluded
       # here because its Go-stdlib CVEs are not fixable by us until upstream ships
