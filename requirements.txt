@@ -1,6 +1,6 @@
 # Runtime dependency closure; all direct and transitive versions are pinned.
 # Renovate proposes updates; validate the complete closure with pip-audit and CI.
-certifi==2026.10.19
+certifi==2026.10.23
     # via requests
 charset-normalizer==3.5.2
     # via requests
@@ -17,16 +17,16 @@ annotated-types==0.8.0
 degiro-connector==3.0.36
 isodate==0.7.2
 orjson==3.13.0
-pydantic==2.14.0
-pydantic-core==2.50.0
+pydantic==2.14.1
+pydantic-core==2.50.1
 pyotp==2.10.0
 typing-extensions==4.16.0
 typing-inspection==0.4.4
-wrapt==2.5.0
+wrapt==2.5.1
 
 # Reused IBKR isolated Apprise worker dependency closure.
 apprise==2.0.1
 click==8.5.0
-markdown==3.11
+markdown==3.11.2
 oauthlib==4.0.0
 requests-oauthlib==2.0.0
