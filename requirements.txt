@@ -17,15 +17,15 @@ annotated-types==0.8.0
 degiro-connector==3.0.36
 isodate==0.7.2
 orjson==3.13.0
-pydantic==2.14.1
-pydantic-core==2.50.1
+pydantic==2.14.2
+pydantic-core==2.50.2
 pyotp==2.10.0
 typing-extensions==4.16.0
 typing-inspection==0.4.4
-wrapt==2.5.1
+wrapt==2.5.2
 
 # Reused IBKR isolated Apprise worker dependency closure.
-apprise==2.0.1
+apprise==2.1.0
 click==8.5.0
 markdown==3.11.2
 oauthlib==4.0.1
