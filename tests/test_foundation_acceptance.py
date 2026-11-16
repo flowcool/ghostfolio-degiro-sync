@@ -1,7 +1,9 @@
 """Exact accepted subsets, profile rewrites and durable uncertainty."""
 from copy import deepcopy
+import json
 
 import pytest
+import requests
 
 from ghostfolio_degiro_sync import accounting, ghostfolio, journal, sync
 from test_degiro_sync import NOW, TARGET, MAPPING, QUOTES, activity_row, opening_holding, snapshot
@@ -89,6 +91,98 @@ def test_real_core_accepts_zero_manual_uuid_with_exact_association(monkeypatch, 
     accepted, profiles = ghostfolio.prove_accepted_subset([proposal], returned)
     assert ok and accepted == [proposal]
     assert profiles[proposal['comment']]['returned'] == UUID
+
+
+def test_native_nullable_currency_import_preserves_raw_evidence_and_repeat_identity(monkeypatch):
+    import ghostfolio_core as core
+    proposal = {**fee(), 'type': 'INTEREST', 'comment': 'DEGIRO#123:INTEREST:104',
+        'symbol': 'GF_DEGIRO_123_FLATEX_INTEREST_EUR'}
+    created = activity_row({**proposal, 'symbol': UUID, 'currency': None})
+    created['assetProfile']['currency'] = 'EUR'
+    body = {'activities': [created], 'count': 1}
+    raw = json.dumps(body).encode()
+    reply = requests.Response()
+    reply.status_code = 201
+    reply._content = raw
+    monkeypatch.setattr(requests.Session, 'send', lambda *args, **kwargs: reply)
+    config = {'ghost_host': 'http://localhost:3333', 'ghost_token': 'synthetic', 'dry_run': False}
+    with ghostfolio.ghost_transport(config, TARGET):
+        returned, ok = core.ghost_import_activities(config, [proposal])
+    accepted, profiles = ghostfolio.prove_accepted_subset([proposal], returned)
+    assert ok and accepted == [proposal]
+    assert profiles[proposal['comment']]['returned'] == UUID
+    rows, _ = ghostfolio.index_existing_activities(body, TARGET, now=NOW)
+    rows, bound = ghostfolio.bind_existing_profiles(rows, [proposal], profiles)
+    assert ghostfolio.pending_activities([proposal], rows, TARGET, '123') == []
+    assert bound == profiles
+    assert reply.content == raw
+    assert body['activities'][0]['currency'] is None
+
+
+@pytest.mark.parametrize('profile_currency', [None, '', 'GBp', 123])
+def test_nullable_currency_without_supported_profile_stays_uncertain(monkeypatch, profile_currency):
+    import ghostfolio_core as core
+    proposal = {**fee(), 'type': 'INTEREST', 'comment': 'DEGIRO#123:INTEREST:104',
+        'symbol': 'GF_DEGIRO_123_FLATEX_INTEREST_EUR'}
+    created = activity_row({**proposal, 'symbol': UUID, 'currency': None})
+    if profile_currency is not None:
+        created['assetProfile']['currency'] = profile_currency
+    reply = requests.Response()
+    reply.status_code = 201
+    reply._content = json.dumps({'activities': [created]}).encode()
+    monkeypatch.setattr(requests.Session, 'send', lambda *args, **kwargs: reply)
+    config = {'ghost_host': 'http://localhost:3333', 'ghost_token': 'synthetic', 'dry_run': False}
+    with ghostfolio.ghost_transport(config, TARGET):
+        assert core.ghost_import_activities(config, [proposal]) == ([], False)
+    assert config['_uncertain_import_accounts'] == {'target-a'}
+    with pytest.raises(RuntimeError, match='Unverified .* (currency|representation)'):
+        ghostfolio.index_existing_activities({'activities': [created], 'count': 1}, TARGET, now=NOW)
+
+
+def test_explicit_activity_currency_overrides_profile_currency(monkeypatch):
+    import ghostfolio_core as core
+    proposal = fee()
+    created = activity_row({**proposal, 'symbol': UUID})
+    created['assetProfile']['currency'] = 'USD'
+    reply = requests.Response()
+    reply.status_code = 201
+    reply._content = json.dumps({'activities': [created]}).encode()
+    monkeypatch.setattr(requests.Session, 'send', lambda *args, **kwargs: reply)
+    config = {'ghost_host': 'http://localhost:3333', 'ghost_token': 'synthetic', 'dry_run': False}
+    with ghostfolio.ghost_transport(config, TARGET):
+        returned, ok = core.ghost_import_activities(config, [proposal])
+    assert ok and returned[0]['currency'] == 'EUR'
+    rows, _ = ghostfolio.index_existing_activities({'activities': [created], 'count': 1}, TARGET, now=NOW)
+    assert rows[0]['currency'] == 'EUR'
+
+
+def test_positive_import_recovery_uses_exact_inherited_profile_currency(tmp_path):
+    tmp_path.chmod(0o700)
+    proposal = {**fee(), 'type': 'INTEREST', 'comment': 'DEGIRO#123:INTEREST:104',
+        'symbol': 'GF_DEGIRO_123_FLATEX_INTEREST_EUR'}
+    row = activity_row({**proposal, 'symbol': UUID, 'currency': None})
+    row['assetProfile']['currency'] = 'EUR'
+    config = {'source_account': '123', 'target_account': 'target-a', 'dry_run': False,
+        'ghost_host': 'http://localhost:3333', 'state_dir': str(tmp_path)}
+    with journal.account_journal(config) as state:
+        intent = journal.begin_intent(state, 'import', {proposal['comment']: proposal})
+        assert journal.verify_import_intent(state, config, {'activities': [row], 'count': 1}, intent) == 1
+        assert state['document']['pending']['accepted'] == [proposal]
+        assert state['document']['profiles'][proposal['comment']]['returned'] == UUID
+        assert row['currency'] is None
+
+
+@pytest.mark.parametrize('kind', ['BUY', 'DIVIDEND'])
+def test_existing_yahoo_rows_inherit_only_their_own_profile_currency(kind):
+    source_kind = 'TRADE' if kind == 'BUY' else kind
+    proposal = {**fee(), 'type': kind, 'comment': f'DEGIRO#123:{source_kind}:104',
+        'symbol': 'TEST', 'dataSource': 'YAHOO', 'currency': 'USD', 'unitPrice': 10}
+    row = activity_row({**proposal, 'currency': None})
+    row['assetProfile']['currency'] = 'USD'
+    rows, _ = ghostfolio.index_existing_activities({'activities': [row], 'count': 1}, TARGET, now=NOW)
+    assert rows[0]['currency'] == 'USD'
+    assert ghostfolio.pending_activities([proposal], rows, TARGET, '123') == []
+    assert row['currency'] is None
 
 
 def test_recovery_requires_exact_comment_not_only_equivalent_generation(snapshot, tmp_path):

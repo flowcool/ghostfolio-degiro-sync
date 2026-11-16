@@ -112,6 +112,23 @@ def ghost_transport(config: Any, target_account: Any) -> Iterator[Any]:
                     or not core.activity_is_active({"account": current}) or current.get("balance") is None):
                 raise RuntimeError("Ghostfolio cash account changed or is redacted")
             accounting_module.financial_decimal(current["balance"])
+        if request.method == "POST" and parts.path == "/api/v1/import" and 200 <= response.status_code < 300:
+            original_json = response.json
+
+            def normalized_json(**json_kwargs: Any) -> Any:
+                body = original_json(**json_kwargs)
+                if not isinstance(body, dict) or not isinstance(body.get("activities"), list):
+                    return body
+                try:
+                    rows = [effective_activity_currency(row) if isinstance(row, dict) else row
+                            for row in body["activities"]]
+                except RuntimeError:
+                    # The immutable core treats an unprovable reply as uncertain.
+                    raise ValueError("Invalid Ghostfolio activity currency") from None
+                return {**body, "activities": rows}
+
+            # Keep response.content/text and captured wire evidence unchanged.
+            response.json = normalized_json
         return response
 
     session.send = send
@@ -128,6 +145,19 @@ def ghost_transport(config: Any, target_account: Any) -> Iterator[Any]:
         core.requests = previous_requests
         core.log.disabled, core.log.propagate = saved_log
         session.close()
+
+
+def effective_activity_currency(row: dict[str, Any]) -> dict[str, Any]:
+    """Resolve stored null only through that activity's supported profile currency."""
+    if "currency" not in row or row["currency"] is not None:
+        return row
+    profile = row["assetProfile"] if "assetProfile" in row else row.get("SymbolProfile")
+    if (not isinstance(profile, dict) or not isinstance(profile.get("symbol"), str)
+            or not profile["symbol"] or profile.get("dataSource") not in ("YAHOO", "MANUAL")
+            or not isinstance(profile.get("currency"), str)
+            or profile["currency"] not in accounting_module.CURRENCY_QUANTA):
+        raise RuntimeError("Unverified Ghostfolio activity currency")
+    return {**row, "currency": profile["currency"]}
 
 
 def index_existing_activities(body: Any, target_account: Any, *, now: datetime | None=None) -> tuple[list[dict[str, Any]], dict[tuple[str, str], Decimal]]:
@@ -159,6 +189,11 @@ def index_existing_activities(body: Any, target_account: Any, *, now: datetime |
             else:
                 result.append(row)
             continue
+        profile = row["assetProfile"] if "assetProfile" in row else row.get("SymbolProfile")
+        # Legacy holdings can prove quantity without proving monetary units.
+        # Keep missing currency unavailable; exact comparisons still refuse it.
+        if not isinstance(profile, dict) or profile.get("currency") is not None:
+            row = effective_activity_currency(row)
         for field in ("quantity", "unitPrice", "fee"):
             if accounting_module.financial_decimal(row.get(field)) < 0:
                 raise RuntimeError("Invalid or redacted Ghostfolio financial context")
