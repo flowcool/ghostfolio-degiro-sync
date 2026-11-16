@@ -10,7 +10,7 @@ The connector confuses currencies accepted by Ghostfolio with the three currenci
 - Accept compatible currencies through versioned reference data, without an EUR/USD/JPY restriction.
 - Preserve original currency evidence. Resolve a null activity currency only from that activity's own valid profile.
 - Keep structurally valid historical data when unavailable monetary evidence does not affect the operation. Require proof for holdings, matching, ownership and recovery.
-- Keep one Ghostfolio account. Set cash to DEGIRO's verified signed aggregate in its base currency. Do not calculate a replacement aggregate or create currency accounts.
+- Keep one Ghostfolio account. Set EUR cash to DEGIRO's verified signed total with zero foreign components. Do not calculate a replacement aggregate or create currency accounts.
 - Explain unavailable units and unqualified cash cases without exposing private data.
 
 ### Event scope
@@ -30,7 +30,8 @@ The source remains the saved French DEGIRO contract in `docs/source-contract.md`
 | Zero Flatex interest | Existing EUR convention |
 | Positive monetary-fund compensation | Existing EUR convention |
 | Announced dividend | No activity |
-| Current foreign-currency cash | Verified broker base-currency aggregate |
+| Current EUR cash | Verified signed broker total; foreign components must be zero |
+| Nonzero foreign cash | Deferred; refuse before dispatch |
 | Legacy fund NAV/transactions, corporate actions, unknown categories | Remain blocked when relevant |
 
 ## Capabilities
@@ -41,7 +42,7 @@ None.
 
 ### Modified Capabilities
 
-- `degiro-synchronization`: general currency evidence, relevant-data refusal, quote units and aggregate cash.
+- `degiro-synchronization`: general currency evidence, relevant-data refusal, quote units and verified signed EUR cash.
 
 ## Impact
 
@@ -49,4 +50,8 @@ Adapter configuration, accounting, destination reads, selection, broker cash cla
 
 ## Non-goals
 
-No automatic FX trading, external-rate cash calculation, multiple destination accounts, instrument-class expansion, new income policy, historical conversion, production activation or stable publication.
+No automatic FX trading, external-rate cash calculation, multiple destination accounts, instrument-class expansion, new income policy, historical conversion, production activation or nonzero foreign-cash support. Release publication follows the operator GO.
+
+## Approved release boundary
+
+The operator confirmed this boundary on 2026-11-16: release compatible trade and dividend currencies with verified signed EUR cash. Nonzero foreign cash and other base currencies remain refused. Their source qualification is separate future work. Do not acquire new broker data for this release.

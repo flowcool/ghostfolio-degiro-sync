@@ -18,9 +18,9 @@ All requirement and scenario names below refer to `specs/degiro-synchronization/
 
 ## 4. Broker cash aggregate
 
-- [x] 4.1 Classify typed cash positions before security metadata lookup in both reading and position reconciliation. Preserve original component currencies and require unique complete current evidence. Requirement: Cash check and simulation. Scenario: One account with foreign cash. Files: `ghostfolio_degiro_sync/degiro.py`, `ghostfolio_degiro_sync/sync.py`, `ghostfolio_degiro_sync/accounting.py`, `tests/test_degiro_read.py`, `tests/test_rolling.py`; update `docs/source-contract.md` to distinguish cash from securities. Acceptance: `.venv/bin/python -m pytest -q tests/test_degiro_read.py tests/test_rolling.py`.
+- [x] 4.1 Classify typed cash positions before security metadata lookup in both reading and position reconciliation. Preserve original component currencies and require unique complete current evidence. Requirement: Cash check and simulation. Scenario: One EUR account with foreign-cash refusal. Files: `ghostfolio_degiro_sync/degiro.py`, `ghostfolio_degiro_sync/sync.py`, `ghostfolio_degiro_sync/accounting.py`, `tests/test_degiro_read.py`, `tests/test_rolling.py`; update `docs/source-contract.md` to distinguish cash from securities. Acceptance: `.venv/bin/python -m pytest -q tests/test_degiro_read.py tests/test_rolling.py`.
 
-- [ ] 4.2 Prove and consume the DEGIRO-reported base-currency aggregate for one existing account. Bind denomination, source, freshness, complete components and independent cross-checks; preserve current EUR-only validation. Never invent a conversion, sum unlike currencies or double-count aliases. Add synthetic cases for qualified multi-currency evidence and positive, zero and negative verified totals, and refusal of unqualified layouts or settlement. Requirements: Cash check and simulation. Scenarios: Cash and failure contracts; One account with foreign cash. Files: `ghostfolio_degiro_sync/accounting.py`, `ghostfolio_degiro_sync/models.py`, `ghostfolio_degiro_sync/sync.py`, `tests/test_degiro_cash.py`, `tests/test_rolling.py`; document exact qualified fields and limitations in `docs/source-contract.md` and README. Acceptance: `.venv/bin/python -m pytest -q tests/test_degiro_cash.py tests/test_rolling.py`, plus authoritative or retained-source proof for every admitted nonzero-foreign-cash layout. This task remains incomplete if that proof is absent; request any fresh evidence through Infra's approved operation rather than starting a broker login here.
+- [x] 4.2 Accept positive, zero and negative verified totals in the existing EUR-only layout. Preserve exact source binding, freshness, complete components, agreeing aliases and zero settlement. Refuse nonzero foreign components, other base currencies, duplicate aliases, missing base denomination and unqualified layouts before dispatch. Do not calculate replacement FX or create accounts. Nonzero foreign-cash qualification is deferred under the operator's explicit 2026-11-16 release boundary. Requirements: Cash check and simulation. Scenarios: Cash and failure contracts; One EUR account with foreign-cash refusal. Files: `ghostfolio_degiro_sync/accounting.py`, `tests/test_degiro_cash.py`, `tests/test_rolling.py`, `docs/source-contract.md`, README. Acceptance: `.venv/bin/python -m pytest -q tests/test_degiro_cash.py tests/test_rolling.py`.
 
 ## 5. User-visible results
 
@@ -32,13 +32,6 @@ Before committing shipped code, run touched-file type checks, `.venv/bin/python 
 
 Use one branch and PR for the deliverable. Apply the repository review/merge gate if publication is requested. Archive this change in the final implementation commit after proof passes. Release preparation and the returned immutable artifact remain in the owning work chain. Stable publication and Infra production activation keep their separate authority. A successful synthetic or lab result does not close real-history acceptance or replace a fresh authorized production preview.
 
-## Current proof boundary
+## Release boundary
 
-Offline slices 1.1, 2.1, 3.1, 3.2, 4.1 and 5.1 pass their targeted checks.
-Task 4.2 accepts verified signed totals in the existing EUR-only layout, but
-remains incomplete: no retained or authoritative source proves a nonzero foreign
-component layout and its independent base-currency aggregate checks. Such inputs
-still refuse before dispatch. The Infra operation owns any fresh broker capture.
-No lab or release qualification is claimed. The image publication and final
-empty/golden acceptance remain pending. Keep this change unarchived until all
-acceptance gates pass.
+The operator approved this release on 2026-11-16 with compatible trade/dividend currencies and verified signed EUR cash. Nonzero foreign cash remains refused and is tracked separately. All seven offline slices pass their targeted checks. Exact-image native acceptance and final release qualification are required before delivery. Real-history acceptance remains independent.

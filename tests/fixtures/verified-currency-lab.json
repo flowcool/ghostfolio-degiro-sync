@@ -1,0 +1,381 @@
+{
+  "schema": "degiro-lab-replay-v1",
+  "synthetic": true,
+  "clock": "2026-01-04T12:00:02+00:00",
+  "window": [
+    "2026-01-01",
+    "2026-01-04"
+  ],
+  "source": {
+    "source_account": "123",
+    "transactions": [
+      {
+        "id": 9,
+        "productId": 20,
+        "buysell": "B",
+        "date": "2026-01-01T10:00:00+01:00",
+        "quantity": 2,
+        "price": 10,
+        "total": -20,
+        "totalInBaseCurrency": -18.18,
+        "fxRate": 1.1,
+        "grossFxRate": 1.1,
+        "nettFxRate": 1.12,
+        "feeInBaseCurrency": 0,
+        "autoFxFeeInBaseCurrency": 0,
+        "totalFeesInBaseCurrency": 0
+      },
+      {
+        "id": 10,
+        "productId": 20,
+        "buysell": "S",
+        "date": "2026-01-02T10:00:00+01:00",
+        "quantity": -2,
+        "price": 10,
+        "total": 20,
+        "totalInBaseCurrency": 18.18,
+        "fxRate": 1.1,
+        "grossFxRate": 1.1,
+        "nettFxRate": 1.12,
+        "feeInBaseCurrency": -0.05,
+        "autoFxFeeInBaseCurrency": -0.1,
+        "totalFeesInBaseCurrency": -0.15
+      },
+      {
+        "id": 1009,
+        "productId": 30,
+        "buysell": "B",
+        "date": "2026-01-01T10:00:00+01:00",
+        "quantity": 2,
+        "price": 10,
+        "total": -20,
+        "totalInBaseCurrency": -18.18,
+        "fxRate": 1.1,
+        "grossFxRate": 1.1,
+        "nettFxRate": 1.12,
+        "feeInBaseCurrency": 0,
+        "autoFxFeeInBaseCurrency": 0,
+        "totalFeesInBaseCurrency": 0
+      },
+      {
+        "id": 1010,
+        "productId": 30,
+        "buysell": "S",
+        "date": "2026-01-02T10:00:00+01:00",
+        "quantity": -2,
+        "price": 10,
+        "total": 20,
+        "totalInBaseCurrency": 18.18,
+        "fxRate": 1.1,
+        "grossFxRate": 1.1,
+        "nettFxRate": 1.12,
+        "feeInBaseCurrency": -0.05,
+        "autoFxFeeInBaseCurrency": -0.1,
+        "totalFeesInBaseCurrency": -0.15
+      },
+      {
+        "id": 2009,
+        "productId": 40,
+        "buysell": "B",
+        "date": "2026-01-01T10:00:00+01:00",
+        "quantity": 2,
+        "price": 10,
+        "total": -20,
+        "totalInBaseCurrency": -18.18,
+        "fxRate": 1.1,
+        "grossFxRate": 1.1,
+        "nettFxRate": 1.12,
+        "feeInBaseCurrency": 0,
+        "autoFxFeeInBaseCurrency": 0,
+        "totalFeesInBaseCurrency": 0
+      },
+      {
+        "id": 2010,
+        "productId": 40,
+        "buysell": "S",
+        "date": "2026-01-02T10:00:00+01:00",
+        "quantity": -2,
+        "price": 10,
+        "total": 20,
+        "totalInBaseCurrency": 18.18,
+        "fxRate": 1.1,
+        "grossFxRate": 1.1,
+        "nettFxRate": 1.12,
+        "feeInBaseCurrency": -0.05,
+        "autoFxFeeInBaseCurrency": -0.1,
+        "totalFeesInBaseCurrency": -0.15
+      }
+    ],
+    "products": {
+      "20": {
+        "id": "20",
+        "productType": "STOCK",
+        "contractSize": 1,
+        "currency": "USD",
+        "isin": "US0378331005",
+        "symbol": "TEST"
+      },
+      "30": {
+        "id": "30",
+        "productType": "STOCK",
+        "contractSize": 1,
+        "currency": "CAD",
+        "isin": "CA7800871021",
+        "symbol": "TEST"
+      },
+      "40": {
+        "id": "40",
+        "productType": "STOCK",
+        "contractSize": 1,
+        "currency": "GBP",
+        "isin": "GB00BH4HKS39",
+        "symbol": "TEST"
+      }
+    },
+    "account_info": {
+      "baseCurrency": "EUR"
+    },
+    "update": {
+      "baseCurrency": "EUR",
+      "totalPortfolio": {
+        "value": [
+          {
+            "name": "totalCash",
+            "value": 12.3
+          },
+          {
+            "name": "degiroCash",
+            "value": 0
+          },
+          {
+            "name": "flatexCash",
+            "value": 12.3
+          },
+          {
+            "name": "pendingSettlement",
+            "value": 0
+          }
+        ]
+      },
+      "cashFunds": {
+        "value": [
+          {
+            "name": "cashFund",
+            "value": [
+              {
+                "name": "currencyCode",
+                "value": "EUR"
+              },
+              {
+                "name": "value",
+                "value": 12.3
+              }
+            ]
+          }
+        ]
+      },
+      "portfolio": {
+        "value": [
+          {
+            "id": "FLATEX_EUR",
+            "name": "positionrow",
+            "value": [
+              {
+                "name": "id",
+                "value": "FLATEX_EUR"
+              },
+              {
+                "name": "size",
+                "value": 12.3
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "cash_movements": [
+      {
+        "id": 101,
+        "type": "CASH_TRANSACTION",
+        "description": "Dividende",
+        "productId": 20,
+        "currency": "USD",
+        "change": 10,
+        "date": "2026-01-03T10:00:00+01:00",
+        "valueDate": "2026-01-03T00:00:00+01:00"
+      },
+      {
+        "id": 102,
+        "type": "CASH_TRANSACTION",
+        "description": "Impôts sur dividende",
+        "productId": 20,
+        "currency": "USD",
+        "change": -1.5,
+        "date": "2026-01-03T10:00:00+01:00",
+        "valueDate": "2026-01-03T00:00:00+01:00"
+      },
+      {
+        "id": 103,
+        "type": "CASH_TRANSACTION",
+        "description": "Frais DEGIRO de courtage et/ou de parties tierces",
+        "productId": 20,
+        "orderId": "synthetic-order",
+        "currency": "EUR",
+        "change": -0.05,
+        "date": "2026-01-02T10:00:00+01:00",
+        "valueDate": "2026-01-02T10:00:00+01:00"
+      },
+      {
+        "id": 104,
+        "type": "CASH_TRANSACTION",
+        "description": "Frais de connexion aux places boursières 2026 (Synthetic exchange)",
+        "currency": "EUR",
+        "change": -2.5,
+        "date": "2026-01-01T00:00:00+01:00",
+        "valueDate": "2026-01-01T00:00:00+01:00"
+      },
+      {
+        "id": 105,
+        "type": "CASH_TRANSACTION",
+        "description": "Flatex Interest Income",
+        "currency": "EUR",
+        "change": 0,
+        "date": "2026-01-01T00:00:00+01:00",
+        "valueDate": "2026-01-01T00:00:00+01:00"
+      },
+      {
+        "id": 106,
+        "type": "COMPENSATION_BOOKING",
+        "description": "Compensation Fonds Monétaires DEGIRO",
+        "currency": "EUR",
+        "change": 0.02,
+        "date": "2026-01-01T00:00:00+01:00",
+        "valueDate": "2026-01-01T00:00:00+01:00"
+      },
+      {
+        "id": 209,
+        "type": "TRANSACTION",
+        "productId": 20,
+        "description": "Achat 2 TEST",
+        "change": -20,
+        "currency": "USD",
+        "date": "2026-01-01T10:00:00+01:00",
+        "valueDate": "2026-01-01T10:00:00+01:00"
+      },
+      {
+        "id": 210,
+        "type": "TRANSACTION",
+        "productId": 20,
+        "description": "Vente 2 TEST",
+        "change": 20,
+        "currency": "USD",
+        "date": "2026-01-02T10:00:00+01:00",
+        "valueDate": "2026-01-02T10:00:00+01:00"
+      },
+      {
+        "id": 1101,
+        "type": "CASH_TRANSACTION",
+        "description": "Dividende",
+        "productId": 30,
+        "currency": "CAD",
+        "change": 10,
+        "date": "2026-01-03T10:00:00+01:00",
+        "valueDate": "2026-01-03T00:00:00+01:00"
+      },
+      {
+        "id": 1102,
+        "type": "CASH_TRANSACTION",
+        "description": "Impôts sur dividende",
+        "productId": 30,
+        "currency": "CAD",
+        "change": -1.5,
+        "date": "2026-01-03T10:00:00+01:00",
+        "valueDate": "2026-01-03T00:00:00+01:00"
+      },
+      {
+        "id": 1103,
+        "type": "CASH_TRANSACTION",
+        "description": "Frais DEGIRO de courtage et/ou de parties tierces",
+        "productId": 30,
+        "orderId": "synthetic-order1000",
+        "currency": "EUR",
+        "change": -0.05,
+        "date": "2026-01-02T10:00:00+01:00",
+        "valueDate": "2026-01-02T10:00:00+01:00"
+      },
+      {
+        "id": 1209,
+        "type": "TRANSACTION",
+        "productId": 30,
+        "description": "Achat 2 TEST",
+        "change": -20,
+        "currency": "CAD",
+        "date": "2026-01-01T10:00:00+01:00",
+        "valueDate": "2026-01-01T10:00:00+01:00"
+      },
+      {
+        "id": 1210,
+        "type": "TRANSACTION",
+        "productId": 30,
+        "description": "Vente 2 TEST",
+        "change": 20,
+        "currency": "CAD",
+        "date": "2026-01-02T10:00:00+01:00",
+        "valueDate": "2026-01-02T10:00:00+01:00"
+      },
+      {
+        "id": 2101,
+        "type": "CASH_TRANSACTION",
+        "description": "Dividende",
+        "productId": 40,
+        "currency": "GBP",
+        "change": 10,
+        "date": "2026-01-03T10:00:00+01:00",
+        "valueDate": "2026-01-03T00:00:00+01:00"
+      },
+      {
+        "id": 2102,
+        "type": "CASH_TRANSACTION",
+        "description": "Impôts sur dividende",
+        "productId": 40,
+        "currency": "GBP",
+        "change": -1.5,
+        "date": "2026-01-03T10:00:00+01:00",
+        "valueDate": "2026-01-03T00:00:00+01:00"
+      },
+      {
+        "id": 2103,
+        "type": "CASH_TRANSACTION",
+        "description": "Frais DEGIRO de courtage et/ou de parties tierces",
+        "productId": 40,
+        "orderId": "synthetic-order2000",
+        "currency": "EUR",
+        "change": -0.05,
+        "date": "2026-01-02T10:00:00+01:00",
+        "valueDate": "2026-01-02T10:00:00+01:00"
+      },
+      {
+        "id": 2209,
+        "type": "TRANSACTION",
+        "productId": 40,
+        "description": "Achat 2 TEST",
+        "change": -20,
+        "currency": "GBP",
+        "date": "2026-01-01T10:00:00+01:00",
+        "valueDate": "2026-01-01T10:00:00+01:00"
+      },
+      {
+        "id": 2210,
+        "type": "TRANSACTION",
+        "productId": 40,
+        "description": "Vente 2 TEST",
+        "change": 20,
+        "currency": "GBP",
+        "date": "2026-01-02T10:00:00+01:00",
+        "valueDate": "2026-01-02T10:00:00+01:00"
+      }
+    ],
+    "fetch_started_at": "2026-01-04T12:00:00+00:00",
+    "fetched_at": "2026-01-04T12:00:01+00:00"
+  }
+}

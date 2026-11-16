@@ -13,7 +13,7 @@ Implement the general contract without changing authentication, journal format, 
 - **Evidence:** adapt `ghostfolio_ibkr_sync/ghostfolio.py`'s `CurrencyEvidence` and `effective_currency` mechanism. Keep raw/effective values, origin and refusal reason. A missing field differs from null. Destination compatibility does not authorize accounting.
 - **Units:** use a packaged keyed YAML currency registry with reference dates, hashes and source URLs. Derive standard minor units from SIX ISO 4217 data. Verify destination acceptance against Ghostfolio's validator. Reuse the sibling's major/derived-unit distinction, but require explicit verified mapping rather than its ticker-suffix inference. Use exact Decimal factors; do not add a runtime lookup or dependency.
 - **History:** retain complete rows and global ownership checks. Assess required evidence in `select_account_activities` before allowing unavailable historical monetary units. Include manual-match margins, holding quantities and pending recovery. CAD is an ordinary recognized currency, not an exception.
-- **Cash:** reuse the sibling's `ibkr.parse_cash_report` principle: consume the broker's signed base-currency aggregate. Keep DEGIRO-specific verification in `current_cash_balance`; recognize typed CASH rows before security-ID decoding in both broker reading and holdings selection. Reuse the immutable `ghost_update_cash_balance` writer and durable intent. Do not copy IBKR XML fields into DEGIRO or construct a replacement aggregate.
+- **Cash:** consume the verified signed EUR total through the existing qualified layout. Require zero foreign components and zero settlement. Defer other base currencies and nonzero foreign components; refuse those layouts before dispatch. Keep DEGIRO-specific verification in `current_cash_balance`; recognize typed CASH rows before security-ID decoding in both broker reading and holdings selection. Reuse the immutable `ghost_update_cash_balance` writer and durable intent. Do not copy IBKR XML fields into DEGIRO or construct a replacement aggregate.
 - **Reports:** reuse existing diagnostic reads and exact decimal comparison. Show provenance and unavailable evidence without changing selection.
 
 ## Risks / Trade-offs
@@ -28,4 +28,4 @@ Use one branch and PR. Prove synthetic regressions and retained offline admissio
 
 ## Open Questions
 
-Which retained DEGIRO fields prove aggregate denomination and component coverage with nonzero foreign cash? Resolve the evidence gate before enabling that layout; obtain any fresh capture through the existing Infra operation.
+None for this release. The operator deferred nonzero foreign cash on 2026-11-16. Future work must prove aggregate denomination, component coverage and independent checks before enabling that layout.

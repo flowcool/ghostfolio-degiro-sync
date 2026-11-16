@@ -66,11 +66,11 @@ Baseline changed: `tests/test_foundation_acceptance.py` currently preserves unsu
 
 ### Requirement: Cash check and simulation
 
-Current cash MUST come from fresh DEGIRO evidence and never from old ledger balances. The connector SHALL keep one configured Ghostfolio account. Its currency SHALL equal the broker base currency. Where foreign cash exists, the proposed balance SHALL be the broker-reported aggregate already expressed in that base currency. A list of currency balances alone SHALL NOT establish an aggregate.
+Current cash MUST come from fresh DEGIRO evidence and never from old ledger balances. The connector SHALL keep one configured Ghostfolio account in EUR. It SHALL consume the verified DEGIRO-reported EUR total through the existing qualified layout. Its current source-account binding, freshness, complete component coverage and exact agreeing cash aliases SHALL remain required. Foreign cash components and pending settlement MUST be zero. Positive, zero and negative verified EUR totals SHALL be accepted.
 
-The aggregate SHALL have proved field meaning, currency, current source-account binding, complete component coverage and independent consistency checks. Missing, duplicate, contradictory, stale or unqualified evidence SHALL block before any financial write. Unproved nonzero components SHALL NOT become zero. Cash aliases and pseudo-positions SHALL remain corroboration, not extra balances to add. A verified aggregate SHALL be accepted when positive, zero or negative. Its sign SHALL NOT change its source meaning or authorize a broker transaction. Nonzero settlement and new cash/income categories SHALL retain refusal until separately qualified; the connector SHALL NOT invent settled cash.
+Nonzero foreign cash, other base currencies and unqualified layouts SHALL block before any financial write. This release SHALL NOT claim their aggregate semantics are qualified. A valid currency code, a list of currency balances or a foreign-currency security SHALL NOT authorize a foreign-cash aggregate. Missing, duplicate, contradictory or stale evidence SHALL retain refusal. No local FX calculation, unlike-currency sum, account creation or account-currency change is permitted.
 
-The connector SHALL NOT calculate a substitute aggregate from external rates, trade rates or a sum of unlike currencies. It SHALL NOT create accounts or change the configured account currency. Existing EUR-only evidence SHALL keep its current verification path. Other base currencies and nonzero foreign cash SHALL require the same proved aggregate contract. Recognition of a currency SHALL NOT claim that an unobserved DEGIRO cash layout has been qualified.
+Nonzero foreign-cash aggregate support is deferred by the operator's 2026-11-16 scope decision. A later approved change must prove field meaning, base denomination, full coverage and independent equality before that support can be enabled. The connector SHALL NOT create nonzero foreign balances to obtain this evidence.
 
 A one-cent statement difference SHALL remain accepted only under its existing corroborated execution rule. This change SHALL NOT extend that tolerance to other categories or monetary scales. DRY_RUN SHALL authenticate, read, log proposals and the cash change, write nothing and not advance coverage.
 
@@ -82,20 +82,20 @@ Ghostfolio account list/detail reads SHALL use a 120-second inactivity timeout; 
 
 #### Scenario: Cash and failure contracts
 
-- **WHEN** `.venv/bin/python -m pytest -q tests/test_degiro_cash.py tests/test_notify.py tests/test_foundation_runtime.py tests/test_ghostfolio_auth.py` runs existing EUR cases and qualified synthetic aggregate cases
+- **WHEN** `.venv/bin/python -m pytest -q tests/test_degiro_cash.py tests/test_notify.py tests/test_foundation_runtime.py tests/test_ghostfolio_auth.py` runs existing EUR cases and positive, zero and negative verified EUR totals
 - **THEN** currency, freshness, coverage and exact cash guards pass; simulation sends no financial writes; invalid inputs and failed delivery preserve the notification contract; account reads use 120 seconds and cash writes use 30 seconds.
 
-#### Scenario: One account with foreign cash
+#### Scenario: One EUR account with foreign-cash refusal
 
-- **WHEN** `.venv/bin/python -m pytest -q tests/test_degiro_cash.py tests/test_rolling.py` runs a qualified positive, zero or negative broker aggregate, nonzero foreign components, duplicate aliases, missing base denomination and an unqualified layout
-- **THEN** the qualified case proposes only the reported base-currency aggregate for the existing account; uncertain cases refuse before imports or cash writes, without a local FX calculation or account creation.
+- **WHEN** `.venv/bin/python -m pytest -q tests/test_degiro_cash.py tests/test_rolling.py` runs positive, zero and negative verified EUR totals, nonzero foreign components, duplicate aliases, missing base denomination and unqualified layouts
+- **THEN** only the verified EUR total is proposed for the existing account; foreign cash and uncertain cases refuse before imports or cash writes, without a local FX calculation or account creation.
 
 #### Scenario: Rounding in simulation
 
 - **WHEN** `docker compose up` runs under authorized DRY_RUN against a qualified snapshot with one supported execution-cent rounding difference
 - **THEN** logs show `Cash statement verified with 1 corroborated one-cent execution rounding differences` and `(no update sent)`.
 
-Baseline changed: `tests/test_degiro_cash.py` permits only EUR, zero foreign components and exact agreeing EUR aliases. `docs/source-contract.md` records that observed configuration. The meaning and cross-checks of a nonzero multicurrency aggregate remain an implementation qualification gate, not an asserted broker fact. Notification and transport baselines remain `tests/test_notify.py` and `docs/ghostfolio-auth.md`.
+Baseline changed: `tests/test_degiro_cash.py` permits only EUR, zero foreign components and exact agreeing EUR aliases. `docs/source-contract.md` records that observed configuration. Nonzero multicurrency aggregates are outside this release and remain refused. Their source qualification belongs to a later approved change. Notification and transport baselines remain `tests/test_notify.py` and `docs/ghostfolio-auth.md`.
 
 ### Requirement: Exact read-only reconciliation
 
