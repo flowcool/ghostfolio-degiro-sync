@@ -34,4 +34,4 @@ Use one branch and PR for the deliverable. Apply the repository review/merge gat
 
 ## Release boundary
 
-The operator approved this release on 2026-11-16 with compatible trade/dividend currencies and verified signed EUR cash. Nonzero foreign cash remains refused and is tracked separately. All seven offline slices pass their targeted checks. Exact-image native acceptance and final release qualification are required before delivery. Real-history acceptance remains independent.
+The operator approved this release on 2026-11-16 with compatible trade/dividend currencies and verified signed EUR cash. Nonzero foreign cash remains refused and is tracked separately. All seven offline slices pass their targeted checks. Development-image native acceptance passed for empty and golden labs, including CAD, GBP/GBp, exact EUR cash, repeat deduplication and lost-acknowledgement refusal. Both labs are stopped. Published-digest release qualification remains in the release work item. Real-history acceptance remains independent.
