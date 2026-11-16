@@ -512,8 +512,8 @@ def cash_position_currency(identity: object, fields: dict[str, Any]) -> str | No
     if not pseudo and fields.get("positionType") != "CASH":
         return None
     size = financial_decimal(fields.get("size"))
-    if pseudo and size == 0:
-        return code  # Empty legacy placeholders do not authorize currency arithmetic.
+    if size == 0 and (pseudo or re.fullmatch(r"[1-9][0-9]*", identity)):
+        return code  # Empty cash identifiers do not authorize currency arithmetic.
     if (not currencies.recognized(code) or currencies.UNITS[code]["root"] != code
             or currencies.quantum(code) is None):
         raise RuntimeError("Unverified DEGIRO cash position currency")

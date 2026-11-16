@@ -351,7 +351,7 @@ def test_order_history_failure_logs_out(credentials, monkeypatch):
 
 
 @pytest.mark.parametrize("closed_identity", ["99", "98"])
-@pytest.mark.parametrize("cash_identity", ["USD", "GBP", "KWD", "XYZ"])
+@pytest.mark.parametrize("cash_identity", ["USD", "GBP", "KWD", "XYZ", "1001", "1002"])
 @pytest.mark.parametrize("cash_size", [0, 4.25])
 def test_prospective_reader_fetches_held_metadata_and_captures_destination_inside_interval(
         credentials, monkeypatch, caplog, closed_identity, cash_identity, cash_size):
@@ -378,7 +378,8 @@ def test_prospective_reader_fetches_held_metadata_and_captures_destination_insid
     def destination():
         observed.append("read-only target")
         return {"captured_at": datetime.now(timezone.utc).isoformat(), "account": {"id": "synthetic"}}
-    if closed_identity != "99" or cash_identity == "XYZ":
+    if (closed_identity != "99" or cash_identity == "XYZ"
+            or (cash_identity in {"1001", "1002"} and cash_size != 0)):
         with pytest.raises(RuntimeError, match="products|update"):
             degiro_module.read_degiro(date(2026, 1, 1), date(2026, 1, 2), holdings=True,
                 cutover_target_reader=destination)

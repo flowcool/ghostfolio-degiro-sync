@@ -323,6 +323,17 @@ def test_typed_cash_is_not_a_security_but_still_requires_cash_proof(rolling, cur
         sync_account(rolling)
 
 
+@pytest.mark.parametrize('identity', ['1001', '1002'])
+def test_empty_numeric_cash_positions_do_not_change_rolling_proposals(rolling, identity):
+    config, snapshot, destination = rolling
+    before = deepcopy(destination)
+    snapshot['update']['portfolio']['value'].append({'id': identity, 'value': [
+        {'name': 'id', 'value': identity}, {'name': 'positionType', 'value': 'CASH'},
+        {'name': 'size', 'value': 0}]})
+    assert len(sync_account(rolling)['proposed']) == 3
+    assert destination == before and state(config) is None
+
+
 @pytest.mark.parametrize('instant,owned,blocked', [
     ('2025-10-02T23:59:59Z', False, False),
     ('2025-10-03T00:00:00Z', False, True),
