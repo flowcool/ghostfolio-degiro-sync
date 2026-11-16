@@ -10,12 +10,12 @@ from typing import Any, TypeGuard, cast
 
 import yaml
 
+from ghostfolio_degiro_sync import currencies
 from ghostfolio_degiro_sync import identity as identity_module
 
-# Observed placeholders only; nonzero cash in these currencies is not authorized.
-CASH_CURRENCIES = frozenset({"CAD", "CHF", "DKK", "EUR", "GBP", "HKD", "JPY", "NOK", "SEK", "USD"})
+# Arithmetic units are independent from destination recognition.
 
-CURRENCY_QUANTA = {"EUR": Decimal("0.01"), "USD": Decimal("0.01"), "JPY": Decimal("1")}
+CURRENCY_QUANTA = {code: unit for code in currencies.UNITS if (unit := currencies.quantum(code)) is not None}
 
 
 TRADE_FIELDS = ("accountId", "comment", "currency", "dataSource", "date", "fee",
@@ -140,8 +140,8 @@ def convert_trade_to_activity(trade: Any, product: Any, source_account: Any, tar
     currency = product.get("currency")
     if currency not in CURRENCY_QUANTA or base_currency not in CURRENCY_QUANTA:
         raise RuntimeError("Unverified DEGIRO currency units")
-    if quote_currencies.get(symbol) != currency:
-        raise RuntimeError("Unverified or conflicting Yahoo quote units")
+    quote = quote_currencies.get(symbol)
+    factor = currencies.quote_factor(currency, quote)
     side = trade.get("buysell")
     quantity = financial_decimal(trade.get("quantity"))
     price = financial_decimal(trade.get("price"))
@@ -171,10 +171,10 @@ def convert_trade_to_activity(trade: Any, product: Any, source_account: Any, tar
                             ("totalPlusAllFeesInBaseCurrency", base_total + fees)):
         if field in trade and abs(financial_decimal(trade[field]) - expected) > CURRENCY_QUANTA[base_currency]:
             raise RuntimeError("Inconsistent DEGIRO net execution total")
-    activity = {"accountId": target_account, "comment": comment, "currency": currency,
+    activity: dict[str, Any] = {"accountId": target_account, "comment": comment, "currency": quote,
                 "dataSource": "YAHOO", "date": broker_instant(trade.get("date")),
-                "fee": float(-fees * fx), "quantity": float(abs(quantity)), "symbol": symbol,
-                "type": "BUY" if side == "B" else "SELL", "unitPrice": float(price)}
+                "fee": float(-fees * fx * factor), "quantity": float(abs(quantity)), "symbol": symbol,
+                "type": "BUY" if side == "B" else "SELL", "unitPrice": float(price * factor)}
     if any(not isfinite(activity[field]) or (activity[field] == 0 and value != 0)
            for field, value in (("fee", fees), ("quantity", quantity), ("unitPrice", price))):
         raise RuntimeError("DEGIRO execution cannot be represented safely")
@@ -429,16 +429,17 @@ def normalize_dividends(snapshot: dict[str, Any], target_account: Any, mapping: 
         if not isinstance(symbol, str) or not symbol.strip() or symbol != symbol.strip():
             raise RuntimeError("DEGIRO dividend requires an explicit Yahoo mapping")
         currency = dividend["currency"]
-        if (currency not in CURRENCY_QUANTA or product.get("currency") != currency
-                or quote_currencies.get(symbol) != currency):
+        if currency not in CURRENCY_QUANTA or product.get("currency") != currency:
             raise RuntimeError("Unverified DEGIRO dividend currency or quote units")
-        gross = float(financial_decimal(dividend["change"]))
-        tax = float(-financial_decimal(withholding["change"]))
+        quote = quote_currencies.get(symbol)
+        factor = currencies.quote_factor(currency, quote)
+        gross = float(financial_decimal(dividend["change"]) * factor)
+        tax = float(-financial_decimal(withholding["change"]) * factor)
         if not isfinite(gross) or gross <= 0 or not isfinite(tax) or tax <= 0:
             raise RuntimeError("DEGIRO dividend cannot be represented safely")
         result.append({"accountId": target_account,
             "comment": identity_module.versioned_comment(snapshot["source_account"], "DIVIDEND", dividend["id"]),
-            "currency": currency, "dataSource": "YAHOO", "date": broker_instant(dividend["date"]),
+            "currency": quote, "dataSource": "YAHOO", "date": broker_instant(dividend["date"]),
             "fee": tax, "quantity": 1, "symbol": symbol, "type": "DIVIDEND", "unitPrice": gross})
     return sorted(result, key=lambda activity: (activity["date"], activity["comment"]))
 
@@ -502,6 +503,21 @@ def normalize_fees(snapshot: dict[str, Any], target_account: Any, rules: Any=Non
     return sorted(result, key=lambda activity: (activity["date"], activity["comment"]))
 
 
+def cash_position_currency(identity: object, fields: dict[str, Any]) -> str | None:
+    """Recognize typed cash without qualifying its base-currency valuation."""
+    if not isinstance(identity, str):
+        return None
+    pseudo = identity.startswith("FLATEX_")
+    code = identity.removeprefix("FLATEX_") if pseudo else identity
+    if not pseudo and fields.get("positionType") != "CASH":
+        return None
+    if (not currencies.recognized(code) or currencies.UNITS[code]["root"] != code
+            or currencies.quantum(code) is None):
+        raise RuntimeError("Unverified DEGIRO cash position currency")
+    financial_decimal(fields.get("size"))
+    return code
+
+
 def current_cash_balance(snapshot: dict[str, Any], target_account: Any, source_account: Any, now: Any=None) -> Any:
     """Validate the observed EUR current snapshot; aliases are cross-checks only."""
     now = datetime.now(UTC) if now is None else now
@@ -531,7 +547,7 @@ def current_cash_balance(snapshot: dict[str, Any], target_account: Any, source_a
         degiro = financial_decimal(total["degiroCash"])
         flatex = financial_decimal(total["flatexCash"])
         settlement = financial_decimal(total["pendingSettlement"])
-        if (balance < 0 or degiro != 0 or flatex != balance or degiro + flatex != balance
+        if (degiro != 0 or flatex != balance or degiro + flatex != balance
                 or settlement != 0 or balance % CURRENCY_QUANTA["EUR"] != 0):
             raise RuntimeError("Unverified or inconsistent DEGIRO cash totals or settlement")
         if "cryptoTotalCash" in total and financial_decimal(total["cryptoTotalCash"]) != balance:
@@ -551,11 +567,17 @@ def current_cash_balance(snapshot: dict[str, Any], target_account: Any, source_a
         cash_positions = set()
         for row in positions:
             identity = row.get("id")
-            if isinstance(identity, str) and identity.startswith("FLATEX_"):
-                fields = named_values(row["value"])
+            fields = named_values(row["value"])
+            code = cash_position_currency(identity, fields)
+            if code is not None:
                 if identity in cash_positions or fields.get("id") != identity:
-                    raise RuntimeError("Conflicting DEGIRO cash pseudo-position identity")
+                    raise RuntimeError("Conflicting DEGIRO cash position identity")
                 cash_positions.add(identity)
+                if not str(identity).startswith("FLATEX_"):
+                    size = financial_decimal(fields["size"])
+                    if size != 0 and size != funds.get(code):
+                        raise RuntimeError("Unverified DEGIRO typed cash position")
+            if isinstance(identity, str) and identity.startswith("FLATEX_"):
                 if identity != "FLATEX_EUR" and financial_decimal(fields["size"]) != 0:
                     raise RuntimeError("Unverified foreign DEGIRO cash pseudo-position")
         matches = [row for row in positions if row.get("id") == "FLATEX_EUR"]

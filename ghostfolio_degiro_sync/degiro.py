@@ -12,7 +12,7 @@ import requests
 from ghostfolio_degiro_sync import vault
 from ghostfolio_degiro_sync.accounting import (
     API_FORMAT_ERRORS,
-    CASH_CURRENCIES,
+    cash_position_currency,
     cash_wrapper_rows,
     check_api_import_format,
     financial_decimal,
@@ -303,11 +303,7 @@ def read_degiro(from_date: date, to_date: date, window_days: int=90, report_loca
                     if held_identity in identities or fields.get("id") != held_identity:
                         raise RuntimeError("Conflicting prospective holding identity")
                     identities.add(held_identity)
-                    if isinstance(held_identity, str) and held_identity.startswith("FLATEX_"):
-                        continue
-                    if (held_identity in CASH_CURRENCIES
-                            and fields.get("positionType") == "CASH"
-                            and financial_decimal(fields.get("size")) == 0):
+                    if cash_position_currency(held_identity, fields) is not None:
                         continue
                     product_id = broker_identity(held_identity)
                     if financial_decimal(fields.get("size")) == 0:

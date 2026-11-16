@@ -708,10 +708,10 @@ def test_closed_holding_needs_no_metadata_but_requires_identity(evidence, mismat
     ('USD', 'EUR', 'CASH', 0, False),
     ('USD', 'USD', 'PRODUCT', 0, False),
     ('unknown', 'unknown', 'CASH', 0, False),
-    ('USD', 'USD', 'CASH', 1, False),
-    ('USD', 'USD', 'CASH', -1, False),
+    ('USD', 'USD', 'CASH', 1, True),
+    ('USD', 'USD', 'CASH', -1, True),
 ])
-def test_only_identified_empty_currency_cash_placeholders_are_excluded_from_holdings(
+def test_only_identified_typed_currency_cash_is_excluded_from_holdings(
         evidence, identity, inner, position, size, accepted):
     loaded, unused_path, unused_digest = evidence
     snapshot = deepcopy(loaded['captures']['broker'])

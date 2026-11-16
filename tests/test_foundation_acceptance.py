@@ -185,9 +185,21 @@ def test_existing_yahoo_rows_inherit_only_their_own_profile_currency(kind):
     assert row['currency'] is None
 
 
-@pytest.mark.parametrize('profile_currency', ['CHF', 'GBp'])
+@pytest.mark.parametrize('currency', ['CAD', 'CHF', 'GBP', 'GBp'])
+def test_complete_history_admits_compatible_inherited_dividend_currency(currency):
+    row = activity_row({**fee(), 'type': 'DIVIDEND', 'comment': None,
+        'symbol': 'TEST', 'dataSource': 'YAHOO', 'currency': None})
+    row['assetProfile']['currency'] = currency
+    before = deepcopy(row)
+    rows, balances = ghostfolio.index_existing_activities({'activities': [row], 'count': 1}, TARGET, now=NOW)
+    assert rows[0]['currency'] == currency
+    assert balances == {}
+    assert row == before
+
+
+@pytest.mark.parametrize('profile_currency', ['CHF', 'GBp', 'ZZZ'])
 @pytest.mark.parametrize('kind', ['BUY', 'SELL'])
-def test_unsupported_inherited_holding_currency_preserves_quantity_only(profile_currency, kind):
+def test_inherited_holding_currency_preserves_quantity_and_available_units(profile_currency, kind):
     row = opening_holding()
     row.update(currency=None)
     row['assetProfile']['currency'] = profile_currency
@@ -202,7 +214,7 @@ def test_unsupported_inherited_holding_currency_preserves_quantity_only(profile_
         'activities': [{**item, 'currency': profile_currency} for item in body['activities']],
         'count': body['count']}, TARGET, now=NOW)
     assert balances == explicit_balances == {('target-a', 'TEST'): 7 if kind == 'SELL' else 10}
-    assert all(item['currency'] is None for item in rows)
+    assert all(item['currency'] == (None if profile_currency == 'ZZZ' else profile_currency) for item in rows)
     assert all(item['currency'] == profile_currency for item in explicit_rows)
     proposal = {**rows[0], 'currency': 'USD', 'comment': 'DEGIRO#123:TRADE:104'}
     with pytest.raises(RuntimeError):

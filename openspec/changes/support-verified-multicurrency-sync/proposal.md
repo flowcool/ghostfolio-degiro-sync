@@ -10,7 +10,7 @@ The connector confuses currencies accepted by Ghostfolio with the three currenci
 - Accept compatible currencies through versioned reference data, without an EUR/USD/JPY restriction.
 - Preserve original currency evidence. Resolve a null activity currency only from that activity's own valid profile.
 - Keep structurally valid historical data when unavailable monetary evidence does not affect the operation. Require proof for holdings, matching, ownership and recovery.
-- Keep one Ghostfolio account. Set cash to DEGIRO's verified aggregate in its base currency. Do not calculate a replacement aggregate or create currency accounts.
+- Keep one Ghostfolio account. Set cash to DEGIRO's verified signed aggregate in its base currency. Do not calculate a replacement aggregate or create currency accounts.
 - Explain unavailable units and unqualified cash cases without exposing private data.
 
 ### Event scope

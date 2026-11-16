@@ -135,12 +135,14 @@ drive a cash update. Historical overview balances cannot. Freshness, missing
 fields, conflicting duplicate names and account-currency mismatch remain guards.
 
 The current-cash adapter deliberately accepts only the observed EUR configuration:
-zero `degiroCash`, non-negative `totalCash` equal to `flatexCash`, exact cent units,
+zero `degiroCash`, signed `totalCash` equal to `flatexCash`, exact cent units,
 zero pending settlement, one agreeing EUR cash fund and `FLATEX_EUR` position.
 Other fund currencies and FLATEX positions must be zero. Missing fields never
 become zero. A duplicate name/currency/position or conflicting optional alias
-blocks. Nonzero DEGIRO-held cash, negative cash and pending settlement need separate
-evidence before broadening this policy; no inferred settled-cash subtraction.
+blocks. Positive, zero and negative totals use the same evidence checks. A negative
+balance authorizes no borrowing transaction. Nonzero DEGIRO-held cash, nonzero
+foreign components and pending settlement need separate source evidence before
+broadening this policy; no inferred settled-cash subtraction.
 An explicitly removed/ambiguous `isAdded` flag or mismatched wrapper name also
 blocks; a full update must not treat removed rows as current values.
 
@@ -168,15 +170,17 @@ are required inputs. Broker tickers never supply a fallback. Each comment is
 account. Equal overlaps are retained once, while changed financial content under
 an existing identity blocks the batch. Separate fills retain separate identities.
 
-Only STOCK metadata with contract size 1 and characterized EUR/USD/JPY major
-currencies are currently accepted. ETF, derivative, transfer and minor-unit cases
-are blocked pending broker evidence. Price times signed quantity must reconstruct
+Only STOCK metadata with contract size 1 and verified monetary units is accepted.
+ETF, derivative and transfer cases remain blocked. Currency recognition alone
+does not establish instrument support or a cash conversion. Price times signed quantity must reconstruct
 the signed total within one security-currency quantum. Both gross FX rates must
 reconstruct the base total within one base-currency quantum, with division from
 security to base. Same-currency rates must be 1. Brokerage and AutoFX must both
 be non-positive, and their sum must equal the total fee exactly. The activity fee
 is the negated total base fee multiplied once by `fxRate`; `nettFxRate` is unused.
-No refund clamping, automatic 100x scaling or hidden extra commission is applied.
+An explicit major/derived quote relationship then scales price and fee exactly
+once into the configured Yahoo quote unit. Quantity and execution identity stay
+unchanged. No refund clamping, inferred scaling or hidden commission is applied.
 
 Source timestamps require an explicit UTC offset and are converted to the same
 instant in UTC, including local-to-UTC calendar-day shifts. JSON numbers are
@@ -258,3 +262,40 @@ record source-account scope, repeated overlapping source windows, event-kind
 uniqueness and exact target comment/readback preservation on the candidate image.
 Any missing account, window or target-image proof remains pending in the operation
 record. No fixture or single observed source window fills that gap.
+
+## Currency evidence and reference data
+
+`currency-units.yaml` is the versioned keyed registry. It records the ISO 4217
+minor units from SIX List One (publication 2026-09-17), their input hash, and the
+recognized domain of Ghostfolio 3.99.0's pinned validator 13.15.35. The registry
+also records Ghostfolio's exact derived units: GBp/GBP, ILA/ILS and ZAc/ZAR, with
+100 derived units per major unit. USX is recognized but has no proved arithmetic
+factor here. Codes without numeric ISO minor units remain readable, but cannot
+enter monetary arithmetic. No runtime lookup or new dependency is required.
+Reference URLs and exact upstream commits live with the registry.
+
+Raw activity currency and effective currency are distinct. An explicit recognized
+code takes precedence. A null field can resolve from the same row's current
+`assetProfile`, or `SymbolProfile` only when the current profile field is absent.
+Missing fields and invalid current profiles do not fall back. This projection
+never changes the source object. Current matching, owned-row comparison and
+recovery require proved units. Unowned old rows outside the rolling start and
+three-day dividend match margin can retain unavailable monetary evidence after
+all structural, ownership, active-state and position checks pass. The boundary
+accounts for the broker's Europe/Zurich dates and matching's UTC dates.
+
+Trades and gross dividends use the same quote-unit relationship. Dividend tax
+pairing still requires exact product, source currency, date and value date.
+Both gross dividend and withholding scale together. EUR standalone fee and
+income conventions remain unchanged. A registry entry is a unit reference,
+not evidence that a particular broker instrument or new cash layout was observed.
+
+Typed CASH positions with recognized major-currency IDs are classified before
+security product lookup, including nonzero balances. FLATEX pseudo-positions
+follow the same unit checks. This does not qualify their valuation: complete
+cash evidence is still checked independently before any financial dispatch.
+The one account must use the broker base currency. Only a source-qualified
+broker aggregate can support foreign cash. No trade rate, external rate, sum of
+unlike currencies or extra account can replace that proof. Retained source proof
+currently establishes EUR with zero foreign components only. A nonzero foreign
+layout remains blocked until denomination, coverage and cross-checks are proved.

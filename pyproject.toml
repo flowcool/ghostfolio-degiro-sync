@@ -13,7 +13,7 @@ packages = ["ghostfolio_degiro_sync"]
 py-modules = ["ghostfolio_core"]
 
 [tool.setuptools.package-data]
-ghostfolio_degiro_sync = ["cash-rules.yaml"]
+ghostfolio_degiro_sync = ["cash-rules.yaml", "currency-units.yaml"]
 
 [tool.ruff]
 target-version = "py314"

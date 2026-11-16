@@ -68,7 +68,7 @@ Baseline changed: `tests/test_foundation_acceptance.py` currently preserves unsu
 
 Current cash MUST come from fresh DEGIRO evidence and never from old ledger balances. The connector SHALL keep one configured Ghostfolio account. Its currency SHALL equal the broker base currency. Where foreign cash exists, the proposed balance SHALL be the broker-reported aggregate already expressed in that base currency. A list of currency balances alone SHALL NOT establish an aggregate.
 
-The aggregate SHALL have proved field meaning, currency, current source-account binding, complete component coverage and independent consistency checks. Missing, duplicate, contradictory, stale or unqualified evidence SHALL block before any financial write. Unproved nonzero components SHALL NOT become zero. Cash aliases and pseudo-positions SHALL remain corroboration, not extra balances to add. Negative cash, nonzero settlement and new cash/income categories SHALL retain refusal until separately qualified; this change SHALL NOT approve borrowing or invent settled cash.
+The aggregate SHALL have proved field meaning, currency, current source-account binding, complete component coverage and independent consistency checks. Missing, duplicate, contradictory, stale or unqualified evidence SHALL block before any financial write. Unproved nonzero components SHALL NOT become zero. Cash aliases and pseudo-positions SHALL remain corroboration, not extra balances to add. A verified aggregate SHALL be accepted when positive, zero or negative. Its sign SHALL NOT change its source meaning or authorize a broker transaction. Nonzero settlement and new cash/income categories SHALL retain refusal until separately qualified; the connector SHALL NOT invent settled cash.
 
 The connector SHALL NOT calculate a substitute aggregate from external rates, trade rates or a sum of unlike currencies. It SHALL NOT create accounts or change the configured account currency. Existing EUR-only evidence SHALL keep its current verification path. Other base currencies and nonzero foreign cash SHALL require the same proved aggregate contract. Recognition of a currency SHALL NOT claim that an unobserved DEGIRO cash layout has been qualified.
 
@@ -87,7 +87,7 @@ Ghostfolio account list/detail reads SHALL use a 120-second inactivity timeout; 
 
 #### Scenario: One account with foreign cash
 
-- **WHEN** `.venv/bin/python -m pytest -q tests/test_degiro_cash.py tests/test_rolling.py` runs a qualified broker aggregate, nonzero foreign components, duplicate aliases, missing base denomination and an unqualified layout
+- **WHEN** `.venv/bin/python -m pytest -q tests/test_degiro_cash.py tests/test_rolling.py` runs a qualified positive, zero or negative broker aggregate, nonzero foreign components, duplicate aliases, missing base denomination and an unqualified layout
 - **THEN** the qualified case proposes only the reported base-currency aggregate for the existing account; uncertain cases refuse before imports or cash writes, without a local FX calculation or account creation.
 
 #### Scenario: Rounding in simulation

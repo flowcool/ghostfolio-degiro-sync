@@ -44,6 +44,24 @@ def test_first_dry_run_proposes_pre_service_events_and_preserves_state(rolling):
     assert destination == before and state(config) is None
 
 
+@pytest.mark.parametrize('relevant', [False, True])
+def test_unknown_historical_monetary_units_block_only_relevant_controls(rolling, relevant):
+    config, snapshot, destination = rolling
+    row = activity_row({'accountId': 'target-a', 'comment': None, 'currency': None,
+        'dataSource': 'YAHOO', 'symbol': 'TEST', 'type': 'DIVIDEND', 'quantity': 1,
+        'unitPrice': 10, 'fee': 1, 'date': '2026-01-01T00:00:00Z' if relevant else '2025-01-01T00:00:00Z'})
+    row['assetProfile']['currency'] = 'ZZZ'
+    destination['activities']['activities'].append(row)
+    destination['activities']['count'] += 1
+    before = deepcopy(destination)
+    if relevant:
+        with pytest.raises(RuntimeError, match='currency'):
+            sync_account(rolling)
+    else:
+        assert len(sync_account(rolling)['proposed']) == 3
+    assert destination == before
+
+
 def test_first_live_repeat_and_success_coverage(rolling):
     config, snapshot, destination = rolling
     config["dry_run"] = False
@@ -291,3 +309,36 @@ def test_foreign_incomplete_profile_does_not_block_rolling(rolling, field, value
     result = sync_account(rolling)
     assert len(result['proposed']) == 3 and result['rolling_verified']
     assert destination == before
+
+
+@pytest.mark.parametrize('currency', ['USD', 'GBP', 'KWD'])
+def test_typed_cash_is_not_a_security_but_still_requires_cash_proof(rolling, currency):
+    config, snapshot, destination = rolling
+    snapshot['update']['portfolio']['value'].append({'id': currency, 'value': [
+        {'name': 'id', 'value': currency}, {'name': 'positionType', 'value': 'CASH'},
+        {'name': 'size', 'value': 4.25}]})
+    assert sync_module.broker_stock_holdings(snapshot, destination['account'],
+        {'US0378331005': 'TEST'}, {'TEST': 'USD'})
+    with pytest.raises(RuntimeError, match='cash'):
+        sync_account(rolling)
+
+
+@pytest.mark.parametrize('instant,owned,blocked', [
+    ('2025-10-02T23:59:59Z', False, False),
+    ('2025-10-03T00:00:00Z', False, True),
+    ('2025-01-01T00:00:00Z', True, True),
+])
+def test_unknown_currency_respects_utc_dividend_margin_and_ownership(rolling, instant, owned, blocked):
+    config, snapshot, destination = rolling
+    row = activity_row({'accountId': 'target-a',
+        'comment': 'DEGIRO#123:DIVIDEND:999' if owned else None,
+        'currency': None, 'dataSource': 'YAHOO', 'symbol': 'TEST', 'type': 'DIVIDEND',
+        'quantity': 1, 'unitPrice': 10, 'fee': 1, 'date': instant})
+    row['assetProfile']['currency'] = 'ZZZ'
+    destination['activities']['activities'].append(row)
+    destination['activities']['count'] += 1
+    if blocked:
+        with pytest.raises(RuntimeError, match='currency'):
+            sync_account(rolling)
+    else:
+        assert len(sync_account(rolling)['proposed']) == 3

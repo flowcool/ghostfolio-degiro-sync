@@ -96,7 +96,8 @@ def simulation_plan(result: Any, start: Any, end: Any) -> Any:
             "period": {"from_date": period.get("from_date") or start.isoformat(),
                        "to_date": period.get("to_date") or end.isoformat(), "timezone": "Europe/Zurich"},
             "activities": result["proposed"], "cash": result.get("cash"),
-            "cash_before": result.get("cash_before"), "cash_currency": "EUR",
+            "cash_before": result.get("cash_before"), "cash_currency": result.get("cash_currency", "EUR"),
+            "cash_components": result.get("cash_components", {}),
             "candidates": result.get("candidates"), "exclusions": result.get("exclusions", {}),
             "history_verified": result["history_verified"],
             "rolling_verified": result.get("rolling_verified", False),
@@ -118,6 +119,9 @@ def log_simulation(result: Any) -> Any:
                  result["cash_before"], result["cash"])
     elif result.get("cash") is not None:
         log.info("[DRY RUN] Proposed Ghostfolio cash: EUR %.2f (no update sent)", result["cash"])
+    for currency, amount in result.get("cash_components", {}).items():
+        log.info("[DRY RUN] Broker cash component: %s %s (aggregate cross-check)",
+                 diagnostics_module.display_value(currency), diagnostics_module.display_number(amount, currency))
     for line in diagnostics_module.render_reconciliation(result.get("reconciliation", [])).splitlines():
         log.info("%s", line)
     exclusions = result.get("exclusions", {})

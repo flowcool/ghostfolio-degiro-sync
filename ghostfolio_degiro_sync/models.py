@@ -46,3 +46,10 @@ class Journal(TypedDict):
     directory: Path
     path: Path
     document: dict[str, Any]
+
+
+class CurrencyEvidence(TypedDict):
+    raw: object
+    effective: str | None
+    provenance: str
+    reason: str | None

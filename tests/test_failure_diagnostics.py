@@ -72,7 +72,7 @@ def test_sync_configuration_fails_before_auth(monkeypatch, tmp_path, caplog, cap
     mapping = tmp_path / "mapping.yaml"
     mapping.write_text("US0378331005: {symbol: AAPL, currency: USD}")
     if change == "mapping-schema":
-        mapping.write_text("US0378331005: {symbol: AAPL, currency: CHF}")
+        mapping.write_text("US0378331005: {symbol: AAPL, currency: ZZZ}")
     elif change == "mapping-read":
         monkeypatch.setenv("MAPPING_FILE", str(tmp_path / SECRET.split('/')[0]))
     elif change == "mapping-yaml":

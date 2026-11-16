@@ -351,9 +351,10 @@ def test_order_history_failure_logs_out(credentials, monkeypatch):
 
 
 @pytest.mark.parametrize("closed_identity", ["99", "98"])
-@pytest.mark.parametrize("cash_identity", ["USD", "GBP", "XYZ"])
+@pytest.mark.parametrize("cash_identity", ["USD", "GBP", "KWD", "XYZ"])
+@pytest.mark.parametrize("cash_size", [0, 4.25])
 def test_prospective_reader_fetches_held_metadata_and_captures_destination_inside_interval(
-        credentials, monkeypatch, caplog, closed_identity, cash_identity):
+        credentials, monkeypatch, caplog, closed_identity, cash_identity, cash_size):
     calls = broker_http(monkeypatch)
     original = requests.Session.send
     extra_products = []
@@ -365,7 +366,7 @@ def test_prospective_reader_fetches_held_metadata_and_captures_destination_insid
                 {"id": "99", "name": "positionrow", "value": [
                     {"name": "id", "value": closed_identity}, {"name": "size", "value": 0}]},
                 {"id": cash_identity, "name": "positionrow", "value": [
-                    {"name": "id", "value": cash_identity}, {"name": "size", "value": 0},
+                    {"name": "id", "value": cash_identity}, {"name": "size", "value": cash_size},
                     {"name": "positionType", "value": "CASH"}]}]},
                 "cashFunds": {"value": []}, "totalPortfolio": {"value": []}})
         if path.endswith("/products/info") and json.loads(request.body) == [21]:

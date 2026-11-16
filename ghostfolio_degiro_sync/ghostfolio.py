@@ -16,6 +16,7 @@ import requests
 import ghostfolio_core as core
 from ghostfolio_degiro_sync import accounting as accounting_module
 from ghostfolio_degiro_sync import config as config_module
+from ghostfolio_degiro_sync import currencies
 from ghostfolio_degiro_sync import diagnostics as diagnostics_module
 from ghostfolio_degiro_sync import identity as identity_module
 
@@ -148,19 +149,15 @@ def ghost_transport(config: Any, target_account: Any) -> Iterator[Any]:
 
 
 def effective_activity_currency(row: dict[str, Any]) -> dict[str, Any]:
-    """Resolve stored null only through that activity's supported profile currency."""
-    if "currency" not in row or row["currency"] is not None:
-        return row
-    profile = row["assetProfile"] if "assetProfile" in row else row.get("SymbolProfile")
-    if (not isinstance(profile, dict) or not isinstance(profile.get("symbol"), str)
-            or not profile["symbol"] or profile.get("dataSource") not in ("YAHOO", "MANUAL")
-            or not isinstance(profile.get("currency"), str)
-            or profile["currency"] not in accounting_module.CURRENCY_QUANTA):
+    """Resolve that row's currency without conflating reads and arithmetic."""
+    evidence = currencies.effective_currency(row)
+    if evidence["effective"] is None:
         raise RuntimeError("Unverified Ghostfolio activity currency")
-    return {**row, "currency": profile["currency"]}
+    return {**row, "currency": evidence["effective"]}
 
 
-def index_existing_activities(body: Any, target_account: Any, *, now: datetime | None=None) -> tuple[list[dict[str, Any]], dict[tuple[str, str], Decimal]]:
+def index_existing_activities(body: Any, target_account: Any, *, now: datetime | None=None,
+                              allow_unverified_currency: bool=False) -> tuple[list[dict[str, Any]], dict[tuple[str, str], Decimal]]:
     """Complete unredacted list; never discard ownership or inactive target rows."""
     if not isinstance(body, dict) or not isinstance(body.get("activities"), list):
         raise RuntimeError("Invalid Ghostfolio activity list")
@@ -195,9 +192,14 @@ def index_existing_activities(body: Any, target_account: Any, *, now: datetime |
         profile_currency = profile.get("currency") if isinstance(profile, dict) else None
         quantity_only = (row.get("type") in ("BUY", "SELL")
             and isinstance(profile_currency, str) and bool(profile_currency)
-            and profile_currency not in accounting_module.CURRENCY_QUANTA)
+            and not currencies.recognized(profile_currency))
         if (not isinstance(profile, dict) or profile_currency is not None) and not quantity_only:
-            row = effective_activity_currency(row)
+            evidence = currencies.effective_currency(row)
+            if evidence["effective"] is not None:
+                row = effective_activity_currency(row)
+            elif not (allow_unverified_currency and isinstance(profile, dict)
+                    and isinstance(profile_currency, str) and bool(profile_currency.strip())):
+                raise RuntimeError("Unverified Ghostfolio activity currency")
         for field in ("quantity", "unitPrice", "fee"):
             if accounting_module.financial_decimal(row.get(field)) < 0:
                 raise RuntimeError("Invalid or redacted Ghostfolio financial context")

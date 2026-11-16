@@ -35,7 +35,8 @@ the image. Compose continues to select the command and schedule automatically.
 
 ## Limits
 
-- Quote currencies: **EUR, USD and JPY only**. Current cash: **EUR only**.
+- Trades and dividends accept currencies with verified monetary units that Ghostfolio recognizes. The packaged [currency registry](ghostfolio_degiro_sync/currency-units.yaml) records the reference sources. Proven major/minor quote relationships include GBP/GBp, ILS/ILA and ZAR/ZAc. Unknown units and unrelated quote currencies block.
+- Current cash uses **one account and the verified broker total in its base currency**. The qualified layout remains **EUR with zero foreign cash components**. Positive, zero and negative verified totals are accepted. Nonzero foreign balances and other layouts remain blocked until their aggregate denomination and independent checks are proved.
 - Cash-statement relationships are characterized for **French (`fr`) statements**; other statement languages are not verified.
 - Normal Compose operation reads a **rolling 90-day window** through the Europe/Zurich date. It reconstructs neither complete history nor historical cost basis.
 - Existing activities are never automatically corrected or deleted. Unknown or ambiguous relevant evidence blocks synchronization.
@@ -140,7 +141,7 @@ US0378331005:
   currency: USD
 ```
 
-Keys must be valid ISINs; entries contain exactly `symbol` and `currency`, without surrounding whitespace. Quote currencies are **EUR, USD and JPY** only. Conflicting currencies for the same symbol reject the mapping. Current cash supports EUR only.
+Keys must be valid ISINs; entries contain exactly `symbol` and `currency`, without surrounding whitespace. Quote currencies must have verified units in the packaged currency registry. For a GBP-priced security quoted by Yahoo in pence, set `currency: GBp`: prices and fees scale by 100, while quantities stay unchanged. This uses an explicit unit relationship, never an inferred exchange rate. Conflicting currencies for the same symbol reject the mapping. See [cash qualification limits](#limits).
 
 Prepare the mounts, using your configured host paths if different:
 
@@ -261,6 +262,16 @@ writes and does not change import selection, exit status or notifications. Priva
 captures may retain original financial JSON for this comparison; protect them as
 financial data. They are not source lifetime-coverage proof.
 
+
+Currency evidence in the reconciliation report identifies the original field and
+its effective value. A null activity currency can use that activity's own asset
+profile. An absent field, invalid current profile or unknown unit stays unproved.
+Old unowned rows outside the rolling interval and its manual-match margin can
+remain as historical evidence. They are never rewritten or certified. Relevant
+ownership, holdings, matching and uncertain-result checks still require evidence.
+The private simulation plan includes `cash_currency`, the broker `cash` aggregate
+and `cash_components` in their original currencies. Components are cross-checks;
+they are never added to the aggregate.
 
 Simulation prints a plain DEGIRO reconciliation report, including runs without
 dividends. Each finding names its source identity, exact compared destination ID,

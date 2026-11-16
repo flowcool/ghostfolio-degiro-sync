@@ -28,6 +28,17 @@ def test_gross_payment_and_same_currency_withholding(snapshot):
         'fee': 1.5, 'quantity': 1, 'symbol': 'TEST', 'type': 'DIVIDEND', 'unitPrice': 10.}
 
 
+@pytest.mark.parametrize('source,quote,price,tax', [('CAD', 'CAD', 10, 1.5), ('CHF', 'CHF', 10, 1.5), ('GBP', 'GBp', 1000, 150)])
+def test_dividend_and_withholding_keep_value_in_verified_quote_units(snapshot, source, quote, price, tax):
+    snapshot['products']['20']['currency'] = source
+    for row in snapshot['cash_movements']:
+        row['currency'] = source
+    before = deepcopy(snapshot)
+    activity, = accounting_module.normalize_dividends(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': quote})
+    assert (activity['currency'], activity['unitPrice'], activity['fee'], activity['quantity']) == (quote, price, tax, 1)
+    assert snapshot == before
+
+
 def test_partial_sales_and_upcoming_payments_do_not_change_paid_amount(snapshot):
     expected = normalize(snapshot)
     snapshot.update(transactions=[{'buysell': 'S', 'quantity': -.5}],
