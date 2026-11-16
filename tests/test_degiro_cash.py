@@ -233,6 +233,27 @@ def test_optional_accrued_interest_without_value_is_observed(snapshot):
         extract(snapshot)
 
 
+@pytest.mark.parametrize('identity', ['1001', '1002'])
+def test_empty_numeric_cash_positions_preserve_cash_and_identity_guards(snapshot, identity):
+    row = {'id': identity, 'name': 'positionrow', 'value': [
+        {'name': 'id', 'value': identity}, {'name': 'size', 'value': 0},
+        {'name': 'positionType', 'value': 'CASH'}]}
+    rows = snapshot['update']['portfolio']['value']
+    rows.append(row)
+    assert extract(snapshot) == 12.3
+    row['value'][1]['value'] = 1
+    with pytest.raises(RuntimeError):
+        extract(snapshot)
+    row['value'][1]['value'] = 0
+    row['value'][0]['value'] = '1003'
+    with pytest.raises(RuntimeError, match='identity'):
+        extract(snapshot)
+    row['value'][0]['value'] = identity
+    rows.append(deepcopy(row))
+    with pytest.raises(RuntimeError, match='identity'):
+        extract(snapshot)
+
+
 def test_unknown_or_unsupported_ledger_blocks_cash(snapshot):
     row = {'id': 10, 'type': 'CASH_TRANSACTION', 'description': 'Flatex Interest Income',
         'change': 1, 'currency': 'EUR', 'date': '2026-01-01T00:00:00Z',
