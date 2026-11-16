@@ -284,6 +284,7 @@ def migration_evidence(inputs):
                 normalized = {**row, 'symbol': profile.get('symbol'), 'dataSource': profile.get('dataSource')}
                 # MANUAL UUID must be proven through exact submitted source identity and money.
                 try:
+                    normalized = ghostfolio.effective_activity_currency(normalized)
                     accepted, _ = ghostfolio.prove_accepted_subset([{**expected, 'comment': comment}], [normalized])
                     exact = len(accepted) == 1
                 except RuntimeError:
@@ -390,11 +391,12 @@ def comment_payload(row, comment):
             and text(profile.get('symbol')) and profile['symbol'] == profile['symbol'].strip(),
             'Unsupported update profile')
     from ghostfolio_degiro_sync import ghostfolio
+    effective = ghostfolio.effective_activity_currency(row)
     require(row['type'] in ('BUY', 'SELL', 'DIVIDEND', 'FEE', 'INTEREST')
             and ghostfolio.core.activity_is_active(row) and ghostfolio.core.activity_date_is_current(row)
             and text(row.get('accountId'))
-            and text(row.get('currency')), 'Unsupported activity context')
-    payload = {key: row[key] for key in ('id', 'accountId', 'currency', 'date', 'type')}
+            and text(effective.get('currency')), 'Unsupported activity context')
+    payload = {key: effective[key] for key in ('id', 'accountId', 'currency', 'date', 'type')}
     payload.update(comment=comment, symbol=profile['symbol'], dataSource=profile['dataSource'])
     for field in ('quantity', 'unitPrice', 'fee'):
         value = row[field]
