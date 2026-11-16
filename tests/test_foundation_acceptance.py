@@ -185,6 +185,40 @@ def test_existing_yahoo_rows_inherit_only_their_own_profile_currency(kind):
     assert row['currency'] is None
 
 
+@pytest.mark.parametrize('profile_currency', ['CHF', 'GBp'])
+@pytest.mark.parametrize('kind', ['BUY', 'SELL'])
+def test_unsupported_inherited_holding_currency_preserves_quantity_only(profile_currency, kind):
+    row = opening_holding()
+    row.update(currency=None)
+    row['assetProfile']['currency'] = profile_currency
+    body = {'activities': [row], 'count': 1}
+    if kind == 'SELL':
+        sold = {**row, 'id': 'sold', 'type': 'SELL', 'quantity': 3}
+        body['activities'].append(sold)
+        body['count'] = 2
+    before = deepcopy(body)
+    rows, balances = ghostfolio.index_existing_activities(body, TARGET, now=NOW)
+    explicit_rows, explicit_balances = ghostfolio.index_existing_activities({
+        'activities': [{**item, 'currency': profile_currency} for item in body['activities']],
+        'count': body['count']}, TARGET, now=NOW)
+    assert balances == explicit_balances == {('target-a', 'TEST'): 7 if kind == 'SELL' else 10}
+    assert all(item['currency'] is None for item in rows)
+    assert all(item['currency'] == profile_currency for item in explicit_rows)
+    proposal = {**rows[0], 'currency': 'USD', 'comment': 'DEGIRO#123:TRADE:104'}
+    with pytest.raises(RuntimeError):
+        ghostfolio.prove_accepted_subset([proposal], [{**rows[0], 'comment': proposal['comment']}])
+    assert body == before
+
+
+@pytest.mark.parametrize('profile_currency', ['', 123])
+def test_malformed_inherited_holding_currency_still_blocks(profile_currency):
+    row = opening_holding()
+    row['currency'] = None
+    row['assetProfile']['currency'] = profile_currency
+    with pytest.raises(RuntimeError, match='Unverified Ghostfolio activity currency'):
+        ghostfolio.index_existing_activities({'activities': [row], 'count': 1}, TARGET, now=NOW)
+
+
 def test_recovery_requires_exact_comment_not_only_equivalent_generation(snapshot, tmp_path):
     tmp_path.chmod(0o700)
     config = {'source_account': '123', 'target_account': 'target-a', 'dry_run': False,

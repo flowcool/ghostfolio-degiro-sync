@@ -191,8 +191,12 @@ def index_existing_activities(body: Any, target_account: Any, *, now: datetime |
             continue
         profile = row["assetProfile"] if "assetProfile" in row else row.get("SymbolProfile")
         # Legacy holdings can prove quantity without proving monetary units.
-        # Keep missing currency unavailable; exact comparisons still refuse it.
-        if not isinstance(profile, dict) or profile.get("currency") is not None:
+        # Keep missing or unsupported holding currency unproved for exact comparisons.
+        profile_currency = profile.get("currency") if isinstance(profile, dict) else None
+        quantity_only = (row.get("type") in ("BUY", "SELL")
+            and isinstance(profile_currency, str) and bool(profile_currency)
+            and profile_currency not in accounting_module.CURRENCY_QUANTA)
+        if (not isinstance(profile, dict) or profile_currency is not None) and not quantity_only:
             row = effective_activity_currency(row)
         for field in ("quantity", "unitPrice", "fee"):
             if accounting_module.financial_decimal(row.get(field)) < 0:
