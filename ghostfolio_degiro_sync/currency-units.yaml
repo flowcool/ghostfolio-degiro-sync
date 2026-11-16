@@ -1,0 +1,745 @@
+format: 1
+sources:
+  iso:
+    url: https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml
+    published: '2026-09-17'
+    sha256: 33139b438657d1cee116ba737807ea71d19d6de4b90f799a09c56f0cc6a1b0ff
+  destination:
+    repository: https://github.com/ghostfolio/ghostfolio
+    commit: d278362d394a1c49c9cc55e9db4be9a7fd17c7dd
+    validator_version: 13.15.35
+    validator_commit: 7a8079709cd4cb27b2a1846e6f6508d68c9d928f
+    validator_sha256: 541d762b61b7314fbfdebd03f1fe49917f5ed9216db70271a217176fcc5aaee1
+currencies:
+  AED:
+    minor_digits: 2
+    root: AED
+    factor: 1
+  AFN:
+    minor_digits: 2
+    root: AFN
+    factor: 1
+  ALL:
+    minor_digits: 2
+    root: ALL
+    factor: 1
+  AMD:
+    minor_digits: 2
+    root: AMD
+    factor: 1
+  ANG:
+    minor_digits: null
+    root: ANG
+    factor: 1
+  AOA:
+    minor_digits: 2
+    root: AOA
+    factor: 1
+  ARS:
+    minor_digits: 2
+    root: ARS
+    factor: 1
+  AUD:
+    minor_digits: 2
+    root: AUD
+    factor: 1
+  AWG:
+    minor_digits: 2
+    root: AWG
+    factor: 1
+  AZN:
+    minor_digits: 2
+    root: AZN
+    factor: 1
+  BAM:
+    minor_digits: 2
+    root: BAM
+    factor: 1
+  BBD:
+    minor_digits: 2
+    root: BBD
+    factor: 1
+  BDT:
+    minor_digits: 2
+    root: BDT
+    factor: 1
+  BGN:
+    minor_digits: null
+    root: BGN
+    factor: 1
+  BHD:
+    minor_digits: 3
+    root: BHD
+    factor: 1
+  BIF:
+    minor_digits: 0
+    root: BIF
+    factor: 1
+  BMD:
+    minor_digits: 2
+    root: BMD
+    factor: 1
+  BND:
+    minor_digits: 2
+    root: BND
+    factor: 1
+  BOB:
+    minor_digits: 2
+    root: BOB
+    factor: 1
+  BOV:
+    minor_digits: 2
+    root: BOV
+    factor: 1
+  BRL:
+    minor_digits: 2
+    root: BRL
+    factor: 1
+  BSD:
+    minor_digits: 2
+    root: BSD
+    factor: 1
+  BTN:
+    minor_digits: 2
+    root: BTN
+    factor: 1
+  BWP:
+    minor_digits: 2
+    root: BWP
+    factor: 1
+  BYN:
+    minor_digits: 2
+    root: BYN
+    factor: 1
+  BZD:
+    minor_digits: 2
+    root: BZD
+    factor: 1
+  CAD:
+    minor_digits: 2
+    root: CAD
+    factor: 1
+  CDF:
+    minor_digits: 2
+    root: CDF
+    factor: 1
+  CHE:
+    minor_digits: 2
+    root: CHE
+    factor: 1
+  CHF:
+    minor_digits: 2
+    root: CHF
+    factor: 1
+  CHW:
+    minor_digits: 2
+    root: CHW
+    factor: 1
+  CLF:
+    minor_digits: 4
+    root: CLF
+    factor: 1
+  CLP:
+    minor_digits: 0
+    root: CLP
+    factor: 1
+  CNY:
+    minor_digits: 2
+    root: CNY
+    factor: 1
+  COP:
+    minor_digits: 2
+    root: COP
+    factor: 1
+  COU:
+    minor_digits: 2
+    root: COU
+    factor: 1
+  CRC:
+    minor_digits: 2
+    root: CRC
+    factor: 1
+  CUP:
+    minor_digits: 2
+    root: CUP
+    factor: 1
+  CVE:
+    minor_digits: 2
+    root: CVE
+    factor: 1
+  CZK:
+    minor_digits: 2
+    root: CZK
+    factor: 1
+  DJF:
+    minor_digits: 0
+    root: DJF
+    factor: 1
+  DKK:
+    minor_digits: 2
+    root: DKK
+    factor: 1
+  DOP:
+    minor_digits: 2
+    root: DOP
+    factor: 1
+  DZD:
+    minor_digits: 2
+    root: DZD
+    factor: 1
+  EGP:
+    minor_digits: 2
+    root: EGP
+    factor: 1
+  ERN:
+    minor_digits: 2
+    root: ERN
+    factor: 1
+  ETB:
+    minor_digits: 2
+    root: ETB
+    factor: 1
+  EUR:
+    minor_digits: 2
+    root: EUR
+    factor: 1
+  FJD:
+    minor_digits: 2
+    root: FJD
+    factor: 1
+  FKP:
+    minor_digits: 2
+    root: FKP
+    factor: 1
+  GBP:
+    minor_digits: 2
+    root: GBP
+    factor: 1
+  GEL:
+    minor_digits: 2
+    root: GEL
+    factor: 1
+  GHS:
+    minor_digits: 2
+    root: GHS
+    factor: 1
+  GIP:
+    minor_digits: 2
+    root: GIP
+    factor: 1
+  GMD:
+    minor_digits: 2
+    root: GMD
+    factor: 1
+  GNF:
+    minor_digits: 0
+    root: GNF
+    factor: 1
+  GTQ:
+    minor_digits: 2
+    root: GTQ
+    factor: 1
+  GYD:
+    minor_digits: 2
+    root: GYD
+    factor: 1
+  HKD:
+    minor_digits: 2
+    root: HKD
+    factor: 1
+  HNL:
+    minor_digits: 2
+    root: HNL
+    factor: 1
+  HTG:
+    minor_digits: 2
+    root: HTG
+    factor: 1
+  HUF:
+    minor_digits: 2
+    root: HUF
+    factor: 1
+  IDR:
+    minor_digits: 2
+    root: IDR
+    factor: 1
+  ILS:
+    minor_digits: 2
+    root: ILS
+    factor: 1
+  INR:
+    minor_digits: 2
+    root: INR
+    factor: 1
+  IQD:
+    minor_digits: 3
+    root: IQD
+    factor: 1
+  IRR:
+    minor_digits: 2
+    root: IRR
+    factor: 1
+  ISK:
+    minor_digits: 0
+    root: ISK
+    factor: 1
+  JMD:
+    minor_digits: 2
+    root: JMD
+    factor: 1
+  JOD:
+    minor_digits: 3
+    root: JOD
+    factor: 1
+  JPY:
+    minor_digits: 0
+    root: JPY
+    factor: 1
+  KES:
+    minor_digits: 2
+    root: KES
+    factor: 1
+  KGS:
+    minor_digits: 2
+    root: KGS
+    factor: 1
+  KHR:
+    minor_digits: 2
+    root: KHR
+    factor: 1
+  KMF:
+    minor_digits: 0
+    root: KMF
+    factor: 1
+  KPW:
+    minor_digits: 2
+    root: KPW
+    factor: 1
+  KRW:
+    minor_digits: 0
+    root: KRW
+    factor: 1
+  KWD:
+    minor_digits: 3
+    root: KWD
+    factor: 1
+  KYD:
+    minor_digits: 2
+    root: KYD
+    factor: 1
+  KZT:
+    minor_digits: 2
+    root: KZT
+    factor: 1
+  LAK:
+    minor_digits: 2
+    root: LAK
+    factor: 1
+  LBP:
+    minor_digits: 2
+    root: LBP
+    factor: 1
+  LKR:
+    minor_digits: 2
+    root: LKR
+    factor: 1
+  LRD:
+    minor_digits: 2
+    root: LRD
+    factor: 1
+  LSL:
+    minor_digits: 2
+    root: LSL
+    factor: 1
+  LYD:
+    minor_digits: 3
+    root: LYD
+    factor: 1
+  MAD:
+    minor_digits: 2
+    root: MAD
+    factor: 1
+  MDL:
+    minor_digits: 2
+    root: MDL
+    factor: 1
+  MGA:
+    minor_digits: 2
+    root: MGA
+    factor: 1
+  MKD:
+    minor_digits: 2
+    root: MKD
+    factor: 1
+  MMK:
+    minor_digits: 2
+    root: MMK
+    factor: 1
+  MNT:
+    minor_digits: 2
+    root: MNT
+    factor: 1
+  MOP:
+    minor_digits: 2
+    root: MOP
+    factor: 1
+  MRU:
+    minor_digits: 2
+    root: MRU
+    factor: 1
+  MUR:
+    minor_digits: 2
+    root: MUR
+    factor: 1
+  MVR:
+    minor_digits: 2
+    root: MVR
+    factor: 1
+  MWK:
+    minor_digits: 2
+    root: MWK
+    factor: 1
+  MXN:
+    minor_digits: 2
+    root: MXN
+    factor: 1
+  MXV:
+    minor_digits: 2
+    root: MXV
+    factor: 1
+  MYR:
+    minor_digits: 2
+    root: MYR
+    factor: 1
+  MZN:
+    minor_digits: 2
+    root: MZN
+    factor: 1
+  NAD:
+    minor_digits: 2
+    root: NAD
+    factor: 1
+  NGN:
+    minor_digits: 2
+    root: NGN
+    factor: 1
+  NIO:
+    minor_digits: 2
+    root: NIO
+    factor: 1
+  NOK:
+    minor_digits: 2
+    root: NOK
+    factor: 1
+  NPR:
+    minor_digits: 2
+    root: NPR
+    factor: 1
+  NZD:
+    minor_digits: 2
+    root: NZD
+    factor: 1
+  OMR:
+    minor_digits: 3
+    root: OMR
+    factor: 1
+  PAB:
+    minor_digits: 2
+    root: PAB
+    factor: 1
+  PEN:
+    minor_digits: 2
+    root: PEN
+    factor: 1
+  PGK:
+    minor_digits: 2
+    root: PGK
+    factor: 1
+  PHP:
+    minor_digits: 2
+    root: PHP
+    factor: 1
+  PKR:
+    minor_digits: 2
+    root: PKR
+    factor: 1
+  PLN:
+    minor_digits: 2
+    root: PLN
+    factor: 1
+  PYG:
+    minor_digits: 0
+    root: PYG
+    factor: 1
+  QAR:
+    minor_digits: 2
+    root: QAR
+    factor: 1
+  RON:
+    minor_digits: 2
+    root: RON
+    factor: 1
+  RSD:
+    minor_digits: 2
+    root: RSD
+    factor: 1
+  RUB:
+    minor_digits: 2
+    root: RUB
+    factor: 1
+  RWF:
+    minor_digits: 0
+    root: RWF
+    factor: 1
+  SAR:
+    minor_digits: 2
+    root: SAR
+    factor: 1
+  SBD:
+    minor_digits: 2
+    root: SBD
+    factor: 1
+  SCR:
+    minor_digits: 2
+    root: SCR
+    factor: 1
+  SDG:
+    minor_digits: 2
+    root: SDG
+    factor: 1
+  SEK:
+    minor_digits: 2
+    root: SEK
+    factor: 1
+  SGD:
+    minor_digits: 2
+    root: SGD
+    factor: 1
+  SHP:
+    minor_digits: 2
+    root: SHP
+    factor: 1
+  SLE:
+    minor_digits: 2
+    root: SLE
+    factor: 1
+  SLL:
+    minor_digits: null
+    root: SLL
+    factor: 1
+  SOS:
+    minor_digits: 2
+    root: SOS
+    factor: 1
+  SRD:
+    minor_digits: 2
+    root: SRD
+    factor: 1
+  SSP:
+    minor_digits: 2
+    root: SSP
+    factor: 1
+  STN:
+    minor_digits: 2
+    root: STN
+    factor: 1
+  SVC:
+    minor_digits: 2
+    root: SVC
+    factor: 1
+  SYP:
+    minor_digits: 2
+    root: SYP
+    factor: 1
+  SZL:
+    minor_digits: 2
+    root: SZL
+    factor: 1
+  THB:
+    minor_digits: 2
+    root: THB
+    factor: 1
+  TJS:
+    minor_digits: 2
+    root: TJS
+    factor: 1
+  TMT:
+    minor_digits: 2
+    root: TMT
+    factor: 1
+  TND:
+    minor_digits: 3
+    root: TND
+    factor: 1
+  TOP:
+    minor_digits: 2
+    root: TOP
+    factor: 1
+  TRY:
+    minor_digits: 2
+    root: TRY
+    factor: 1
+  TTD:
+    minor_digits: 2
+    root: TTD
+    factor: 1
+  TWD:
+    minor_digits: 2
+    root: TWD
+    factor: 1
+  TZS:
+    minor_digits: 2
+    root: TZS
+    factor: 1
+  UAH:
+    minor_digits: 2
+    root: UAH
+    factor: 1
+  UGX:
+    minor_digits: 0
+    root: UGX
+    factor: 1
+  USD:
+    minor_digits: 2
+    root: USD
+    factor: 1
+  USN:
+    minor_digits: 2
+    root: USN
+    factor: 1
+  UYI:
+    minor_digits: 0
+    root: UYI
+    factor: 1
+  UYU:
+    minor_digits: 2
+    root: UYU
+    factor: 1
+  UYW:
+    minor_digits: 4
+    root: UYW
+    factor: 1
+  UZS:
+    minor_digits: 2
+    root: UZS
+    factor: 1
+  VED:
+    minor_digits: 2
+    root: VED
+    factor: 1
+  VES:
+    minor_digits: 2
+    root: VES
+    factor: 1
+  VND:
+    minor_digits: 0
+    root: VND
+    factor: 1
+  VUV:
+    minor_digits: 0
+    root: VUV
+    factor: 1
+  WST:
+    minor_digits: 2
+    root: WST
+    factor: 1
+  XAF:
+    minor_digits: 0
+    root: XAF
+    factor: 1
+  XAG:
+    minor_digits: null
+    root: XAG
+    factor: 1
+  XAU:
+    minor_digits: null
+    root: XAU
+    factor: 1
+  XBA:
+    minor_digits: null
+    root: XBA
+    factor: 1
+  XBB:
+    minor_digits: null
+    root: XBB
+    factor: 1
+  XBC:
+    minor_digits: null
+    root: XBC
+    factor: 1
+  XBD:
+    minor_digits: null
+    root: XBD
+    factor: 1
+  XCD:
+    minor_digits: 2
+    root: XCD
+    factor: 1
+  XDR:
+    minor_digits: null
+    root: XDR
+    factor: 1
+  XOF:
+    minor_digits: 0
+    root: XOF
+    factor: 1
+  XPD:
+    minor_digits: null
+    root: XPD
+    factor: 1
+  XPF:
+    minor_digits: 0
+    root: XPF
+    factor: 1
+  XPT:
+    minor_digits: null
+    root: XPT
+    factor: 1
+  XSU:
+    minor_digits: null
+    root: XSU
+    factor: 1
+  XTS:
+    minor_digits: null
+    root: XTS
+    factor: 1
+  XUA:
+    minor_digits: null
+    root: XUA
+    factor: 1
+  XXX:
+    minor_digits: null
+    root: XXX
+    factor: 1
+  YER:
+    minor_digits: 2
+    root: YER
+    factor: 1
+  ZAR:
+    minor_digits: 2
+    root: ZAR
+    factor: 1
+  ZMW:
+    minor_digits: 2
+    root: ZMW
+    factor: 1
+  ZWL:
+    minor_digits: null
+    root: ZWL
+    factor: 1
+  GBp:
+    minor_digits: null
+    root: GBP
+    factor: 100
+  ILA:
+    minor_digits: null
+    root: ILS
+    factor: 100
+  ZAc:
+    minor_digits: null
+    root: ZAR
+    factor: 100
+  USX:
+    minor_digits: null
+    root: USX
+    factor: 1

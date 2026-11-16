@@ -422,3 +422,34 @@ def test_recovery_cli_emits_actual_complete_readback_digest_without_private_rows
         assert document(config)['pending'] is None
     else:
         assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize('currency', ['CAD', 'GBP', 'GBp'])
+def test_recovery_reads_own_profile_currency_for_exact_pending_row(config, snapshot, currency):
+    intent = pending_import(config, snapshot)
+    with journal_module.account_journal(config) as journal:
+        for row in journal['document']['pending']['payload'].values():
+            if row['type'] == 'DIVIDEND':
+                row['currency'] = currency
+        journal_module.write_journal(journal)
+    intent = document(config)['pending']
+    rows = [activity_row(a, str(i)) for i, a in enumerate(intent['payload'].values())]
+    for row in rows:
+        row['assetProfile']['currency'] = row['currency']
+        row['currency'] = None
+    assert journal_module.resolve_import_intent(config, {'activities': rows, 'count': len(rows)},
+        expected_intent_id=intent['id']) == 2
+
+
+def test_recovery_preserves_unowned_old_unavailable_money(config, snapshot):
+    intent = pending_import(config, snapshot)
+    rows = [activity_row(a, str(i)) for i, a in enumerate(intent['payload'].values())]
+    old = activity_row({**next(iter(intent['payload'].values())), 'comment': None,
+        'currency': 'ZZZ', 'type': 'DIVIDEND', 'date': '2020-01-01T00:00:00Z'}, 'old')
+    old['assetProfile']['currency'] = 'ZZZ'
+    old['currency'] = None
+    rows.append(old)
+    before = deepcopy(rows)
+    assert journal_module.resolve_import_intent(config, {'activities': rows, 'count': len(rows)},
+        expected_intent_id=intent['id']) == 2
+    assert rows == before

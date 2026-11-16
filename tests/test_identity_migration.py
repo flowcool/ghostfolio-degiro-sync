@@ -252,7 +252,7 @@ def test_native_inherited_currency_preview_apply_and_rollback_preserve_raw_conte
 
 
 @pytest.mark.parametrize('currency,profile_currency,expected', [
-    ('USD', 'EUR', 'USD'), (None, None, None), (None, '', None), (None, 'GBp', None)])
+    ('USD', 'EUR', 'USD'), (None, None, None), (None, '', None), (None, 'GBp', 'GBp'), (None, 'ZZZ', None)])
 def test_comment_payload_never_guesses_currency_or_replaces_explicit_override(currency, profile_currency, expected):
     row = opening_holding()
     row.update(currency=currency, tags=[])

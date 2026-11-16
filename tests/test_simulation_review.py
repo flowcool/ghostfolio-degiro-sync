@@ -89,3 +89,11 @@ def test_live_run_does_not_publish_private_simulation_or_activity_details(review
     assert adapter.main(["--sync"]) == 0
     assert not list(tmp_path.rglob("*.json"))
     assert "DIVIDEND" not in caplog.text and "TEST" not in caplog.text
+
+
+def test_optional_plan_exposes_verified_cash_components(review, tmp_path):
+    review['cash_currency'] = 'EUR'
+    review['cash_components'] = {'EUR': '42.50', 'USD': '0'}
+    assert adapter.main(['--sync', '--plan-output', str(tmp_path / 'cash.json')]) == 0
+    data = json.loads((tmp_path / 'cash.json').read_bytes())
+    assert data['cash_currency'] == 'EUR' and data['cash_components'] == review['cash_components']

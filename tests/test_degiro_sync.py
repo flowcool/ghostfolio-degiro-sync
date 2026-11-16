@@ -436,7 +436,7 @@ def test_invalid_config_rejected_before_broker_read(monkeypatch, tmp_path, name,
 
 
 @pytest.mark.parametrize('document', [None, {}, {'US0378331006': {'symbol': 'TEST', 'currency': 'USD'}},
-    {'US0378331005': 'TEST'}, {'US0378331005': {'symbol': 'TEST', 'currency': 'GBp'}},
+    {'US0378331005': 'TEST'}, {'US0378331005': {'symbol': 'TEST', 'currency': 'USX'}},
     {'US0378331005': {'symbol': ' TEST ', 'currency': 'USD'}},
     {'US0378331005': {'symbol': 'TEST', 'currency': 'USD', 'password': 'FAKE'}}])
 def test_mapping_requires_explicit_verified_units(monkeypatch, tmp_path, document):

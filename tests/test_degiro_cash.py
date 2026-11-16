@@ -212,6 +212,19 @@ def test_source_lastupdated_units_are_not_guessed(snapshot):
     assert extract(snapshot) == 12.3
 
 
+@pytest.mark.parametrize('code', ['BGN', 'CNH', 'XXX'])
+def test_unknown_zero_cash_placeholder_does_not_authorize_nonzero_cash(snapshot, code):
+    foreign = deepcopy(snapshot['update']['portfolio']['value'][0])
+    foreign['id'] = foreign['value'][0]['value'] = 'FLATEX_' + code
+    foreign['value'][1]['value'] = 0
+    snapshot['update']['portfolio']['value'].append(foreign)
+    assert accounting_module.cash_position_currency(foreign['id'], {'size': 0}) == code
+    assert extract(snapshot) == 12.3
+    foreign['value'][1]['value'] = 1
+    with pytest.raises(RuntimeError):
+        extract(snapshot)
+
+
 def test_optional_accrued_interest_without_value_is_observed(snapshot):
     snapshot['update']['portfolio']['value'][0]['value'].append({'name': 'accruedInterest'})
     assert extract(snapshot) == 12.3
@@ -273,3 +286,22 @@ def test_unconfirmed_writer_result_fails(snapshot, result):
     with pytest.raises(RuntimeError, match='confirm success'):
         accounting_module.apply_cash_balance(snapshot, TARGET, '123', lambda *args: result,
             dry_run=False, import_ok=True, now=NOW)
+
+
+@pytest.mark.parametrize('balance', [-12.3, 0, 12.3])
+def test_verified_signed_aggregate(snapshot, balance):
+    for name in ('totalCash', 'flatexCash'):
+        set_total(snapshot, name, balance)
+    snapshot['update']['cashFunds']['value'][0]['value'][1]['value'] = balance
+    snapshot['update']['portfolio']['value'][0]['value'][1]['value'] = balance
+    before = deepcopy(snapshot)
+    assert extract(snapshot) == balance
+    assert snapshot == before
+
+
+def test_duplicate_typed_cash_is_not_accepted_as_current_evidence(snapshot):
+    row = {'id': 'EUR', 'value': [{'name': 'id', 'value': 'EUR'},
+        {'name': 'size', 'value': 12.3}, {'name': 'positionType', 'value': 'CASH'}]}
+    snapshot['update']['portfolio']['value'].extend([row, deepcopy(row)])
+    with pytest.raises(RuntimeError, match='identity'):
+        extract(snapshot)

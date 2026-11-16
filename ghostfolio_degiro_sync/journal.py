@@ -152,7 +152,7 @@ def selected_import_intent(journal: Journal, expected_intent_id: Any) -> Any:
 def verify_import_intent(journal: Journal, config: Any, existing_body: Any, expected_intent_id: Any) -> Any:
     pending = selected_import_intent(journal, expected_intent_id)
     target = {"id": config["target_account"]}
-    rows, _ = ghostfolio_module.existing_activity_context(existing_body, target)
+    rows, _ = ghostfolio_module.existing_activity_context(existing_body, target, allow_unverified_currency=True)
     candidates = list(pending["payload"].values())
     if any(not isinstance(row, dict) or row.get("comment") != identity
             for identity, row in pending["payload"].items()):
@@ -160,6 +160,12 @@ def verify_import_intent(journal: Journal, config: Any, existing_body: Any, expe
     keys = {(row["accountId"], row["comment"]) for row in candidates}
     selected = [row for row in rows if (row.get("accountId"), row.get("comment")) in keys]
     try:
+        # Owned rows require monetary units; unrelated history cannot prove a pending result.
+        for row in rows:
+            if (row.get("accountId") == target["id"] and str(row.get("comment") or "").startswith("DEGIRO#")
+                    and row.get("currency") not in accounting_module.CURRENCY_QUANTA):
+                raise RuntimeError("Unverified owned recovery currency")
+        selected = [ghostfolio_module.effective_activity_currency(row) for row in selected]
         # The core validates IDs, profiles, exact money/date/type and eligibility.
         accepted = core.accepted_import_subset(candidates, {"activities": selected})
         accepted, profiles = ghostfolio_module.prove_accepted_subset(candidates, accepted)

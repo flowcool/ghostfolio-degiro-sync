@@ -75,7 +75,7 @@ def test_complete_coverage_and_contention_are_explicit():
 
 def test_missing_exact_evidence_remains_uncertain_and_unsupported_units_unavailable():
     row = candidate()
-    row['currency'] = 'GBp'
+    row['currency'] = 'XAU'
     report = diagnostics.reconcile_activities([row], [{**row, 'id': 'one'}], None, None, exact=False)
     assert report[0]['status'] == 'uncertain'
     assert report[0]['checks']['currency'] == 'unavailable'
@@ -105,7 +105,7 @@ def test_original_source_json_decimals_survive_conversion(snapshot):
     ('EUR', 'USD', 'coherent', 'equal', 'EUR'),
     ('USD', 'EUR', 'to-check', 'different', 'USD'),
     (None, None, 'uncertain', 'unavailable', None),
-    (None, 'GBp', 'uncertain', 'unavailable', None),
+    (None, 'GBp', 'to-check', 'different', 'GBp'),
 ])
 def test_native_report_inherits_exact_profile_currency_without_changing_evidence(
         snapshot, raw_currency, profile_currency, status, currency_check, observed_currency):
@@ -182,7 +182,7 @@ def test_no_dividend_report_and_unavailable_units_are_explicit():
     assert 'No source or destination events available.' in empty
     assert check_report(empty) == []
     row = candidate('DIVIDEND', 'DIVIDEND')
-    row['currency'] = 'GBp'
+    row['currency'] = 'XAU'
     text = diagnostics.render_reconciliation(diagnostics.reconcile_activities([row], [], None, None, exact=False))
     assert 'Security quantity: unavailable' in text
     assert 'unitPrice unavailable' in text
@@ -197,3 +197,35 @@ def test_manual_matching_skips_foreign_rows_without_profile_symbol():
     incomplete_foreign = {'accountId': 'other', 'type': 'BUY',
                           'date': '2026-01-01T00:00:00Z', 'quantity': 1}
     assert not match_manual_activity(activity, [incomplete_foreign])
+
+
+def test_original_source_derived_quote_units_match_exact_dto(snapshot):
+    import json
+    from test_degiro_sync import MAPPING
+    product = snapshot['products']['20']
+    product['currency'] = 'GBP'
+    for row in snapshot['cash_movements']:
+        if row.get('currency') == 'USD':
+            row['currency'] = 'GBP'
+    snapshot['_diagnostic_wire'] = [
+        {'path': '/transactions', 'body': json.dumps({'data': snapshot['transactions']})},
+        {'path': '/accountoverview', 'body': json.dumps({'data': {'cashMovements': snapshot['cash_movements']}})},
+        {'path': '/products/info', 'body': json.dumps({'data': snapshot['products']})}]
+    activities = diagnostics.exact_source_activities(snapshot, 'target-a', MAPPING, {'TEST': 'GBp'})
+    assert activities is not None
+    trade = next(row for row in activities if row['type'] == 'SELL')
+    assert trade['currency'] == 'GBp' and trade['unitPrice'] == Decimal('1000')
+    assert trade['fee'] == Decimal('16.500')
+
+
+def test_report_explains_profile_currency_without_changing_original(snapshot):
+    from test_degiro_sync import MAPPING, QUOTES, opening_holding
+    row = opening_holding()
+    row['currency'] = None
+    row['assetProfile']['currency'] = 'CAD'
+    body = {'activities': [row], 'count': 1}
+    before = deepcopy(body)
+    report = diagnostics.snapshot_reconciliation(snapshot, body, 'target-a', MAPPING, QUOTES)
+    text = diagnostics.render_reconciliation(report)
+    assert 'raw unavailable; effective CAD; provenance assetProfile.currency' in text
+    assert body == before

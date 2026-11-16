@@ -35,7 +35,8 @@ the image. Compose continues to select the command and schedule automatically.
 
 ## Limits
 
-- Quote currencies: **EUR, USD and JPY only**. Current cash: **EUR only**.
+- Trades and dividends accept currencies with verified monetary units that Ghostfolio recognizes. The packaged [currency registry](ghostfolio_degiro_sync/currency-units.yaml) records the reference sources. Proven major/minor quote relationships include GBP/GBp, ILS/ILA and ZAR/ZAc. Unknown units and unrelated quote currencies block.
+- Current cash uses **one account and the verified broker total in its base currency**. The qualified layout remains **EUR with zero foreign cash components**. Positive, zero and negative verified totals are accepted. Nonzero foreign balances and other layouts remain blocked until their aggregate denomination and independent checks are proved.
 - Cash-statement relationships are characterized for **French (`fr`) statements**; other statement languages are not verified.
 - Normal Compose operation reads a **rolling 90-day window** through the Europe/Zurich date. It reconstructs neither complete history nor historical cost basis.
 - Existing activities are never automatically corrected or deleted. Unknown or ambiguous relevant evidence blocks synchronization.
@@ -50,7 +51,7 @@ Paste this into a Portainer stack or save it as `compose.yaml`. Supply the varia
 # Existing Ghostfolio network; run once by default, CRON is opt-in.
 services:
   degiro-sync:
-    image: ${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:v0.5.0}
+    image: ${DEGIRO_IMAGE:-ghcr.io/flowcool/ghostfolio-degiro-sync:v0.7.0}
     restart: ${RESTART_POLICY:-no}
     user: "10001:10001"
     read_only: true
@@ -118,7 +119,7 @@ Start with `DRY_RUN=1` and an empty `CRON`. In Portainer, use absolute host path
 | `RESTART_POLICY` | Docker restart policy | `no` | With `CRON`, set `unless-stopped` to restart the scheduler after a crash or host reboot |
 | `APPRISE_URLS` | Failure alerts | Empty: disabled | Recommended for scheduled runs; JSON list, e.g. `'["ntfy://notification-host/topic"]'` |
 | `APPRISE_TIMEOUT` | Alert deadline | `10` seconds | Keep the default; allowed range 1–30 |
-| `DEGIRO_IMAGE` | Published image tag or digest | `ghcr.io/flowcool/ghostfolio-degiro-sync:v0.5.0` | Follow a reviewed release, pin an immutable digest for controlled upgrades, or explicitly choose `:latest` |
+| `DEGIRO_IMAGE` | Published image tag or digest | `ghcr.io/flowcool/ghostfolio-degiro-sync:v0.7.0` | Follow a reviewed release, pin an immutable digest for controlled upgrades, or explicitly choose `:latest` |
 
 **BREAKING:** a valid IANA `TZ` is required for financial writes. Missing or invalid `TZ` forces simulation and emits a fixed warning. Absent or blank `DRY_RUN` also simulates and emits `DRY_RUN not set: simulation, nothing written`. Values are trimmed and case-insensitive: `1`/`true`/`yes`/`on` simulate; `0`/`false`/`no`/`off` request writes. Any other value stops before broker or Ghostfolio access.
 
@@ -140,7 +141,7 @@ US0378331005:
   currency: USD
 ```
 
-Keys must be valid ISINs; entries contain exactly `symbol` and `currency`, without surrounding whitespace. Quote currencies are **EUR, USD and JPY** only. Conflicting currencies for the same symbol reject the mapping. Current cash supports EUR only.
+Keys must be valid ISINs; entries contain exactly `symbol` and `currency`, without surrounding whitespace. Quote currencies must have verified units in the packaged currency registry. For a GBP-priced security quoted by Yahoo in pence, set `currency: GBp`: prices and fees scale by 100, while quantities stay unchanged. This uses an explicit unit relationship, never an inferred exchange rate. Conflicting currencies for the same symbol reject the mapping. See [cash qualification limits](#limits).
 
 Prepare the mounts, using your configured host paths if different:
 
@@ -261,6 +262,16 @@ writes and does not change import selection, exit status or notifications. Priva
 captures may retain original financial JSON for this comparison; protect them as
 financial data. They are not source lifetime-coverage proof.
 
+
+Currency evidence in the reconciliation report identifies the original field and
+its effective value. A null activity currency can use that activity's own asset
+profile. An absent field, invalid current profile or unknown unit stays unproved.
+Old unowned rows outside the rolling interval and its manual-match margin can
+remain as historical evidence. They are never rewritten or certified. Relevant
+ownership, holdings, matching and uncertain-result checks still require evidence.
+The private simulation plan includes `cash_currency`, the broker `cash` aggregate
+and `cash_components` in their original currencies. Components are cross-checks;
+they are never added to the aggregate.
 
 Simulation prints a plain DEGIRO reconciliation report, including runs without
 dividends. Each finding names its source identity, exact compared destination ID,

@@ -188,7 +188,7 @@ def exact_json(raw: object) -> Any:
 def exact_source_activities(snapshot: dict[str, Any], target: str, mapping: dict[str, str],
         quotes: dict[str, str]) -> list[dict[str, Any]] | None:
     """Use original wire decimals, never reconstruct precision from floats."""
-    from ghostfolio_degiro_sync import accounting, identity
+    from ghostfolio_degiro_sync import accounting, currencies, identity
     wires = snapshot.get('_diagnostic_wire')
     if not isinstance(wires, list):
         return None
@@ -229,12 +229,14 @@ def exact_source_activities(snapshot: dict[str, Any], target: str, mapping: dict
             row = trades[source_id] if kind == 'TRADE' else cash[source_id]
             value = dict(activity)
             if kind == 'TRADE':
+                factor = currencies.quote_factor(exact['products'][str(row['productId'])]['currency'], activity['currency'])
                 value.update(quantity=abs(accounting.financial_decimal(row['quantity'])),
-                    unitPrice=accounting.financial_decimal(row['price']),
-                    fee=-accounting.financial_decimal(row['totalFeesInBaseCurrency']) * accounting.financial_decimal(row['fxRate']))
+                    unitPrice=accounting.financial_decimal(row['price']) * factor,
+                    fee=-accounting.financial_decimal(row['totalFeesInBaseCurrency']) * accounting.financial_decimal(row['fxRate']) * factor)
             elif kind == 'DIVIDEND':
-                value.update(quantity=1, unitPrice=accounting.financial_decimal(row['change']),
-                    fee=-accounting.financial_decimal(dividends[source_id]['change']))
+                factor = currencies.quote_factor(row['currency'], activity['currency'])
+                value.update(quantity=1, unitPrice=accounting.financial_decimal(row['change']) * factor,
+                    fee=-accounting.financial_decimal(dividends[source_id]['change']) * factor)
             elif kind == 'FEE':
                 value.update(quantity=1, unitPrice=0, fee=-accounting.financial_decimal(row['change']))
             else:
@@ -248,19 +250,20 @@ def exact_source_activities(snapshot: dict[str, Any], target: str, mapping: dict
 def snapshot_reconciliation(snapshot: dict[str, Any], existing: dict[str, Any],
         target: str, mapping: dict[str, str], quotes: dict[str, str]) -> list[dict[str, Any]]:
     """Observe the existing read phase; incomplete evidence stays unavailable."""
-    from ghostfolio_degiro_sync import accounting, ghostfolio
+    from ghostfolio_degiro_sync import accounting, currencies, ghostfolio
     expected = exact_source_activities(snapshot, target, mapping, quotes)
     exact_body = exact_json(existing.get('_diagnostic_wire'))
     observed = []
     body = exact_body if isinstance(exact_body, dict) else existing
     for row in body.get('activities', []):
+        evidence = currencies.effective_currency(row)
         try:
             row = ghostfolio.effective_activity_currency(row)
         except RuntimeError:
             # Unproved units stay unavailable in this observational report.
             pass
         profile = row.get('assetProfile') if 'assetProfile' in row else row.get('SymbolProfile')
-        observed.append({**row, 'symbol': (profile or {}).get('symbol'),
+        observed.append({**row, 'currency_evidence': evidence, 'symbol': (profile or {}).get('symbol'),
             'dataSource': (profile or {}).get('dataSource')})
     exact = expected is not None and isinstance(exact_body, dict) and (
         exact_body.get('count') == len(observed) == len(existing.get('activities', []))
@@ -321,6 +324,11 @@ def render_reconciliation(findings: list[dict[str, Any]]) -> str:
                 f"symbol {display_value(row.get('symbol'))}; currency {display_value(currency)}; "
                 f"quantity {display_number(row.get('quantity'))}; unitPrice {display_number(row.get('unitPrice'), currency or '?')} "
                 f"{display_value(currency)}; fee {display_number(row.get('fee'), currency or '?')} {display_value(currency)}")
+        evidence = (block['observed'] or {}).get('currency_evidence')
+        if evidence is not None:
+            lines.append('Currency evidence: raw ' + display_value(evidence['raw'])
+                + '; effective ' + display_value(evidence['effective']) + '; provenance '
+                + display_value(evidence['provenance']) + '.currency; reason ' + display_value(evidence['reason']))
         lines.append('Security quantity: ' + display_number(block['security_quantity']))
         lines.append('Checks: ' + ('; '.join(f'{name} {value}' for name, value in block['checks'].items()) or 'unavailable'))
         lines.append('Coverage: source events ' + str(block['source_count']) + '; destination activities '

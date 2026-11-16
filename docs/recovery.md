@@ -307,3 +307,13 @@ candidate digest with `DRY_RUN=1` and the existing Compose target. If it cannot
 start, keep writers stopped until compatible repair. Neither comment reversal
 nor a source Git revert qualifies an older binary when retained v1 rows exist.
 A database restore has a separate operation boundary and is never automatic.
+
+## Currency evidence during recovery
+
+A null currency can resolve from that stored activity's own profile, using the
+same verified currency registry as normal admission. Recovery still requires
+exact effective units and financial content for every pending or accepted row.
+Historical quantity-only admission does not authorize a recovery match, resend,
+conversion or rewrite. Preserve the original capture and journal. New-currency
+imports require proof that a rollback reader can read those rows before reverting
+the running connector.

@@ -39,6 +39,20 @@ def test_cross_currency_sell_preserves_cost_and_identity(snapshot):
     assert convert(snapshot) == [activity]
 
 
+@pytest.mark.parametrize('currency', ['CAD', 'CHF', 'GBP', 'KWD'])
+def test_verified_trade_currency_is_not_limited_to_original_three(snapshot, currency):
+    snapshot['products']['20']['currency'] = currency
+    result, = accounting_module.normalize_trades(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': currency})
+    assert (result['currency'], result['unitPrice'], result['fee'], result['quantity']) == (currency, 10, .165, 2)
+
+
+def test_verified_pence_quote_scales_price_and_fee_once(snapshot):
+    snapshot['products']['20']['currency'] = 'GBP'
+    result, = accounting_module.normalize_trades(snapshot, 'target-a', {'US0378331005': 'TEST'}, {'TEST': 'GBp'})
+    assert (result['currency'], result['unitPrice'], result['fee'], result['quantity']) == ('GBp', 1000, 16.5, 2)
+    assert snapshot['transactions'][0]['price'] == 10
+
+
 def test_fractional_buy_and_same_currency(snapshot):
     snapshot['products']['20']['currency'] = 'EUR'
     row = buy(snapshot, quantity='0.125')

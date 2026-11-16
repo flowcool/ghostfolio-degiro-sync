@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 import ghostfolio_core as core
 from ghostfolio_degiro_sync import accounting as accounting_module
 from ghostfolio_degiro_sync import config as config_module
+from ghostfolio_degiro_sync import currencies
 from ghostfolio_degiro_sync import degiro as degiro_module
 from ghostfolio_degiro_sync import diagnostics as diagnostics_module
 from ghostfolio_degiro_sync import ghostfolio as ghostfolio_module
@@ -61,7 +62,8 @@ def select_account_activities(config: Any, snapshot: Any, target_account: Any, e
             config, snapshot, target_account, existing_body, mapping, quote_currencies,
             evidence=prospective_evidence, now=now, profiles=profiles)
     else:
-        existing, quantities = ghostfolio_module.index_existing_activities(existing_body, target_account, now=now)
+        existing, quantities = ghostfolio_module.index_existing_activities(existing_body, target_account, now=now,
+            allow_unverified_currency=rolling)
     if rolling:
         snapshot = rolling_snapshot(snapshot, journal)
     balance = accounting_module.current_cash_balance(snapshot, target_account, source, now)
@@ -76,6 +78,8 @@ def select_account_activities(config: Any, snapshot: Any, target_account: Any, e
         raise RuntimeError("Future DEGIRO candidate blocks synchronization")
     if rolling and any(datetime.fromisoformat(a["date"]).microsecond % 1000 for a in activities):
         raise RuntimeError("Rolling date precision cannot be represented by Ghostfolio")
+    if rolling:
+        verify_historical_currency_relevance(existing, target_account, snapshot)
     existing, profiles = ghostfolio_module.bind_existing_profiles(existing, activities, profiles)
     if context:
         profiles.update(context.get("profiles", {}))
@@ -113,6 +117,22 @@ def select_account_activities(config: Any, snapshot: Any, target_account: Any, e
         prospective=prospective, rolling=rolling, context=context, profiles=profiles)
 
 
+def verify_historical_currency_relevance(rows: Any, target: Any, snapshot: Any) -> None:
+    """Unavailable old monetary units cannot influence matching or ownership."""
+    # The longest inherited matching margin is three calendar days for dividends.
+    boundary = datetime.combine(date.fromisoformat(snapshot["from_date"]), datetime.min.time(),
+        tzinfo=ZoneInfo("Europe/Zurich")).astimezone(UTC).date() - timedelta(days=3)
+    for row in rows:
+        if row.get("accountId") != target["id"]:
+            continue
+        evidence = currencies.effective_currency(row)
+        if evidence["effective"] is not None and currencies.quantum(evidence["effective"]) is not None:
+            continue
+        if (str(row.get("comment") or "").startswith("DEGIRO#")
+                or accounting_module.prospective_instant(row["date"]).date() >= boundary):
+            raise RuntimeError("Unverified relevant Ghostfolio activity currency")
+
+
 def synchronize_locked(config: Any, snapshot: Any, target_account: Any, existing_body: Any, mapping: Any,
                         quote_currencies: Any, import_activities: Any, update_balance: Any,
                         now: datetime | None=None, journal: Any=None) -> Any:
@@ -136,6 +156,10 @@ def synchronize_locked(config: Any, snapshot: Any, target_account: Any, existing
         reconciliation = diagnostics_module.snapshot_reconciliation(diagnostic_snapshot, existing_body, target_account["id"], mapping, quote_currencies)
         return {"reconciliation": reconciliation, "proposed": pending, "accepted": [], "cash": balance, "dry_run": True,
                 "cash_before": float(accounting_module.financial_decimal(target_account["balance"])),
+                "cash_currency": snapshot["account_info"]["baseCurrency"],
+                "cash_components": {fields["currencyCode"]: str(accounting_module.financial_decimal(fields["value"]))
+                    for row in accounting_module.cash_wrapper_rows(snapshot["update"], "cashFunds")
+                    for fields in [accounting_module.named_values(row["value"])]},
                 "candidates": plan.candidates, "exclusions": dict(plan.exclusions),
                 "period": {"from_date": snapshot.get("from_date"), "to_date": snapshot.get("to_date"),
                            "timezone": "Europe/Zurich"},
@@ -203,11 +227,8 @@ def broker_stock_holdings(snapshot: Any, target_account: Any, mapping: Any, quot
             raise RuntimeError("Conflicting prospective holding identity")
         identities.add(identity)
         size = accounting_module.financial_decimal(fields.get("size"))
-        if isinstance(identity, str) and identity.startswith("FLATEX_"):
-            continue  # Independently checked by current_cash_balance.
-        if (identity in accounting_module.CASH_CURRENCIES
-                and fields.get("positionType") == "CASH" and size == 0):
-            continue  # Empty currency placeholders are not held securities.
+        if accounting_module.cash_position_currency(identity, fields) is not None:
+            continue  # Valuation is independently checked by current_cash_balance.
         product_id = identity_module.broker_identity(identity)
         if size == 0:
             continue
@@ -218,9 +239,9 @@ def broker_stock_holdings(snapshot: Any, target_account: Any, mapping: Any, quot
                 or not accounting_module.valid_isin(product.get("isin"))):
             raise RuntimeError("Unverified prospective security holding")
         symbol = mapping.get(product["isin"])
-        if (not isinstance(symbol, str) or not symbol.strip()
-                or quote_currencies.get(symbol) != product.get("currency")):
+        if not isinstance(symbol, str) or not symbol.strip():
             raise RuntimeError("Unverified prospective holding mapping")
+        currencies.quote_factor(product.get("currency"), quote_currencies.get(symbol))
         key = (target_account["id"], symbol)
         quantities[key] = quantities.get(key, Decimal(0)) + size
     return {key: value for key, value in quantities.items() if value != 0}
