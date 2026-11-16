@@ -248,12 +248,17 @@ def exact_source_activities(snapshot: dict[str, Any], target: str, mapping: dict
 def snapshot_reconciliation(snapshot: dict[str, Any], existing: dict[str, Any],
         target: str, mapping: dict[str, str], quotes: dict[str, str]) -> list[dict[str, Any]]:
     """Observe the existing read phase; incomplete evidence stays unavailable."""
-    from ghostfolio_degiro_sync import accounting
+    from ghostfolio_degiro_sync import accounting, ghostfolio
     expected = exact_source_activities(snapshot, target, mapping, quotes)
     exact_body = exact_json(existing.get('_diagnostic_wire'))
     observed = []
     body = exact_body if isinstance(exact_body, dict) else existing
     for row in body.get('activities', []):
+        try:
+            row = ghostfolio.effective_activity_currency(row)
+        except RuntimeError:
+            # Unproved units stay unavailable in this observational report.
+            pass
         profile = row.get('assetProfile') if 'assetProfile' in row else row.get('SymbolProfile')
         observed.append({**row, 'symbol': (profile or {}).get('symbol'),
             'dataSource': (profile or {}).get('dataSource')})

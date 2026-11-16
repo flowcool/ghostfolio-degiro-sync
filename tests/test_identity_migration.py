@@ -151,10 +151,13 @@ def test_preview_changed_complete_selection_removes_replacements(tmp_path, snaps
     assert manifest['counts']['unproven'] == 3
 
 
-def prepare_apply(tmp_path, snapshot, destination_version='3.86.0', api_shape=False):
+def prepare_apply(tmp_path, snapshot, destination_version='3.86.0', api_shape=False, inherited_currency=False):
     inputs, rows = saved_inputs(tmp_path, snapshot)
     config = yaml.safe_load(inputs.read_text())
     for index, row in enumerate(rows):
+        if inherited_currency:
+            row['assetProfile']['currency'] = row['currency']
+            row['currency'] = None
         if api_shape:
             row.pop('isDraft')
             row['updatedAt'] = '2026-01-05T00:00:00.000Z'
@@ -188,8 +191,9 @@ def prepare_apply(tmp_path, snapshot, destination_version='3.86.0', api_shape=Fa
     return inputs, manifest, manifest_hash, permit, migration.digest(permit.read_bytes()), tmp_path / 'operation.yaml', rows
 
 
-def apply_fake(tmp_path, snapshot, monkeypatch, effect=None, destination_version='3.86.0', api_shape=False):
-    args = prepare_apply(tmp_path, snapshot, destination_version, api_shape)
+def apply_fake(tmp_path, snapshot, monkeypatch, effect=None, destination_version='3.86.0', api_shape=False,
+               inherited_currency=False):
+    args = prepare_apply(tmp_path, snapshot, destination_version, api_shape, inherited_currency)
     rows = migration.exact_json((tmp_path / 'destination.json').read_bytes())['activities']
     puts = []
     def request(method, host, token, row_id=None, payload=None):
@@ -217,6 +221,49 @@ def test_apply_only_changes_reviewed_comments_with_intent_first(tmp_path, snapsh
     assert migration.keyed_yaml(args[5].read_bytes())['status'] == 'complete'
     with pytest.raises(RuntimeError, match='Existing'):
         migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+
+
+def test_native_inherited_currency_preview_apply_and_rollback_preserve_raw_context(tmp_path, snapshot, monkeypatch):
+    def effect(rows, row_id, payload):
+        row = next(row for row in rows if row['id'] == row_id)
+        assert payload['currency'] == row['assetProfile']['currency']
+        assert row['currency'] is None
+        row['comment'] = payload['comment']
+    args, rows, puts = apply_fake(tmp_path, snapshot, monkeypatch, effect,
+        destination_version='3.100.0', api_shape=True, inherited_currency=True)
+    before = deepcopy(rows)
+    manifest = migration.keyed_yaml(args[1].read_bytes())
+    assert manifest['counts'] == {'eligible': 3, 'manual/other broker': 1}
+    assert manifest['selection_proof']['equal'] is True
+    migration.apply(*args[:6], 'https://portfolio.example', 'synthetic-token')
+    assert len(puts) == 3
+    assert [{**row, 'comment': old['comment']} for row, old in zip(rows, before)] == before
+    permit = rollback_permit(args)
+    def rollback_request(method, host, token, row_id=None, payload=None):
+        if method == 'GET':
+            return {'count': len(rows), 'activities': deepcopy(rows)}
+        puts.append(row_id)
+        effect(rows, row_id, payload)
+    monkeypatch.setattr(migration, 'maintenance_request', rollback_request)
+    migration.rollback(args[5], args[1], args[2], permit, migration.digest(permit.read_bytes()),
+        'https://portfolio.example', 'synthetic-token')
+    assert len(puts) == 6 and rows == before
+    assert migration.keyed_yaml(args[5].read_bytes())['status'] == 'rolled_back'
+
+
+@pytest.mark.parametrize('currency,profile_currency,expected', [
+    ('USD', 'EUR', 'USD'), (None, None, None), (None, '', None), (None, 'GBp', None)])
+def test_comment_payload_never_guesses_currency_or_replaces_explicit_override(currency, profile_currency, expected):
+    row = opening_holding()
+    row.update(currency=currency, tags=[])
+    row['assetProfile']['currency'] = profile_currency
+    before = deepcopy(row)
+    if expected is None:
+        with pytest.raises(RuntimeError, match='Unverified Ghostfolio activity currency'):
+            migration.comment_payload(row, 'DEGIRO#v1#123:TRADE:10')
+    else:
+        assert migration.comment_payload(row, 'DEGIRO#v1#123:TRADE:10')['currency'] == expected
+    assert row == before
 
 
 @pytest.mark.parametrize('version', ['3.86.0', '3.86.0+build.7', '3.93.0', '3.100.0',

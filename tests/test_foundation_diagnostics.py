@@ -99,6 +99,36 @@ def test_original_source_json_decimals_survive_conversion(snapshot):
     assert trade['unitPrice'] == Decimal('10.00000000000000001')
 
 
+@pytest.mark.parametrize('raw_currency,profile_currency,status,currency_check,observed_currency', [
+    (None, 'EUR', 'coherent', 'equal', 'EUR'),
+    ('EUR', 'USD', 'coherent', 'equal', 'EUR'),
+    ('USD', 'EUR', 'to-check', 'different', 'USD'),
+    (None, None, 'uncertain', 'unavailable', None),
+    (None, 'GBp', 'uncertain', 'unavailable', None),
+])
+def test_native_report_inherits_exact_profile_currency_without_changing_evidence(
+        snapshot, raw_currency, profile_currency, status, currency_check, observed_currency):
+    import json
+    from test_degiro_sync import MAPPING, QUOTES, activity_row
+    snapshot['_diagnostic_wire'] = [
+        {'path': '/transactions', 'body': json.dumps({'data': snapshot['transactions']})},
+        {'path': '/accountoverview', 'body': json.dumps({'data': {'cashMovements': snapshot['cash_movements']}})},
+        {'path': '/products/info', 'body': json.dumps({'data': snapshot['products']})}]
+    expected = diagnostics.exact_source_activities(snapshot, 'target-a', MAPPING, QUOTES)
+    proposal = next(row for row in expected if row['type'] == 'FEE')
+    stored = activity_row({**proposal, 'currency': raw_currency, 'symbol': '00000000-0000-4000-8000-000000000001'})
+    stored['assetProfile']['currency'] = profile_currency
+    body = {'activities': [stored], 'count': 1}
+    body['_diagnostic_wire'] = json.dumps(body, default=float)
+    before = deepcopy((snapshot, body))
+    findings = diagnostics.snapshot_reconciliation(snapshot, body, 'target-a', MAPPING, QUOTES)
+    matched = next(block for block in findings if block['observed_ids'])
+    assert matched['status'] == status
+    assert matched['checks']['currency'] == currency_check
+    assert matched['observed']['currency'] == observed_currency
+    assert (snapshot, body) == before
+
+
 def test_split_source_history_does_not_claim_ownership_from_equal_amounts():
     row = candidate('DIVIDEND', 'DIVIDEND')
     source = [row, {**row, 'comment': 'DEGIRO#123:DIVIDEND:11'}]
