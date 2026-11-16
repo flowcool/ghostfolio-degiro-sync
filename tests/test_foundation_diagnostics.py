@@ -1,4 +1,5 @@
 """Exact observational reconciliation; all numeric evidence is synthetic."""
+import re
 from copy import deepcopy
 from decimal import Decimal
 
@@ -152,19 +153,27 @@ def test_report_is_observational_for_selection(snapshot):
 
 
 def test_plain_report_has_exact_target_and_one_action():
+    target = '54c98163-34fc-4e46-837e-257798962734'
     expected = candidate()
-    observed = {**expected, 'id': 'compared-row', 'unitPrice': 3}
+    observed = {**expected, 'id': target, 'unitPrice': 3}
     findings = diagnostics.reconcile_activities([expected], [observed], '2026-01-01', '2026-01-31')
     text = diagnostics.render_reconciliation(findings)
     assert 'DEGIRO reconciliation: nothing written' in text
-    assert 'Compared activity: compared-row' in text
-    assert 'Action: Inspect activity compared-row.' in text
+    assert f'Compared activity: {target}' in text
+    assert f'Action: Inspect activity {target}.' in text
     assert text.count('Action:') == 1
     assert 'unitPrice 2.00 USD' in text and 'unitPrice 3.00 USD' in text
     assert 'Security quantity: 1' in text
     from scripts.check_degiro_report import check_report
     assert check_report(text) == []
-    assert check_report(text.replace('Action: Inspect activity compared-row.', 'Action: Inspect activity wrong-row.'))
+    assert check_report(text.replace(f'Action: Inspect activity {target}.', 'Action: Inspect activity wrong-row.'))
+    for prefix in ('Expected:', 'Observed:'):
+        for field in ('quantity', 'unitPrice', 'fee'):
+            bad = '\n'.join(re.sub(r'(?<=; )' + field + r' \S+', field + ' 1e+2', line)
+                if line.startswith(prefix) else line for line in text.splitlines())
+            assert 'Exponent notation in report' in check_report(bad)
+    assert 'Exponent notation in report' in check_report(text.replace('Security quantity: 1',
+        'Security quantity: 1e+2'))
 
 
 def test_no_dividend_report_and_unavailable_units_are_explicit():

@@ -31,7 +31,13 @@ def check_report(text):
         for prefix in ('Source identity:', 'Expected:', 'Observed:', 'Security quantity:', 'Checks:', 'Coverage:', 'Reason:'):
             if sum(line.startswith(prefix) for line in block) != 1:
                 violations.append('Missing or repeated report field: ' + prefix)
-        if any(re.search(r'\b[0-9]+(?:\.[0-9]+)?[eE][+-][0-9]+\b', line) for line in block):
+        numeric_values = [field.split(' ', 1)[1].split(' ', 1)[0]
+            for line in block if line.startswith(('Expected:', 'Observed:'))
+            for field in line.split('; ') if field.startswith(('quantity ', 'unitPrice ', 'fee '))]
+        numeric_values.extend(line.removeprefix('Security quantity: ') for line in block
+            if line.startswith('Security quantity: '))
+        if any(re.fullmatch(r'[+-]?[0-9]+(?:\.[0-9]+)?[eE][+-]?[0-9]+', value)
+               for value in numeric_values):
             violations.append('Exponent notation in report')
     for line in lines:
         if line == 'DEGIRO reconciliation: nothing written':
