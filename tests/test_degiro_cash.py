@@ -212,6 +212,19 @@ def test_source_lastupdated_units_are_not_guessed(snapshot):
     assert extract(snapshot) == 12.3
 
 
+@pytest.mark.parametrize('code', ['BGN', 'CNH', 'XXX'])
+def test_unknown_zero_cash_placeholder_does_not_authorize_nonzero_cash(snapshot, code):
+    foreign = deepcopy(snapshot['update']['portfolio']['value'][0])
+    foreign['id'] = foreign['value'][0]['value'] = 'FLATEX_' + code
+    foreign['value'][1]['value'] = 0
+    snapshot['update']['portfolio']['value'].append(foreign)
+    assert accounting_module.cash_position_currency(foreign['id'], {'size': 0}) == code
+    assert extract(snapshot) == 12.3
+    foreign['value'][1]['value'] = 1
+    with pytest.raises(RuntimeError):
+        extract(snapshot)
+
+
 def test_optional_accrued_interest_without_value_is_observed(snapshot):
     snapshot['update']['portfolio']['value'][0]['value'].append({'name': 'accruedInterest'})
     assert extract(snapshot) == 12.3
